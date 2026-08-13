@@ -46,6 +46,13 @@ esta decisão:
 3. **Métrica de qualidade ao lado de toda métrica de velocidade.** Recall junto de QPS no vetorial; NDCG, MRR
    e recall junto de QPS no lexical. Latência sozinha não é resultado.
 4. **Ponto de operação casado, não parâmetro casado.** Comparação de velocidade só a qualidade equivalente.
+
+   **Acrescentado em 2026-08-13, por medição:** e o **pré-processamento** também. No B-047, o mapeamento que
+   o próprio arnês configura para Elasticsearch e OpenSearch usa o analisador `standard`, que não stemiza —
+   enquanto o nosso stemiza por padrão. A tabela product-default dava **+6,4% de NDCG** ao TheoDB; com
+   `english` nos dois concorrentes, o NDCG deles sobe de 0,6908 para 0,7343 e **a vantagem desaparece**.
+   Quando as duas leituras existem, **publica-se as duas**: product-default responde o que o usuário recebe
+   ao instalar; configuração casada responde qual motor é melhor.
 5. **Máquina de referência declarada.** `g-16vcpu-64gb` — o `16c64g` que é o rótulo de referência do próprio
    upstream. Droplet efêmero, IP citado no artefato, destruído ao fim.
 6. **O que a corrida não cobre é publicado com o que ela cobre**, e antes dos números quando for handicap

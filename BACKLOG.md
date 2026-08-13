@@ -1532,7 +1532,7 @@ suggested_mode: evolve
 source: human
 evidence: os dois artefatos publicados declaram a mesma lacuna, por razões diferentes. No vetorial (`b035`) rodamos **um** concorrente — o pgvector — e num único ponto da curva dele. No lexical (`b040`) rodamos **nenhum**: o artefato diz explicitamente que citar os números publicados do leaderboard da Zilliz compararia máquinas, versões e datas diferentes, e por isso não os cita. O arnês já tem clientes prontos para Elasticsearch, OpenSearch, Milvus, Turbopuffer e Vespa — nenhum precisa ser escrito.
 why_now: prática declarada pelo owner em 2026-08-13 — **sempre rodar os benchmarks oficiais**. Hoje temos o instrumento (o fork do VectorDBBench), o procedimento (`run.sh` / `run-fts.sh` com gates de versão e de falha) e o padrão de máquina (`g-16vcpu-64gb`, o `16c64g` de referência do upstream). O que falta é o hábito e o custo declarado: cada corrida em droplet efêmero custou entre US$ 1 e US$ 2 e levou de 15 a 30 minutos. Sem os concorrentes na mesma tabela, cada artefato nosso é um número isolado que só se compara consigo mesmo.
-status: raw
+status: planned
 dod:
   - o `run.sh` e o `run-fts.sh` aceitam uma **lista de motores** e rodam todos na mesma máquina, na mesma corrida, com o gate de "meia comparação não se publica" valendo para o conjunto
   - a corrida lexical inclui **Elasticsearch e OpenSearch** com analisador declarado dos dois lados (é o handicap do [[B-044]] que torna a leitura possível)
@@ -1543,5 +1543,19 @@ dod:
 > Registrado 2026-08-13. **O que este item NÃO é:** não é reescrever arnês. Os clientes dos concorrentes já
 > existem no upstream e o nosso já roda. É orquestração e disciplina, e o custo é de infraestrutura, não de
 > engenharia.
+
+> **2026-08-13 — metade cumprida, e a metade que importava.** O eixo **lexical** foi executado: TheoDB ×
+> Elasticsearch 9.1.2 × OpenSearch 2.17.1, MS MARCO 100K, mesma máquina, mesma corrida, cinco corridas
+> (`wiki/benchmarks/b047-lexical-headtohead.md`). **Com analisador casado a qualidade é paridade** (NDCG
+> 0,7351 contra 0,7343/0,7344) e o **Elasticsearch faz 4,3× o nosso QPS**; somos 2× mais rápidos na carga.
+>
+> **O que FALTA deste item:** o eixo **vetorial** — varredura de `ef_search` dos dois lados para fronteira de
+> Pareto, em vez do ponto casado único do b035. E o `run.sh`/`run-fts.sh` ainda não aceitam lista de motores;
+> o `run-lexical.sh` acrescentado neste ciclo faz isso só para o lexical.
+>
+> Dois defeitos de ferramenta consertados no caminho: o cliente OpenSearch do arnês era **inrodável**
+> (`REPLICA_HEALTH_TIMEOUT = "30m"` passado como timeout numérico — corrigido no fork, candidato a PR
+> upstream), e o `elasticsearch-py` não-pinado contra servidor 8.15 produz um 400 opaco.
+
 
 Próximo id livre: **`B-048`**. Ids são monotônicos e nunca reusados.
