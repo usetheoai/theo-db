@@ -1541,8 +1541,8 @@ suggested_mode: evolve
 source: human
 evidence: medido em 2026-08-12 no droplet `g-16vcpu-64gb`, `Performance1536D50K` (50.000 × 1536d, COSINE), publicado em `wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md`. A recall casado — **0,9829 do TheoDB contra 0,9835 do pgvector** — o pgvector faz **3.590,6 QPS** e o TheoDB **3.086,1**: déficit de **16,3%**. A origem é a mesma do [[B-042]] vista pelo outro lado: no mesmo `ef_search=64` o TheoDB entrega recall 0,9600 contra 0,9835, e precisa de `ef=128` para empatar — ou seja, **o dobro de candidatos por consulta**. Reprodutibilidade das duas corridas independentes em `ef=64`: 1,3% de QPS, 0,06% de recall.
 why_now: alvo declarado pelo owner em 2026-08-13 — **paridade com o pgvector**. Este é o número que a comparação pública mostra, e é distinto do [[B-042]]: aquele é o custo de **construir**, este é o custo de **consultar**. Podem ter a mesma causa (grafo pior exige mais varredura) ou causas independentes (varredura menos eficiente por candidato), e **a medição atual não separa as duas** — é exatamente o que o [[B-036]] destrava ao tornar `m`/`ef_construction` ajustáveis. Enquanto não separar, qualquer otimização é palpite.
-status: raw
-blocked_by: B-036 — sem `m`/`ef_construction` ajustáveis não é possível variar a qualidade do grafo mantendo a varredura fixa, que é o experimento que decide onde está o custo
+status: triaged
+blocked_by: (nenhum — B-036 shipped em 2026-08-13, `cecd388`)
 dod:
   - o déficit é **decomposto**: quanto vem de qualidade de grafo (recall menor no mesmo `ef`) e quanto de eficiência de varredura (custo por candidato). Medido por experimento, não inferido
   - o custo por candidato é comparado com o do pgvector no mesmo corpus — distâncias calculadas por consulta, não só tempo de parede
@@ -1553,6 +1553,16 @@ dod:
 > Registrado 2026-08-13. Separado do [[B-042]] porque são trabalhos diferentes com DoDs diferentes, embora
 > possam ter causa comum. Se a decomposição mostrar uma causa única, um dos dois fecha como duplicata do
 > outro — e isso será dito, não escondido.
+
+> **2026-08-13 — triaged.** Oportunidade em
+> `.claude/knowledge-base/discoveries/opportunities/b046-qps-parity-opportunity.md`. Três achados medidos:
+> (1) o **cliente do arnês recusa o experimento** — o guard do B-035 compara contra a constante `m=16` em vez
+> de perguntar ao servidor, e `index_param()` devolve `options: {}` com um comentário que diz que o AM rejeita
+> as reloptions; as duas afirmações eram verdadeiras e deixaram de ser em `cecd388`; (2) o instrumento da
+> decomposição **existe nos dois motores e é o mesmo** — `EXPLAIN (ANALYZE, BUFFERS)` (medido: TheoDB
+> `shared hit=139`, pgvector `182` num corpus de brinquedo), e do nosso lado ainda há `candidates_seen`, que o
+> pgvector não tem; (3) **recall e páginas-por-consulta não dependem da máquina** — só o QPS depende. A
+> decomposição roda no host; o droplet fica para o número final do artefato.
 
 ## B-047 — Rodar os motores concorrentes nos benchmarks oficiais, na mesma máquina, como prática recorrente   [ ]
 

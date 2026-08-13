@@ -7,7 +7,7 @@
 
 services:
   theodb:
-    image: theodb:b034
+    image: theodb:b036
     container_name: vdbb-theodb
     environment:
       POSTGRES_PASSWORD: theo
