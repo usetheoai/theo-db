@@ -183,6 +183,28 @@ build, tamanho do índice e pico de memória. Se um build custar mais de ~20 min
 - tamanho do índice e tempo de build de um ponto `equals` registrados no log da corrida
 - a grade final está escrita no plano **antes** do primeiro ponto rodar: `grep -c '^| m=' run-graph-sweep.sh` `equals` 12 ou 6, e o commit que a declara é anterior ao commit dos resultados (`git log --reverse`)
 
+> **T1.0 — EXECUTADA em 2026-08-13. A grade de 12 pontos fica.**
+>
+> | Grandeza | Medido |
+> |---|---|
+> | inserção de 50.000 × 1536d | **17,8 s** |
+> | construção do índice (`optimize`) | **200,7 s** |
+> | carga total | 218,5 s |
+> | heap | 391 MB |
+> | índice HNSW | **401 MB** |
+> | disco livre no host | 128 GB |
+>
+> Um ponto custa ~3,7 min de carga; doze pontos cabem em ~1 h. O corte para 6 pontos que a
+> T1.0 autorizava **não é necessário** e não foi feito.
+>
+> **Um achado que mudou o runner, e que só apareceu por rodar:** o estágio
+> `--search-concurrent` varre 8 níveis de concorrência (1, 5, 10, 20, 30, 40, 60, 80) × 30 s
+> ≈ **4 min por ponto**, e produz QPS — que a D2 proíbe publicar a partir do host. Pior: o
+> JSON de resultado só é escrito no fim da tarefa **inteira**, então interromper esse estágio
+> perdeu o recall que a corrida já havia medido. Quatro minutos por ponto para produzir um
+> número inutilizável, com risco de perder o utilizável. O runner passou a usar
+> `--search-serial` sozinho.
+
 ### T1.1 — O guard passa a perguntar ao servidor
 
 #### Why this step
@@ -235,6 +257,14 @@ já está memoizado quando os workers sobem.
 - contra um servidor sem as reloptions, **levanta** `UnsupportedBuildParameterError` citando a mensagem real do
   PostgreSQL, não uma constante do cliente
 - `pytest tests/test_theodb.py -q` reporta `>= 24` testes e `0 failed` (hoje: `21 passed`)
+
+> **Correção por acréscimo à T1.1, feita na implementação (2026-08-13).** O plano dizia que a
+> recusa continuaria acontecendo na **construção da config**. Não pode: `TheoDBHNSWConfig` é
+> construída pela CLI **antes de existir qualquer conexão**, e uma sonda sem conexão não é uma
+> sonda. A recusa mudou de lugar — sai da config e passa para `TheoDB.__init__`, logo após
+> `_assert_is_theodb()`, que é onde a conexão já existe **e ainda é antes da carga**. A
+> propriedade que o plano queria preservar (falhar antes do caro) está preservada; o que estava
+> errado era o endereço.
 
 ### T1.2 — O `WITH` chega ao `CREATE INDEX`, verificado no catálogo
 
