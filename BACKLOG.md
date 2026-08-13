@@ -1325,7 +1325,7 @@ suggested_mode: evolve
 source: human
 evidence: medido em 2026-08-12 contra a imagem `theodb:b034`. O arnês tem caso FTS (`FTSBm25Performance`, `cases.py:945`) com dataset MS MARCO Small de **100.000 documentos** (`dataset.py:1173`) e mede **QPS, latência, recall, MRR e NDCG** — não latência sozinha. O contrato do cliente é `supports_full_text_search()` + `insert_documents(texts, doc_ids)` + `search_documents(query, k) -> list[str]` (`api.py:273,281,302`). **Nenhum cliente PostgreSQL o implementa hoje** — só Elastic, OpenSearch, Milvus, Turbopuffer e Vespa. Do nosso lado a superfície existe e foi exercitada: `bm25_build(index_id, table, id_col, text_col)` indexou 5 documentos e `bm25_search(index_id, query, k)` devolveu os 2 corretos ranqueados por score (1,7666 e 1,6908), naquela ordem.
 why_now: o B-035 devolveu o arnês e mediu o pilar **vetorial** — o lexical ficou sem instrumento nenhum, e é metade da promessa híbrida do produto. O leaderboard público de full-text da Zilliz existe e tem os mesmos motores contra os quais o pilar lexical seria comparado; sem cliente, o TheoDB simplesmente não aparece nessa tabela, e nenhuma alegação sobre BM25 tem artefato reproduzível (Regra 5). Segundo motivo, medido: **nenhum cliente PostgreSQL implementa FTS no arnês** — o que torna este trabalho mais valioso upstream do que o cliente vetorial foi, e é a mesma razão pela qual ninguém o fez ainda.
-status: raw
+status: triaged
 dod:
   - cliente FTS no MESMO fork `usetheoai/VectorDBBench@theodb`, com diff mínimo e núcleo intocado — a disciplina da Política de Fork D3, já provada no B-035
   - uma corrida real completa emitindo **recall, MRR e NDCG** ao lado de QPS, nunca QPS sozinho
@@ -1356,6 +1356,8 @@ dod:
 > constrói o instrumento e coloca o produto na mesma tabela dos concorrentes. Mas uma corrida deste item
 > **avança o DoD aberto do B-004** (generalização além do SciFact), porque MS MARCO é um segundo corpus,
 > maior e de outro domínio.
+
+> **2026-08-12 — triaged.** Oportunidade em `.claude/knowledge-base/discoveries/opportunities/b040-fts-client-opportunity.md`.
 
 
 Próximo id livre: **`B-041`**. Ids são monotônicos e nunca reusados.
