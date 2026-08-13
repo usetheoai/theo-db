@@ -672,7 +672,7 @@ suggested_mode: evolve
 source: human
 evidence: none-yet
 why_now: a suíte destravou em 2026-08-10 (B-001) e revelou **20 falhas na primeira execução**, das quais uma (B-011) é um defeito de recall que 109 artefatos de benchmark não pegaram. Nada garante que a próxima regressão apareça antes de meses: a execução hoje depende de alguém lembrar de rodá-la à mão, com uma receita de cinco peças que vive num runbook. Medido: a suíte inteira leva **480 s** — o argumento de custo não existe.
-status: raw
+status: planned
 dod:
   - a suíte roda em cada push para `workspace`, com a receita do runbook, e o resultado é visível sem abrir log
   - o número de falhas é um gate declarado (baseline aceito hoje = 20) e **subir esse número reprova**
@@ -680,6 +680,21 @@ dod:
 
 > Registered 2026-08-10 by `/backlog-item` (slug: `suite-no-ci`).
 > Saiu do DoD do B-012 por ser trabalho diferente: B-012 é diagnosticar 18 falhas, este é impedir a próxima.
+
+> **2026-08-13 — `raw` → `planned`. FECHADO pela medição do Tier 1**
+> (`.claude/knowledge-base/discoveries/opportunities/tier1-portao-opportunity.md`).
+>
+> `rust-suite.yml` existe e faz o que o `dod` pedia: roda `cargo pgrx test pg18` num contêiner do
+> `theodb-builder`, e o gate (`:143-160`) reprova quando `failed > BASELINE`. **O baseline é `0` desde
+> 2026-08-12** — "a dívida acabou: 440 passed; 0 failed", diz o comentário no arquivo. Verde na execução de
+> 2026-08-12T11:45 sobre `develop`.
+>
+> O terceiro bullet — distinguir "a suíte não emitiu resultado" de "a suíte reprovou" — está em `:149`, e
+> funciona porque o passo do gate **não** usa `set -e`: o `grep` que não casa devolve string vazia em vez de
+> matar o passo, e a mensagem preparada para esse caso chega a imprimir.
+>
+> **O que este item NÃO cobre, e virou [[B-052]]:** a suíte só roda em `push` para `develop`/`main`. Sobre
+> `workspace`, onde todo trabalho nasce, ela não roda — 73 commits desde a última execução.
 
 ## B-014 — `bm25_search` aceita um termo por chamada; consulta de usuário tem vários   [ ]
 
@@ -1068,7 +1083,7 @@ suggested_mode: bug
 source: discover-live-test
 evidence: medido em 2026-08-11 no PR #226. O job `suite` falhou com `docker: Error response from daemon: Conflict. The container name "/suite" is already in use by container "d14937ebd80f…"` — **antes de executar um único teste**. Causa: `rust-suite.yml` usa `docker run --name suite` (nome fixo) e só faz `docker rm -f suite` **depois** do run; quando o run é cancelado — e cada push novo no mesmo PR cancela o anterior — o passo morre antes da limpeza e o contêiner sobrevive no runner self-hosted.
 why_now: o sintoma **mente sobre a causa**. Sem `test result` no log, o gate seguinte faz `line=$(grep -E "^test result" suite.log | tail -1)` e o job aparece no PR como **"suíte reprovou"** — indistinguível de uma regressão real de testes. Passei um ciclo investigando uma falha de testes que não existia. Num repositório onde o gate é "falhas não podem aumentar", confundir lixo de infraestrutura com regressão é o caminho mais curto para alguém subir o baseline sem precisar.
-status: raw
+status: planned
 dod:
   - ~~`docker rm -f suite` roda ANTES do `docker run`~~ **FEITO 2026-08-11** (remédio)
   - ~~avaliado usar nome único por run~~ **FEITO 2026-08-12 — a classe foi ELIMINADA.** O nome passou a ser `suite-${{ github.run_id }}-${{ github.run_attempt }}`: dois runs nunca disputam o mesmo nome, mesmo que o anterior morra no meio, então não existe colisão a remediar. O `rm -f` fica como higiene do próprio attempt, e um `docker container prune --filter until=24h` varre os órfãos que runs cancelados antigos já deixaram no runner — sem isso eles ocupariam disco para sempre.
@@ -1077,6 +1092,18 @@ dod:
 > Registered 2026-08-11 by `/discover --mode live-test` (slug: `suite-container-orfao`), ao rodar o
 > release do `B-015`. **Provocado pelos meus próprios pushes sucessivos** — mas qualquer cancelamento
 > reproduz, e cancelamento é uso normal de PR.
+
+> **2026-08-13 — `raw` → `planned`. FECHADO, e pela via forte.** Os três bullets do `dod` estão cobertos, e
+> os dois primeiros já constavam riscados no próprio bloco:
+>
+> 1. `docker rm -f` antes do `docker run` (remédio) — feito 2026-08-11;
+> 2. **nome único por run** — `suite-${{ github.run_id }}-${{ github.run_attempt }}` (`rust-suite.yml:96`).
+>    Isto **elimina a classe** em vez de remediá-la: dois runs nunca disputam o mesmo nome, mesmo que o
+>    anterior morra no meio. Some-se `docker container prune --filter until=24h`, que varre os órfãos que
+>    runs cancelados antigos já deixaram no runner;
+> 3. o gate distingue "não emitiu resultado" de "reprovou" (`:149`), verificado hoje na leitura do arquivo.
+>
+> `planned` e não `shipped` porque a última release é a **v0.158.0** e este conserto não está nela.
 
 ## B-028 — O harness de upgrade declarou "TODOS OS CENÁRIOS PASSARAM" com um cenário PULADO   [x]
 
@@ -1709,3 +1736,67 @@ dod:
 > workflow de publish) — condição que este item não tenta contornar.
 
 Próximo id livre: **`B-051`**. Ids são monotônicos e nunca reusados.
+
+## B-051 — Nada compara o checkbox com o `status`, e a divergência sobreviveu meses   [ ]
+
+domain: theo-db
+repo: theo-db
+suggested_mode: review
+source: human
+evidence: medido em 2026-08-13 durante o saneamento do Tier 0. O **B-001** carregava checkbox `[x]` e
+`status: raw` simultaneamente — dois campos do mesmo bloco afirmando coisas opostas, e nenhum dos dois errado
+por si só. Nenhuma ferramenta compara os dois: `scripts/route_domain.py` valida domínio, o `okf-validate`
+valida a wiki, e o `BACKLOG.md` não tem validador nenhum. A divergência entrou com o fix do B-001
+(`842347c`, 2026-08-10) e sobreviveu a três ciclos de leitura do backlog.
+why_now: o próprio saneamento de hoje **produziu** uma segunda divergência antes de corrigir a primeira —
+`B-036` foi marcado `shipped` no dia da implementação, quando `cycle-backlog.md § Status transitions` exige
+`RELEASED`, e o release está em `PR_OPEN_AWAITING_APPROVAL`. Duas divergências de origens independentes na
+mesma semana, num arquivo de 50 blocos, é frequência que não se resolve com atenção. E o custo já foi pago:
+li os 9 itens `planned` corretos como registro podre e propus "avançá-los", raciocínio que só se sustentava
+porque eu não sabia distinguir um status errado de um status que eu não tinha entendido.
+status: raw
+dod:
+  - um validador recusa `[x]` com `status` ∈ {raw, triaged, planned}, e `[ ]` com `status: shipped` — provado
+    por teste que hoje falharia contra o `BACKLOG.md` de `842347c`
+  - `status: shipped` exige evidência de release: uma tag semver que contenha o commit citado, ou o bloco é
+    recusado. É a regra que o meu próprio erro de hoje violou
+  - o validador roda no mesmo lugar em que o `okf-validate` roda, e não num passo que alguém precise lembrar
+  - transições ilegais são recusadas (`raw → planned` sem passar por `triaged` é o exemplo que o contrato
+    já proíbe em texto e ninguém verifica)
+
+> Registrado 2026-08-13 pelo saneamento do Tier 0. **É um item sobre o registro, não sobre o produto** — e
+> vale exatamente porque o registro é o que decide onde o esforço vai. Um backlog em que dois campos podem
+> discordar em silêncio é um backlog que precisa ser lido inteiro para ser confiável, o que é o mesmo que
+> não ser confiável.
+
+## B-052 — `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: review
+source: discover-review
+evidence: medido em 2026-08-13 lendo os `on:` dos dez workflows e o histórico de execuções. **Todo** gate roda
+apenas em `push` para `develop`/`main`; o gatilho de `pull_request` foi removido em 2026-08-12 por decisão do
+owner, com a razão escrita nos dez arquivos ("o runner é único e serial, e cada PR disparava a esteira inteira
+a cada push, com custo elevado"). Como `rules/git-safety.md § 1` manda que **todo** trabalho nasça em
+`workspace`, o primeiro momento em que um portão vê a mudança é **depois** de ela estar integrada em
+`develop`. Números: última execução em `workspace` foi `48286921` (2026-08-12T10:34); desde então **73
+commits**, **13 tocando `theodb_rs/src/`**, **+2.414/−7.420 linhas** em `theodb_rs/`, e **0** execuções.
+why_now: os 478 testes que passaram no B-036 passaram porque eu os rodei à mão, num contêiner que montei à
+mão. Nada no sistema exigiu isso e nada teria notado a ausência. É o mesmo mecanismo do [[B-011]] — um defeito
+de recall que 109 artefatos de benchmark não pegaram e só apareceu quando a suíte rodou — com a diferença de
+que ali a suíte existia e ninguém a chamava, e aqui ela existe, é chamada, e olha o código tarde demais para
+impedir o merge. **A restrição que criou isto é real e não deve ser desfeita por decreto**: qualquer proposta
+que multiplique execuções do runner contradiz a razão pela qual o gatilho foi removido.
+status: raw
+dod:
+  - existe verificação sobre o que está em `workspace` **antes** do merge, sem aumentar o número de execuções
+    da esteira pesada no runner — a restrição de capacidade é premissa, não obstáculo
+  - o custo da proposta é medido em execuções/minuto de runner e comparado com o de hoje, não estimado
+  - a decisão fica em ADR, porque ela negocia com uma decisão anterior do owner e não pode ser silenciosa
+
+> Registrado 2026-08-13 pelo DISCOVER do Tier 1
+> (`.claude/knowledge-base/discoveries/opportunities/tier1-portao-opportunity.md`). Nasce da medição, não de
+> um palpite: nenhum dos cinco itens do Tier 1 nomeava esta janela, e ela é o que faz os outros quatro
+> valerem menos do que parecem — um portão que só olha depois do merge protege `develop` de si mesmo, não o
+> trabalho de quem o produz.
