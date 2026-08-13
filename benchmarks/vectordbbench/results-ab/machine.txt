@@ -1,0 +1,5 @@
+droplet: g-16vcpu-64gb nyc3
+ip: 159.65.249.69
+Model name:                              Intel(R) Xeon(R) Platinum 8358 CPU @ 2.60GHz
+vcpu: 16
+ram_gb: 62

@@ -1,7 +1,7 @@
 ---
 type: Measurement
 title: b040 — BM25 do TheoDB no MS MARCO 100K, com o handicap declarado antes do número
-description: Primeira medição do pilar lexical num arnês público, e ela vem com handicap — sem stemming, sem operadores de consulta, k1/b não configuráveis. Sob product-default, NDCG@10 0,6962, recall 0,8025, MRR 0,667 a 1.616 QPS.
+description: Medição do pilar lexical em arnês público. Com stemming (B-044): NDCG@10 0,7351, recall 0,8464, MRR 0,7034. O A/B na MESMA máquina mostra que stemming melhora qualidade E throughput; a primeira comparação, em máquinas diferentes, dizia o contrário.
 tags: [benchmark, lexical, bm25, vectordbbench, msmarco, ndcg, b040]
 item: B-040
 generated: { by: claude-code/opus-5, at: 2026-08-13T01:00:00Z }
@@ -12,9 +12,36 @@ sources:
     last_modified: 2026-08-13
 ---
 
-# Leia isto antes da tabela
+# Atualização de 2026-08-13 — o stemming entrou, e o A/B controlado inverteu o sinal
 
-O TheoDB **não faz stemming**. `jumping` não casa `jumps` — medido termo a termo. Também não tem operadores
+O [[B-044]] implementou stemming e remoção de stopwords. **A/B na MESMA máquina, mesmo caso, mesmo dataset
+em cache — a única variável é a imagem:**
+
+| | NDCG@10 | recall@10 | MRR | QPS | p99 serial | build |
+|---|---|---|---|---|---|---|
+| sem stemming (`theodb:b034`) | 0,6962 | 0,8025 | 0,6670 | 1.722,6 | 3,9 ms | 2,19 s |
+| **com stemming (`theodb:b044`)** | **0,7351** | **0,8464** | **0,7034** | **1.910,3** | **3,5 ms** | 3,21 s |
+| delta | **+5,6%** | **+5,5%** | **+5,5%** | **+10,9%** | **−10,3%** | +46,9% |
+
+Qualidade sobe nos três eixos **e o throughput sobe junto** — remover stopwords encurta as listas de
+postings mais do que o stemmer as alonga. O único custo é o build: +1,03 s sobre 100.000 documentos.
+
+> **Uma primeira comparação minha dizia o oposto, e estava errada.** Medi a corrida com stemming num droplet
+> Xeon 8168 e comparei com a corrida sem stemming, feita antes num Xeon **8358**. O delta aparente era
+> **−31,8% de QPS** — atribuído ao stemmer. Refeito na mesma máquina, é **+10,9%**. NDCG, recall e MRR são
+> independentes de hardware e não mudaram entre as duas leituras; **QPS e latência são**, e comparar CPUs
+> diferentes lhes atribui uma diferença que é da máquina.
+>
+> É o mesmo erro que o [b035](b035-theodb-vs-pgvector-pg18.md) documentou no eixo vetorial, num eixo novo: lá
+> o parâmetro era igual e o ponto de operação não; aqui o rótulo era igual e a máquina não. O
+> [ADR-0061](../decisions/0061-benchmark-oficial-por-pilar.md) já exigia "mesma máquina" para concorrentes —
+> esta corrida mostra que a exigência vale igual para **antes-e-depois do mesmo motor**.
+
+Os números da corrida original, abaixo, ficam como registro do estado sem stemming.
+
+# O estado sem stemming (medido em 2026-08-12)
+
+O TheoDB **não fazia stemming**. `jumping` não casa `jumps` — medido termo a termo. Também não tem operadores
 de consulta: `"frase exata"` é tratada como palavras soltas, `AND` vira um termo (casa documentos que contêm
 a palavra "and"), `-exclusão` é ignorada e `prefixo*` devolve vazio. E `k1`/`b`, os dois parâmetros do BM25,
 **não são configuráveis** — não existe GUC para nenhum dos dois, então esta corrida é **product-default** e
@@ -73,8 +100,10 @@ O throughput satura por volta de 20 clientes e fica plano até 80, enquanto a la
   nem variância medida, quanto mais significância.
 - **Um único dataset e um único tamanho.** MS MARCO Small é o default do caso. O arnês oferece MS MARCO
   Medium/Large e HotpotQA; nenhum foi rodado.
-- **Sem stemming, sem operadores, `k1`/`b` fixos** — dito no topo, repetido aqui porque a tabela pode ser
-  lida sozinha.
+- **Operadores de consulta e `k1`/`b` continuam ausentes.** O stemming entrou no B-044; frase exata,
+  booleanos, exclusão e prefixo não — são superfície de consulta, não analisador.
+- **Índices construídos antes do B-044 não stemizam e não precisam migrar** — o nome do analisador vai no
+  schema de cada índice. Para ganhar stemming, reconstrua com `bm25_build`.
 - **Sem filtro.** O caso rodado é `NonFilter`.
 
 # Relação com o m186

@@ -21,6 +21,27 @@ favorável. O que a corrida mostra é que aquele resultado **não generaliza** �
 
 ## 2026-08-13
 
+**b044 — stemming entra, e o controle na mesma máquina desfaz uma conclusão minha.**
+
+A/B controlado (mesma máquina, mesmo caso, mesmo dataset em cache, só a imagem muda): NDCG@10 **+5,6%**,
+recall **+5,5%**, MRR **+5,5%** — e **QPS +10,9%**, com p99 10% menor. Remover stopwords encurta as listas
+de postings mais do que o stemmer as alonga. O único custo é o build: +1,03 s sobre 100.000 documentos.
+
+**Minha primeira leitura dizia −31,8% de QPS e estava errada.** Eu comparara a corrida com stemming (Xeon
+8168) contra a corrida sem, feita antes noutro droplet (Xeon 8358). NDCG/recall/MRR são independentes de
+hardware; QPS e latência não são. Refeito na mesma máquina, o sinal inverte.
+
+É o erro do b035 num eixo novo: lá o parâmetro era igual e o ponto de operação não; aqui o rótulo era igual
+e a máquina não. O ADR-0061 já exigia mesma máquina para concorrentes — vale igual para antes-e-depois do
+mesmo motor, e o ADR passa a dizer isso.
+
+**Desenho que tornou tudo isso barato:** o analisador é registrado sob nome próprio (`theodb_en`), nunca
+redefinindo `default`. O Tantivy serializa o nome no schema de cada índice, então índice antigo continua
+respondendo igual, sem migração — provado por teste que constrói um índice legado e verifica que ele NÃO
+stemiza.
+
+## 2026-08-13
+
 **ADR-0061 — todo pilar mensurável tem benchmark oficial público.**
 
 Decisão do owner depois das duas primeiras corridas: arnês de terceiros (não caseiro), concorrentes na mesma

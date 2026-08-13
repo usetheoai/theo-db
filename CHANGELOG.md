@@ -14,7 +14,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **Stemming e remoção de stopwords no pilar lexical** (B-044). Índices novos usam o analisador `theodb_en` — SimpleTokenizer + RemoveLong + LowerCaser + StopWordFilter + Stemmer (Snowball inglês) — e a consulta `jumping` passa a casar documentos com `jumps`
+- **Stemming e remoção de stopwords no pilar lexical** (B-044). Índices novos usam o analisador `theodb_en` — SimpleTokenizer + RemoveLong + LowerCaser + StopWordFilter + Stemmer (Snowball inglês) — e a consulta `jumping` passa a casar documentos com `jumps`. Medido em A/B na mesma máquina, MS MARCO 100K: **NDCG@10 +5,6% (0,6962 → 0,7351), recall +5,5%, MRR +5,5% — e QPS +10,9%**, porque remover stopwords encurta as listas de postings mais do que o stemmer as alonga. Custo: +1,03 s no build de 100.000 documentos
 - Suporte a **full-text (BM25)** no cliente `theodb` do VectorDBBench — quatro métodos na classe existente, zero pontos de registro novos. É o **primeiro cliente PostgreSQL com FTS** no arnês (B-040)
 - Primeira medição do pilar lexical em arnês público (`wiki/benchmarks/b040-theodb-fts-msmarco.md`): MS MARCO 100K, **NDCG@10 0,6962, recall@10 0,8025, MRR 0,667** a 1.616 QPS de pico, p99 serial 4,8 ms. **Sem stemming, sem operadores de consulta e `k1`/`b` não configuráveis** — declarado antes da tabela, porque os motores comparáveis stemmizam por padrão (B-040)
 - Cliente `theodb` para o **VectorDBBench**, em fork de diff mínimo — `pip install "vectordb-bench[theodb] @ git+https://github.com/usetheoai/VectorDBBench@theodb"` — devolvendo ao projeto um arnês de benchmark reproduzível e multi-sistema, ausente desde a remoção de `benchmarks/` (B-035)
