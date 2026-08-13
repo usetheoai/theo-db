@@ -1574,4 +1574,23 @@ dod:
 > upstream), e o `elasticsearch-py` não-pinado contra servidor 8.15 produz um 400 opaco.
 
 
-Próximo id livre: **`B-048`**. Ids são monotônicos e nunca reusados.
+## B-048 — A superfície responde onde deveria recusar: três instâncias novas, e a classe já foi consertada três vezes   [ ]
+
+domain: lexical
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: medido em 2026-08-13 contra `theodb:b044`. **(a) `bm25_build` conta documento que nunca será achável.** Com uma tabela de 3 linhas onde uma tem `body` NULL, `bm25_build` devolve **3** — o `unwrap_or_default()` de `engine.rs:157` transforma o NULL em documento vazio, que entra no índice, conta no retorno e não casa consulta nenhuma. Quem confere o valor de retorno acredita que os 3 estão buscáveis; a busca por termos dos outros dois devolve `3,1` e nunca o 2. **(b) `pg_backing.rs:201`: `Index::open` que falha devolve `0`** em vez de erro — bytes de heap ilegíveis viram "índice vazio". Visível no código; **não** reproduzido por execução (exigiria corromper heap de propósito), e a distinção está dita. **(c) `engine.rs:109`: `read_generation` cai para 0** por cadeia de `.ok()`, misturando "índice sem build" (estado válido) com "a consulta ao catálogo falhou" (não é).
+why_now: a classe **não é nova, e é aí que está o problema**. O próprio backlog registra que ela já foi encontrada e consertada ao menos três vezes: o `explain_scan`/`scan_stats` devolvendo "zeros silenciosos" (consertado com erro tipado, e a justificativa escrita lá vale palavra por palavra aqui — *"os números seguintes viriam de um seqscan, e reportá-los sob o nome `explain_scan` seria medir uma coisa e rotular outra"*), o contador do chunk-skip do colunar, e o gerador de script de upgrade. Somados aos [[B-034]] (GUC aceito sem efeito), [[B-041]] (busca em índice não construído) e ao erro de parse engolido que o [[B-044]] corrigiu, são **seis instâncias da mesma classe consertadas uma a uma**, sem que a classe tenha nome. Cada conserto local é correto e nenhum impede o sétimo.
+status: raw
+dod:
+  - as três instâncias medidas acima corrigidas: `body` NULL **não** conta como indexado (ou o retorno distingue indexados de pulados); `Index::open` que falha **levanta**; `read_generation` separa "sem build" de "catálogo ilegível"
+  - **um teste por instância**, que hoje falharia — para (a), a asserção é sobre o valor de retorno de `bm25_build`, não sobre a busca
+  - a classe ganha **nome e contrato escrito** numa regra do projeto: onde a superfície tem informação para recusar, ela recusa; onde o vazio é resultado legítimo (consulta só de stopwords), isso é dito no código e coberto por teste. Sem o contrato, o sétimo caso chega
+  - a superfície pública é **varrida** por esse contrato — `ai_op`, `nl`, `vectorizer`, colunar —, e o resultado é publicado mesmo que a varredura não ache mais nada
+
+> Registrado 2026-08-13, a partir da pergunta do owner sobre o que mudar para a classe não voltar. **A resposta
+> medida é que não é configuração**: nenhum GUC ou reloption teria evitado qualquer um dos seis casos. O que
+> falta é contrato de falha, e a evidência de que falta é a contagem — seis consertos locais e nenhuma regra.
+
+Próximo id livre: **`B-049`**. Ids são monotônicos e nunca reusados.
