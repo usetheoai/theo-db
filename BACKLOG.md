@@ -1517,6 +1517,8 @@ dod:
 > **Aplicado retroativamente a um dos dois artefatos.** O b047 ganhou o teste; o b040 (stemming, +5,6%) ganhou
 > a explicação de **por que não pode ganhá-lo**: as duas corridas do A/B usaram imagens diferentes e os arrays
 > por consulta do lado sem stemming não foram preservados.
+>
+> **2026-08-13 — a promessa virou item.** O "significância para velocidade é item próprio" citado acima e no artefato do b047 agora é o [[B-049]]. Ficou três turnos como menção sem registro, que é a falha que o `cycle-maintenance` documenta: mencionar sem filar dá falsa sensação de cobertura.
 
 
 ## B-046 — Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3%   [ ]
@@ -1572,6 +1574,8 @@ dod:
 > Dois defeitos de ferramenta consertados no caminho: o cliente OpenSearch do arnês era **inrodável**
 > (`REPLICA_HEALTH_TIMEOUT = "30m"` passado como timeout numérico — corrigido no fork, candidato a PR
 > upstream), e o `elasticsearch-py` não-pinado contra servidor 8.15 produz um 400 opaco.
+>
+> **2026-08-13 — o conserto do OpenSearch virou item.** O "candidato a PR upstream" citado acima agora é o [[B-050]], com escopo estreito de propósito: é o PR de uma linha do cliente deles, não o do nosso cliente FTS.
 
 
 ## B-048 — A superfície responde onde deveria recusar: três instâncias novas, e a classe já foi consertada três vezes   [ ]
@@ -1593,4 +1597,45 @@ dod:
 > medida é que não é configuração**: nenhum GUC ou reloption teria evitado qualquer um dos seis casos. O que
 > falta é contrato de falha, e a evidência de que falta é a contagem — seis consertos locais e nenhuma regra.
 
-Próximo id livre: **`B-049`**. Ids são monotônicos e nunca reusados.
+## B-049 — As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas   [ ]
+
+domain: theo-db
+repo: theo-db
+suggested_mode: evolve
+source: discover-evolve
+evidence: o [[B-045]] fechou a lacuna para métricas de **qualidade** — a paridade lexical do `b047` passou a ter p=0,477 sobre 6.980 consultas, com IC 95% de [−0,0011, +0,0025]. Ele **não** fecha para velocidade, e a razão é estrutural: o teste pareado precisa de valor **por consulta**, e QPS não tem — é uma taxa agregada sobre a corrida inteira. As duas maiores diferenças que publicamos são justamente de velocidade e seguem sem teste: **Elasticsearch faz 4,3× o nosso QPS** no lexical (`b047`) e **pgvector faz +16,3%** a recall casado no vetorial (`b035`). O que existe hoje como sustentação são duas corridas concordantes a 1,3% no b035, e **uma única corrida por configuração** no b047.
+why_now: os dois números são grandes o bastante para que ninguém duvide do sinal — mas o projeto acabou de gastar um ciclo inteiro para poder dizer "demonstrado" em vez de "observado" num empate de terceira casa decimal, e continua dizendo "observado" nas duas diferenças que mais aparecem. A assimetria é indefensável: exigimos rigor onde a diferença é minúscula e o dispensamos onde ela é de 4×. Pior, a ausência morde na direção errada quando o número **melhorar**: o [[B-042]] e o [[B-046]] existem para fechar essas diferenças, e sem teste um ganho de 8% será tão inafirmável quanto o déficit atual.
+status: raw
+dod:
+  - o runner passa a aceitar **N corridas por configuração** (N declarado no artefato), e o artefato reporta média, desvio e IC — não um número solto
+  - o teste aplicado é **apropriado para amostras independentes** (bootstrap sobre as N corridas, ou t não-pareado), e a escolha é justificada como a do `significance.py` justifica a permutação pareada — nunca aplicar o pareado a taxas agregadas, que é o erro que este item existe para não cometer
+  - o **custo** é medido e declarado: N corridas multiplicam o tempo de droplet, e o item diz qual N compra qual precisão em vez de escolher por hábito
+  - aplicado retroativamente ao `b047` (4,3×) e ao `b035` (16,3%); se algum não sobreviver, publica-se por acréscimo
+  - a variância **entre corridas** é reportada junto: se ela for grande, o número publicado precisa dizer isso mais do que precisa de um `p`
+
+> Registrado 2026-08-13. **Prometido três vezes como "item próprio" durante os ciclos B-045 e B-047 e nunca
+> filado** — o que é a mesma falha de registro que o `cycle-maintenance` documenta: mencionar sem filar dá
+> falsa sensação de cobertura. O custo estimado por medição: cada corrida do caso FTS levou ~7 min no droplet
+> depois do dataset em cache, então N=5 por configuração são ~35 min por motor.
+
+## B-050 — O conserto do cliente OpenSearch é do upstream, e o fork tem saída declarada   [ ]
+
+domain: theo-db
+repo: theo-db
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-13 durante o [[B-047]]. `REPLICA_HEALTH_TIMEOUT: Final[str] = "30m"` (sintaxe de duração do Elasticsearch) era passado como `timeout=` ao transporte do `opensearch-py`, que levanta `ValueError: Timeout value connect was 30m, but it must be an int, float or None` **antes de qualquer requisição sair**. `_update_replicas` chama `_wait_till_green` incondicionalmente de `optimize()`, então **toda** corrida de OpenSearch falhava no passo de otimização — não era caminho lento, era caminho morto. Corrigido no nosso fork (`"30m"` → `1800`), e a corrida passou a completar: NDCG 0,7344 sobre 6.980 consultas.
+why_now: o conserto está no fork `usetheoai/VectorDBBench@theodb` **fora do escopo do nosso cliente**, e a Política de Fork (D3) manda diff mínimo com saída declarada. Enquanto ele viver só aqui, duas coisas ruins acontecem ao mesmo tempo: o fork carrega dívida que não é nossa e fica mais difícil de rebasear; e qualquer pessoa que rode o OpenSearch no VectorDBBench upstream continua batendo num caminho morto que já sabemos consertar. É uma correção de uma linha, com reprodução clara e evidência medida — o formato que um PR upstream aceita bem.
+status: raw
+dod:
+  - PR aberto no `zilliztech/VectorDBBench` com **só** essa mudança, corpo trazendo a mensagem de erro exata, a versão do `opensearch-py` e do OpenSearch onde foi observado, e por que o caminho é incondicional
+  - o PR **não** menciona o TheoDB nem o nosso cliente: é conserto do cliente deles, e misturar as duas coisas transformaria uma correção óbvia numa discussão de escopo
+  - se aceito, a linha sai do nosso fork no rebase seguinte — é a saída da D3 exercitada pela primeira vez
+  - se recusado, a razão é registrada e a linha permanece no fork **com o motivo escrito ao lado**
+  - o mesmo tratamento é avaliado para o cliente FTS do `theodb` — o PR maior, que o [[B-035]] adiou por a imagem do produto nunca ter sido publicada; este item **não** o inclui, e diz por quê
+
+> Registrado 2026-08-13. **Escopo deliberadamente estreito:** é o PR de uma linha, não o do nosso cliente.
+> Aquele depende de o revisor conseguir subir um TheoDB, e a imagem nunca foi publicada (10/10 falhas do
+> workflow de publish) — condição que este item não tenta contornar.
+
+Próximo id livre: **`B-051`**. Ids são monotônicos e nunca reusados.
