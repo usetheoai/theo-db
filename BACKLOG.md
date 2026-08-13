@@ -1420,6 +1420,14 @@ dod:
 > do build é 3,6×, e a inserção está empatada — a redação anterior diluía o tamanho da diferença e a atribuía
 > ao lugar errado. Corrigido lá por acréscimo.
 
+> **2026-08-13 — o owner declarou o alvo: paridade com o pgvector.** O DoD acima dizia "publicar mesmo se
+> continuarmos atrás", o que segue valendo como regra de honestidade. O que muda é o critério de sucesso: o
+> item só fecha quando o build estiver **em paridade medida** (dentro de 20%, com o mesmo número de workers
+> dos dois lados) ou quando houver um ADR explicando por que a paridade não é alcançável nesta arquitetura —
+> com a mesma disciplina do `ADR-0035`, que declarou não-alcançável a superioridade sobre o ScaNN por
+> medição, não por desânimo.
+
+
 ## B-043 — O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais   [ ]
 
 domain: lexical
@@ -1439,23 +1447,27 @@ dod:
 > Registrado 2026-08-13. **A curva é o achado; a causa é a pergunta.** Não afirmo trava — a saturação também
 > é compatível com trabalho genuinamente caro por consulta, e distinguir as duas exige perfil, não leitura.
 
-## B-044 — O analisador lexical não faz stemming, e isso custa NDCG contra todo motor comparável   [ ]
+## B-044 — Implementar stemming no analisador lexical (a decisão está tomada)   [ ]
 
 domain: lexical
 repo: theo-db
 suggested_mode: evolve
-source: discover-evolve
-evidence: medido em 2026-08-12 contra `theodb:b034`. `bm25_search` sobre um corpus contendo "the quick brown fox **jumps** over the lazy dog": a consulta `jumping` devolve **vazio**. Stopwords são indexadas em vez de removidas (`the` devolve documentos). Não há operadores de consulta: `"frase exata"` é tratada como palavras soltas, `AND` vira termo que casa documentos contendo a palavra "and", `-exclusão` é ignorada, `prefixo*` devolve vazio. O que **funciona** e foi verificado: multi-termo com OR e scores acumulados corretos, e perguntas em linguagem natural rankeando o documento certo em primeiro.
-why_now: o pilar acabou de ser medido num arnês público — **NDCG@10 0,6962 no MS MARCO 100K** — e o próximo passo natural é comparar com Elasticsearch e OpenSearch, cujos analisadores padrão **stemmizam**. Qualquer diferença de NDCG contra eles carrega essa diferença de pré-processamento embutida, e hoje a única saída honesta é declarar o handicap no topo do artefato, que foi o que se fez. Isso não é sustentável como resposta permanente: ou o produto ganha um analisador comparável, ou a decisão de não ter um vira ADR com a razão escrita.
+source: human
+evidence: medido em 2026-08-12 contra `theodb:b034`: a consulta `jumping` não casa o documento que contém `jumps`; stopwords são indexadas (`the` devolve documentos); operadores de consulta não existem. **Causa localizada em 2026-08-13:** o schema declara `sb.add_text_field("body", TEXT | STORED)` (`theodb_rs/src/lexical/pg_backing.rs:82,125,158` e `engine.rs`), e o `TEXT` do Tantivy usa o tokenizer `"default"` (`tantivy-0.26.1/src/schema/field_entry.rs:160`), que é SimpleTokenizer + RemoveLong + LowerCaser — **sem stemmer, sem stopwords**. O Tantivy 0.26.1 **já traz** `Stemmer`, `Language` (`src/tokenizer/stemmer.rs:12,63`) e `StopWordFilter`.
+why_now: decisão do owner em 2026-08-13 — **implementar**. O item deixa de ser "decidir se" e passa a ser "fazer". O que a medição mudou é o **tamanho**: não se escreve um stemmer, configura-se o que já está linkado (degrau 4 da parsimony ladder — reusar dependência instalada). O custo real não é o código, é o contrato: o analisador precisa ser **idêntico na indexação e na consulta**, e trocá-lo **invalida todo índice existente**, exigindo rebuild.
 status: raw
 dod:
-  - uma DECISÃO em ADR: implementar stemming (e qual — Snowball/Porter, por idioma) ou declarar fora de escopo com a razão. As duas saídas servem; o silêncio não
-  - se implementar: o ganho é medido **no mesmo corpus e comando** do `b040-theodb-fts-msmarco.md`, com NDCG antes e depois, e o artefato é atualizado em vez de duplicado
-  - stopwords e operadores de consulta são avaliados na mesma decisão, ou o ADR diz por que ficam de fora
-  - o analisador é **configurável ou declarado fixo** — se for fixo, o artefato de benchmark continua dizendo isso, porque é o que torna a comparação legível
+  - um `TextAnalyzer` registrado (SimpleTokenizer + LowerCaser + `StopWordFilter` + `Stemmer`) e usado **nos dois lados** — no `add_text_field` e no parser de consulta. Um teste prova que os dois usam o mesmo, porque analisadores divergentes degradam recall em silêncio
+  - `jumping` casa `jumps` — teste de regressão que hoje falha
+  - **o ganho é medido no mesmo corpus e comando do `b040-theodb-fts-msmarco.md`**: NDCG@10, recall@10 e MRR antes e depois, com o artefato ATUALIZADO em vez de duplicado. Se o NDCG não subir, o resultado é publicado assim mesmo
+  - a **invalidação de índices existentes** está tratada: ou a `generation` de `theodb.lexical_index_meta` detecta o descompasso e falha alto, ou há um caminho de rebuild documentado. Índice antigo lido com analisador novo devolve resultado errado sem erro — a mesma classe do [[B-041]]
+  - o **idioma** é uma decisão registrada: fixo em inglês, parâmetro do `bm25_build`, ou GUC. Escolher em silêncio é o defeito que o B-034 pagou para consertar
+  - stopwords entram no mesmo ciclo ou o item declara por que ficam de fora
 
-> Registrado 2026-08-13. Complementa o [[B-004]] (qualidade de recuperação) sem substituí-lo: aquele mede,
-> este decide o que fazer com o que a medição mostrou.
+> Reescrito 2026-08-13 após a decisão do owner e a localização da causa. A versão anterior pedia um ADR
+> decidindo "implementar ou declarar fora de escopo" — a decisão foi tomada, então o item vira execução.
+> Operadores de consulta (`"frase"`, `AND`, `-exclusão`, `prefixo*`) **não** entram aqui: são superfície de
+> consulta, não analisador, e misturá-los faria um item que fecha nunca.
 
 ## B-045 — Nenhuma comparação que publicamos tem teste de significância, e tínhamos o instrumento   [ ]
 
@@ -1475,4 +1487,45 @@ dod:
 > Registrado 2026-08-13. **Este item limita o valor de todos os outros:** enquanto ele estiver aberto,
 > nenhum ganho medido no B-042 ou no B-043 poderá ser afirmado como real, apenas como observado.
 
-Próximo id livre: **`B-046`**. Ids são monotônicos e nunca reusados.
+## B-046 — Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3%   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: medido em 2026-08-12 no droplet `g-16vcpu-64gb`, `Performance1536D50K` (50.000 × 1536d, COSINE), publicado em `wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md`. A recall casado — **0,9829 do TheoDB contra 0,9835 do pgvector** — o pgvector faz **3.590,6 QPS** e o TheoDB **3.086,1**: déficit de **16,3%**. A origem é a mesma do [[B-042]] vista pelo outro lado: no mesmo `ef_search=64` o TheoDB entrega recall 0,9600 contra 0,9835, e precisa de `ef=128` para empatar — ou seja, **o dobro de candidatos por consulta**. Reprodutibilidade das duas corridas independentes em `ef=64`: 1,3% de QPS, 0,06% de recall.
+why_now: alvo declarado pelo owner em 2026-08-13 — **paridade com o pgvector**. Este é o número que a comparação pública mostra, e é distinto do [[B-042]]: aquele é o custo de **construir**, este é o custo de **consultar**. Podem ter a mesma causa (grafo pior exige mais varredura) ou causas independentes (varredura menos eficiente por candidato), e **a medição atual não separa as duas** — é exatamente o que o [[B-036]] destrava ao tornar `m`/`ef_construction` ajustáveis. Enquanto não separar, qualquer otimização é palpite.
+status: raw
+blocked_by: B-036 — sem `m`/`ef_construction` ajustáveis não é possível variar a qualidade do grafo mantendo a varredura fixa, que é o experimento que decide onde está o custo
+dod:
+  - o déficit é **decomposto**: quanto vem de qualidade de grafo (recall menor no mesmo `ef`) e quanto de eficiência de varredura (custo por candidato). Medido por experimento, não inferido
+  - o custo por candidato é comparado com o do pgvector no mesmo corpus — distâncias calculadas por consulta, não só tempo de parede
+  - o item fecha quando o QPS a recall casado estiver **dentro de 10% do pgvector** no mesmo caso, ou com ADR explicando por que não é alcançável
+  - o ganho sobrevive a **teste pareado de significância** ([[B-045]]) — sem ele, "melhorou 8%" é observação, não resultado
+  - o artefato `b035-theodb-vs-pgvector-pg18.md` é ATUALIZADO com o novo número, não duplicado
+
+> Registrado 2026-08-13. Separado do [[B-042]] porque são trabalhos diferentes com DoDs diferentes, embora
+> possam ter causa comum. Se a decomposição mostrar uma causa única, um dos dois fecha como duplicata do
+> outro — e isso será dito, não escondido.
+
+## B-047 — Rodar os motores concorrentes nos benchmarks oficiais, na mesma máquina, como prática recorrente   [ ]
+
+domain: theo-db
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: os dois artefatos publicados declaram a mesma lacuna, por razões diferentes. No vetorial (`b035`) rodamos **um** concorrente — o pgvector — e num único ponto da curva dele. No lexical (`b040`) rodamos **nenhum**: o artefato diz explicitamente que citar os números publicados do leaderboard da Zilliz compararia máquinas, versões e datas diferentes, e por isso não os cita. O arnês já tem clientes prontos para Elasticsearch, OpenSearch, Milvus, Turbopuffer e Vespa — nenhum precisa ser escrito.
+why_now: prática declarada pelo owner em 2026-08-13 — **sempre rodar os benchmarks oficiais**. Hoje temos o instrumento (o fork do VectorDBBench), o procedimento (`run.sh` / `run-fts.sh` com gates de versão e de falha) e o padrão de máquina (`g-16vcpu-64gb`, o `16c64g` de referência do upstream). O que falta é o hábito e o custo declarado: cada corrida em droplet efêmero custou entre US$ 1 e US$ 2 e levou de 15 a 30 minutos. Sem os concorrentes na mesma tabela, cada artefato nosso é um número isolado que só se compara consigo mesmo.
+status: raw
+dod:
+  - o `run.sh` e o `run-fts.sh` aceitam uma **lista de motores** e rodam todos na mesma máquina, na mesma corrida, com o gate de "meia comparação não se publica" valendo para o conjunto
+  - a corrida lexical inclui **Elasticsearch e OpenSearch** com analisador declarado dos dois lados (é o handicap do [[B-044]] que torna a leitura possível)
+  - a corrida vetorial varre `ef_search` **dos dois lados**, produzindo fronteira de Pareto em vez de um ponto casado
+  - o custo por corrida (tempo e dinheiro) é registrado no artefato, para que a prática seja avaliável em vez de aspiracional
+  - a política vira ADR: qual pilar tem benchmark oficial obrigatório, com que frequência, e o que acontece quando uma corrida regride
+
+> Registrado 2026-08-13. **O que este item NÃO é:** não é reescrever arnês. Os clientes dos concorrentes já
+> existem no upstream e o nosso já roda. É orquestração e disciplina, e o custo é de infraestrutura, não de
+> engenharia.
+
+Próximo id livre: **`B-048`**. Ids são monotônicos e nunca reusados.

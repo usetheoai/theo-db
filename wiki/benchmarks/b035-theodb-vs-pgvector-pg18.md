@@ -113,6 +113,12 @@ alcançada, superioridade de QPS não alegável — segue de pé, e esta corrida
 - **Um `db_label` do pgvector saiu com tudo zero** — foi a corrida que falhou por `vector type not found`
   antes do conserto. Está nos artefatos brutos e **não** entra em nenhuma tabela aqui.
 
+# Política que esta corrida ajudou a fixar
+
+O [ADR-0061](../decisions/0061-benchmark-oficial-por-pilar.md) tornou obrigatório o que esta corrida fez por
+disciplina: arnês de terceiros, concorrente na mesma máquina, qualidade ao lado de velocidade e ponto de
+operação casado.
+
 # Reproduzir
 
 ```bash

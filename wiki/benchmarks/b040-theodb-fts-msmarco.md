@@ -102,6 +102,11 @@ Registrado porque afeta a leitura do número:
   mediria o adaptador Python em vez do motor, e publicaria um número que a instalação real do TheoDB não
   reproduz.
 
+# Política que esta corrida ajudou a fixar
+
+O [ADR-0061](../decisions/0061-benchmark-oficial-por-pilar.md) tornou obrigatório declarar o handicap antes
+do número e recusar comparação com leaderboard de outro ambiente — as duas coisas que este artefato faz.
+
 # Reproduzir
 
 ```bash

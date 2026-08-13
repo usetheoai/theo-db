@@ -21,6 +21,22 @@ favorável. O que a corrida mostra é que aquele resultado **não generaliza** �
 
 ## 2026-08-13
 
+**ADR-0061 — todo pilar mensurável tem benchmark oficial público.**
+
+Decisão do owner depois das duas primeiras corridas: arnês de terceiros (não caseiro), concorrentes na mesma
+máquina e na mesma corrida, métrica de qualidade ao lado de toda métrica de velocidade, e ponto de operação
+casado — não parâmetro casado.
+
+**A decisão diz o próprio limite:** não é mecanizada (nenhum hook verifica) e ainda não inclui significância
+estatística. Enquanto o B-045 estiver aberto, toda diferença publicada é observada, não demonstrada.
+
+**Uma correção de número publicado, feita no mesmo dia.** O artefato do b035 dizia "pgvector constrói o
+índice 2,7× mais rápido", citando `load_duration` — que soma inserção e construção. Decomposto: a inserção
+está em paridade (18,80 s contra 19,66 s) e o **build é 3,6× mais lento** (35,09 s contra 125,09 s). A
+redação anterior atribuía à carga um custo que é do build.
+
+## 2026-08-13
+
 **b040 — o pilar lexical entra no arnês, e o handicap vem antes do número.**
 
 Acrescentado `benchmarks/b040-theodb-fts-msmarco.md`. MS MARCO 100K, num droplet `g-16vcpu-64gb` destruído
