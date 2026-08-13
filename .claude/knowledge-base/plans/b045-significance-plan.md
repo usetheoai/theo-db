@@ -186,8 +186,14 @@ pytest benchmarks/significance/test_significance.py -q
 - `pytest benchmarks/significance/test_significance.py` sai com `exit code 0` e reporta **6 passed**
 - `git diff --no-index` entre o arquivo recuperado e `git show 7cd157d^:...` é **vazio** — a função não foi
   reescrita, `equals` byte a byte
-- os 4 testes que dependem de `run_m53_hybrid_beir` estão **removidos com comentário** dizendo por quê —
-  `grep -c "run_m53_hybrid_beir" benchmarks/significance/test_significance.py` `equals` 0
+- os 4 testes que dependem de `run_m53_hybrid_beir` estão **removidos com comentário** dizendo por quê, e
+  não resta **import** dele: `grep -cE "^\s*(from|import) run_m53" benchmarks/significance/test_significance.py`
+  `equals` 0
+
+  > **Correção por acréscimo, na execução.** Este critério dizia `grep -c "run_m53_hybrid_beir" … equals 0`,
+  > e o comentário que explica a remoção contém o nome — o critério reprovaria a própria documentação que
+  > o critério anterior exige. O que ele quis dizer é "nenhuma dependência", e dependência é `import`.
+  > Apagar o comentário para caber na letra seria satisfazer o gate destruindo a informação.
 
 ### T1.2 — O avaliador por consulta, sobre a porta
 
