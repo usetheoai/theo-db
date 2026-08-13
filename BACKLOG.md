@@ -1493,7 +1493,7 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: os dois artefatos publicados neste ciclo declaram a mesma ausência. O `b035-theodb-vs-pgvector-pg18.md` reporta **+16,3% de QPS a recall casado** apoiado em duas amostras concordantes (1,3% entre elas) e diz explicitamente que "duas amostras concordantes não são um teste". O `b040-theodb-fts-msmarco.md` reporta NDCG@10 0,6962 de **uma única corrida**, sem variância medida. O VectorDBBench não tem teste de significância. O `theodb_bench` removido no commit `7cd157d` **tinha** — randomização pareada de Smucker/Allan/Carterette, em `significance.py`.
 why_now: a Regra 5 exige artefato reproduzível para alegação de performance, e os dois artefatos cumprem isso. O que nenhum cumpre é dizer se a diferença medida **sobrevive ao acaso** — e a partir de agora toda comparação nova herda o mesmo limite. O custo é assimétrico: publicar um delta de 16% sem significância é aceitável enquanto o artefato o declara, mas a primeira vez que alguém citar o número fora do artefato, a ressalva não vai junto. O instrumento já existiu neste repositório e o caminho de reprodução saiu com a remoção do `benchmarks/`.
-status: raw
+status: planned
 dod:
   - o teste pareado volta a existir como ferramenta executável sobre os JSON do VectorDBBench — recuperado do histórico (`git show 7cd157d^:benchmarks/.../significance.py`) ou reescrito, o que for menor
   - aplicado retroativamente aos dois artefatos já publicados, com o resultado acrescentado a cada um **mesmo que enfraqueça a conclusão**
@@ -1502,6 +1502,22 @@ dod:
 
 > Registrado 2026-08-13. **Este item limita o valor de todos os outros:** enquanto ele estiver aberto,
 > nenhum ganho medido no B-042 ou no B-043 poderá ser afirmado como real, apenas como observado.
+
+> **2026-08-13 — implementado, não shipped.** Ciclo completo. `benchmarks/significance/` com 22 testes;
+> `significance.py` recuperado **byte a byte**; zero alteração no fork e na extensão. Aplicado aos três
+> motores reais: **paridade do b047 DEMONSTRADA** — p=0,477 vs Elasticsearch, p=0,466 vs OpenSearch, IC 95%
+> [−0,0011, +0,0025] sobre **6.980 consultas**, 6.484 empates exatos. Review `READY_TO_MERGE`; release
+> `PR_OPEN_AWAITING_APPROVAL` (PR #228).
+>
+> **DoD cumprido em três dos quatro.** O que **falta**, e está dito no artefato em vez de escondido: o
+> `run.sh`/`run-fts.sh` **não** passaram a rodar N corridas por ponto, porque para métricas de qualidade uma
+> corrida basta (o pareamento é por consulta, não por corrida) e para **velocidade** o pareado não se aplica
+> — QPS não tem valor por consulta. Significância para velocidade é item próprio.
+>
+> **Aplicado retroativamente a um dos dois artefatos.** O b047 ganhou o teste; o b040 (stemming, +5,6%) ganhou
+> a explicação de **por que não pode ganhá-lo**: as duas corridas do A/B usaram imagens diferentes e os arrays
+> por consulta do lado sem stemming não foram preservados.
+
 
 ## B-046 — Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3%   [ ]
 
