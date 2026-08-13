@@ -229,8 +229,19 @@ de `build.rs:416` passa a usá-los.
 #### Acceptance criteria
 
 - `meta.m` lido do disco `equals` o valor pedido, para dois valores distintos
-- recall com `ef_construction=400` é **maior** que com `16` no mesmo corpus — asserção sobre recall medido,
-  nunca sobre o `CREATE INDEX` ter sido aceito
+- recall com `ef_construction=400` é **maior** que com **`4`** no mesmo corpus (o plano dizia `16`) — asserção
+  sobre recall medido, nunca sobre o `CREATE INDEX` ter sido aceito.
+
+  **Substituição registrada, com a razão (2026-08-13).** O par `16 → 400` não é seguro como asserção: o próprio
+  projeto mediu no M57 que subir `efc` de 64 para 200 **piorou** o recall a 100k–500k (`build.rs:15-21`), e
+  codificar "maior sempre" seria afirmar em teste uma monotonicidade que a nossa própria medição refutou. Com
+  `efc=4` num corpus de 300 nós a busca gulosa do build é pobre demais para empatar, e o teste
+  `ef_construction_changes_the_measured_recall_end_to_end` **mediu** `high > low` — efeito real, não predição.
+
+  Dois testes complementares fecham o elo que o recall sozinho não fecharia, porque `ef_construction` não é
+  persistido em lugar nenhum: `ef_construction_reloption_reaches_the_accessor` (SQL → acessor, determinístico) e
+  `the_builder_actually_consumes_ef_construction` (o builder produz grafos diferentes para `efc` diferente, com
+  o controle de determinismo ao lado — sem ele, a diferença poderia ser ruído em vez de efeito do parâmetro)
 - índice criado **sem** as opções produz `meta.m` `equals` 16, o default de hoje
 
 ### T1.3 — O fold do VACUUM honra os mesmos valores
@@ -321,10 +332,37 @@ grep -c "fn hnsw_ef_construction" theodb_rs/src/        # deve dar 0
 
 #### Acceptance criteria
 
-- `grep -c "THEODB_HNSW_EF_CONSTRUCTION" theodb_rs/src/` `equals` 0
+- ~~`grep -c "THEODB_HNSW_EF_CONSTRUCTION" theodb_rs/src/` `equals` 0~~ — **corrigido por acréscimo na
+  implementação (2026-08-13).** O comentário que EXPLICA a remoção cita o nome da variável, então satisfazer a
+  letra deste critério significaria apagar a explicação. É a mesma armadilha que o T1.1 do B-045 pagou. O que o
+  critério quis dizer é "nenhuma **dependência**", e dependência aqui é a leitura: o `grep` correto é
+  `grep -c "env::var(\"THEODB_HNSW_EF_CONSTRUCTION" theodb_rs/src/`, que dá **0**
 - `THEODB_HNSW_PARALLEL_THRESHOLD` **permanece** — é knob de bissecção de contenção, não de qualidade, e não
   tem reloption equivalente. Removê-la seria escopo que ninguém pediu
 - o CHANGELOG registra a remoção sob `Changed`, porque quem usava a env var em benchmark precisa saber
+
+### T1.6 — Os dois call sites que a descoberta não enumerou (acrescentado na implementação)
+
+#### Why this step
+
+A varredura de consumidores antes de editar encontrou **dois** usos das constantes fora dos dois call sites
+mapeados. Nenhum dos dois aparece na oportunidade, e ignorá-los deixaria o item entregue pela metade:
+
+| Call site | O que quebraria |
+|---|---|
+| `hnsw_page/store.rs:383` — caminho de **INSERT** | um índice criado com `ef_construction=200` voltaria a 64 a cada linha inserida depois do build, em silêncio (o `efc` não está no meta, então nada denunciaria) |
+| `cost.rs:123` — **estimativa de custo** do planner | o custo seguiria descrevendo um grafo `m=16` para um índice `m=32`; o comentário do arquivo afirmava textualmente que `m` era constante |
+| `build.rs:843` — `ambuildempty_hnsw` | o índice **vazio** grava um meta, e é ele que o primeiro INSERT lê; nascer com o default divergiria do pedido |
+
+Os três leem a reloption da relação, não o meta — no `cost.rs` isso é obrigatório e não preferência: uma
+segunda leitura de página dentro do `amcostestimate` seria uma superfície de `Err` nova num caminho que **não
+pode** abortar plano nenhum (contrato EC-3, documentado no próprio arquivo).
+
+#### Acceptance criteria
+
+- `grep -c "crate::am::build::HNSW_EF_CONSTRUCTION" theodb_rs/src/am/hnsw_page/store.rs` `equals` 0
+- `cost.rs` não importa mais `HNSW_M` — `grep -c "use crate::am::build::HNSW_M" theodb_rs/src/am/cost.rs` `equals` 0
+- a suíte completa segue verde com o total **maior** que o baseline de 469
 
 ## Failure scenarios
 

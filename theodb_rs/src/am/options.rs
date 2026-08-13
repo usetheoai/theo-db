@@ -19,6 +19,23 @@ const MAX_LISTS: i32 = 32768; // pgvector's IVFFLAT_MAX_LISTS
 /// M51 — `theodb_hnsw` build knob `WITH (sbq_bits = N)`: bits-per-dim for the inline SBQ codes (0 = off / v1
 /// f32-only, the default, so every existing index is byte-for-byte unchanged). 1..8 mirror the SBQ quantizer
 /// range (`sbq.rs` BITS_MAX). A scan knob (over_fetch) is a GUC (`am/guc.rs`), not a reloption.
+/// B-036 — `m` do HNSW: grau máximo de vizinhos acima do nível 0 (`m0 = 2m` no nível 0). O default 16 é o
+/// mesmo do pgvector, o que mantém maçã-com-maçã toda corrida já publicada em `wiki/benchmarks/`.
+pub(crate) const DEFAULT_HNSW_M: i32 = 16;
+const MIN_HNSW_M: i32 = 2; // `ml = 1/ln(m)` exige m >= 2 (`ann/hnsw.rs:71` já faz `m.max(2)`)
+/// Calculado, não escolhido: no pior caso o tuple de vizinhos de um nó tem `HNSW_MAX_LEVEL*m + m0 = 34m`
+/// slots, e precisa caber numa página — `NBR_HEADER + 34*m*SLOT`, mais `ITEMID` e maxalign, contra
+/// `USABLE = BLCKSZ - PAGE_HEADER = 8168`. Isso dá 39 como o maior `m` seguro; 40 estoura em 8172 bytes.
+/// pgvector usa 100, mas o cap de nível dele é outro — copiar o número dele produziria índices que quebram
+/// no nível alto.
+const MAX_HNSW_M: i32 = 39;
+
+/// B-036 — `ef_construction`: tamanho da lista de candidatos durante a construção. Sobe qualidade do grafo e
+/// custo de build. Default 64, o mesmo do pgvector.
+pub(crate) const DEFAULT_HNSW_EF_CONSTRUCTION: i32 = 64;
+const MIN_HNSW_EF_CONSTRUCTION: i32 = 4;
+const MAX_HNSW_EF_CONSTRUCTION: i32 = 1000; // mesma ordem do teto de `theodb_hnsw.ef_search`
+
 pub(crate) const DEFAULT_SBQ_BITS: i32 = 0;
 const MIN_SBQ_BITS: i32 = 0;
 const MAX_SBQ_BITS: i32 = 8;
@@ -96,6 +113,11 @@ struct TheodbIvfflatOptions {
     refine: i32,
     soar_lambda_milli: i32,
     rabitq_bits: i32,
+    // B-036 — acrescentados AO FINAL pela mesma razão que o `degree_bound` pôde sair do fim sem deslocar
+    // ninguém: `rd_options` é reconstruído pelo `build_reloptions` a cada relcache load, não é formato
+    // persistido. Campos novos default para o valor de hoje, então índice sem a opção é byte-idêntico.
+    hnsw_m: i32,
+    hnsw_ef_construction: i32,
     // B-026 — `degree_bound: i32` removido daqui. Era o ÚLTIMO campo do struct, então tirá-lo não desloca
     // o offset de nenhum outro — e nenhum índice pode tê-lo gravado, porque a opção nunca chegou a ser
     // registrada (ver o comentário na tabela de parse abaixo). Resíduo do `theodb_symqg` (M176).
@@ -187,6 +209,26 @@ pub(crate) unsafe fn init() {
     );
     pg_sys::add_int_reloption(
         RELOPT_KIND,
+        "m".as_pg_cstr(),
+        "Max neighbor degree above level 0 for the theodb_hnsw build (m0 = 2m on the ground level, B-036)"
+            .as_pg_cstr(),
+        DEFAULT_HNSW_M,
+        MIN_HNSW_M,
+        MAX_HNSW_M,
+        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
+    );
+    pg_sys::add_int_reloption(
+        RELOPT_KIND,
+        "ef_construction".as_pg_cstr(),
+        "Candidate-list size during the theodb_hnsw build; raises graph quality and build cost (B-036)"
+            .as_pg_cstr(),
+        DEFAULT_HNSW_EF_CONSTRUCTION,
+        MIN_HNSW_EF_CONSTRUCTION,
+        MAX_HNSW_EF_CONSTRUCTION,
+        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
+    );
+    pg_sys::add_int_reloption(
+        RELOPT_KIND,
         "rabitq_bits".as_pg_cstr(),
         "Bits-per-dim for the v8 (refine=2) f32-free RaBitQ residual rerank codes (7 = f32-free 0.99 recall, E1)".as_pg_cstr(),
         DEFAULT_RABITQ_BITS,
@@ -204,7 +246,7 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
     reloptions: pg_sys::Datum,
     validate: bool,
 ) -> *mut pg_sys::bytea {
-    let tab: [pg_sys::relopt_parse_elt; 9] = [
+    let tab: [pg_sys::relopt_parse_elt; 11] = [
         pg_sys::relopt_parse_elt {
             optname: "lists".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
@@ -286,6 +328,21 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
             // exhaustive, so this is required at every literal — same tax pgvectorscale pays (options.rs:113).
             isset_offset: 0,
         },
+        pg_sys::relopt_parse_elt {
+            optname: "m".as_pg_cstr(),
+            opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
+            offset: std::mem::offset_of!(TheodbIvfflatOptions, hnsw_m) as i32,
+            // Ver a nota do M135 acima: `isset_offset: 0` preserva a semântica do PG17.
+            isset_offset: 0,
+        },
+        pg_sys::relopt_parse_elt {
+            optname: "ef_construction".as_pg_cstr(),
+            opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
+            offset: std::mem::offset_of!(TheodbIvfflatOptions, hnsw_ef_construction) as i32,
+            isset_offset: 0,
+        },
+        // B-036 — as duas entradas acima levam o array de 9 → 11, e cada uma aparece TAMBÉM no
+        // `add_int_reloption` do `init()`. A nota abaixo explica por que essa dupla presença importa.
         // B-026 — a entrada de `degree_bound` saiu daqui (array de 10 → 9). Ela era resíduo do
         // `theodb_symqg`, aposentado no M176, e estava numa situação que só a contagem revela: aparecia no
         // `relopt_parse_elt` mas **nunca** no `add_int_reloption` — todos os outros nove aparecem nos DOIS.
@@ -465,4 +522,39 @@ pub(crate) unsafe fn soar_lambda_from_relation(indexrel: pg_sys::Relation) -> f6
         (*(rd_options as *const TheodbIvfflatOptions)).soar_lambda_milli
     };
     (milli.max(0) as f64) / 1000.0
+}
+
+/// Resolve the build-time `m` for a `theodb_hnsw` index: the `WITH (m=N)` value, or the default.
+///
+/// The clamp on out-of-range is a safety net for a value already on disk (a range that tightened between
+/// versions), **not** the input policy — `build_reloptions` rejects out-of-range at `CREATE INDEX` with a
+/// named error, because clamping the user's request in silence is the defect class B-048 tracks.
+///
+/// # Safety
+/// `indexrel` must be a valid open index relation.
+pub(crate) unsafe fn hnsw_m_from_relation(indexrel: pg_sys::Relation) -> usize {
+    let rd_options = (*indexrel).rd_options;
+    if rd_options.is_null() {
+        return DEFAULT_HNSW_M as usize;
+    }
+    let m = (*(rd_options as *const TheodbIvfflatOptions)).hnsw_m;
+    if (MIN_HNSW_M..=MAX_HNSW_M).contains(&m) { m as usize } else { DEFAULT_HNSW_M as usize }
+}
+
+/// Resolve the build-time `ef_construction` for a `theodb_hnsw` index. Same clamp rationale as
+/// [`hnsw_m_from_relation`].
+///
+/// # Safety
+/// `indexrel` must be a valid open index relation.
+pub(crate) unsafe fn hnsw_ef_construction_from_relation(indexrel: pg_sys::Relation) -> usize {
+    let rd_options = (*indexrel).rd_options;
+    if rd_options.is_null() {
+        return DEFAULT_HNSW_EF_CONSTRUCTION as usize;
+    }
+    let efc = (*(rd_options as *const TheodbIvfflatOptions)).hnsw_ef_construction;
+    if (MIN_HNSW_EF_CONSTRUCTION..=MAX_HNSW_EF_CONSTRUCTION).contains(&efc) {
+        efc as usize
+    } else {
+        DEFAULT_HNSW_EF_CONSTRUCTION as usize
+    }
 }
