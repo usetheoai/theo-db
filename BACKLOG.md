@@ -664,6 +664,21 @@ dod:
 
 > Registered 2026-08-10 by `/backlog-item` (slug: `egress-guarda-ssrf`).
 
+> **2026-08-13 — os três testes PASSAM, e mesmo assim o item NÃO fecha.** Medido na suíte de hoje:
+>
+> ```
+> test tests::pg_embed_unreachable_endpoint_fails_typed ... ok
+> test tests::pg_rerank_unreachable_endpoint_fails_typed ... ok
+> test http::tests::pg_m104_breaker_success_closes ... ok
+> ```
+>
+> Dois bullets do `dod` continuam abertos, e são os que dão valor ao item: **(a)** um teste separado que cubra
+> a própria guarda SSRF — hoje ela só é exercitada por acidente, como efeito colateral de outro teste; **(b)**
+> cobertura da máquina de estados do disjuntor que não dependa de rede alguma.
+>
+> Verde não é DoD. Fechar aqui seria trocar a pergunta ("a guarda está coberta?") pelo sintoma que a
+> denunciava ("o teste está vermelho?").
+
 ## B-013 — A suíte não roda no CI, então a próxima regressão espera meses   [x]
 
 domain: engine-pgrx
@@ -932,7 +947,7 @@ repo: theo-db
 suggested_mode: bug
 source: discover-review
 evidence: suíte completa de 2026-08-11 (`434 passed; 6 failed`). `graph::csr_build_guards_u32_boundary` declara `error = "must fit in u32"` e o produto emite `theodb.graph_build: node ids must fit in u32 (max 4294967295)`; `vectorizer::process_delete_failure_does_not_mark_done` declara `error = "does not exist"` e o produto emite `column "emb" of relation "dst_bad" does not exist`. **A comparação do pgrx é igualdade exata** — lido no fonte da dependência, `pgrx-tests-0.19.0/src/framework.rs:174`: `if Some(received_error_message) == expected_error`.
-status: triaged
+status: planned
 status_nota: resolvido em 2026-08-11 — os dois passaram a declarar a mensagem INTEIRA. Efeito colateral desejado e registrado: o texto do erro vira contrato, e mudá-lo passa a quebrar o teste (para o do `vectorizer` a mensagem é do ENGINE, `analyze.c`, então o contrato é do PostgreSQL).
 why_now: **o produto está CORRETO nos dois** — cada um emitiu exatamente o erro tipado que o teste existe para provar, e a asserção reprova mesmo assim. É a classe que o m188 chamou de classificação errada de teste, e ela custa duas vagas permanentes no baseline de falhas do CI, protegendo dívida em vez de produto. O conserto é declarar a mensagem inteira; o cuidado é que ela então vira contrato — mudar o texto do erro passa a quebrar o teste, que é o comportamento desejado para um erro tipado.
 status: raw
@@ -943,6 +958,17 @@ dod:
 
 > Registered 2026-08-11 by `/discover --mode review` (slug: `pg-test-error-fragmento`), da investigação
 > das 6 falhas remanescentes após o `B-015`.
+
+> **2026-08-13 — `triaged` → `planned`. FECHADO por medição.** Os dois testes passam com a mensagem completa,
+> na suíte de hoje (`478 passed; 0 failed`):
+>
+> ```
+> test graph::tests::pg_csr_build_guards_u32_boundary ... ok
+> test vectorizer::tests::pg_process_delete_failure_does_not_mark_done ... ok
+> ```
+>
+> Nenhum foi afrouxado para `should_panic` genérico — o pgrx compara por igualdade, então passar É a prova de
+> que a mensagem declarada casa inteira. Os outros dois bullets já constavam riscados no bloco.
 
 ## B-023 — Um teste de PERFORMANCE mora na suíte funcional, e ele reprovou com AVX 51% mais lento   [ ]
 
@@ -963,6 +989,18 @@ dod:
 
 > Registered 2026-08-11 by `/discover --mode review` (slug: `simd-speedup-na-suite-funcional`), da
 > investigação das 6 falhas remanescentes após o `B-015`.
+
+> **2026-08-13 — passa hoje, e é exatamente por isso que o item continua aberto.** Medido:
+> `test vec::tests::pg_cosine_simd_per_candidate_speedup ... ok`.
+>
+> O primeiro bullet do `dod` já estava riscado com a conclusão certa — **não reproduz, é contenção**. E o
+> bullet que decorre dela permanece: *"se ruído: o teste **sai** da suíte funcional para o harness de
+> benchmark, com variância declarada — não é afrouxado no lugar"*. Ele continua em `vec.rs:553`, dentro da
+> suíte funcional.
+>
+> Um teste de performance que passa hoje e falha amanhã por carga da máquina é flaky por construção
+> (`rules/testing.md § 6`), e um vermelho intermitente treina o time a ignorar vermelho. **A execução verde
+> de hoje é evidência a favor de mover o teste, não contra.**
 
 ## B-024 — O autotune recomendou `ef_search` sobre contadores em ZERO, e ninguém mediu o alcance   [ ]
 
