@@ -2011,3 +2011,34 @@ dod:
 > para `vec` e passou a apontar para `kernels`. **Um gate mais barato que o gate que importa dá uma confiança
 > que ele não sustenta** — que é, literalmente, o assunto deste ciclo. O gate certo é
 > `cargo check --features pg18,pg_test --all-targets`, e ele fecha em 2m32s contra os ~6 min da suíte.
+
+## B-054 — Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r`   [ ]
+
+domain: theo-db
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: medido em 2026-08-13, durante o ciclo B-041/B-048. Uma execução de `cargo pgrx test pg18` no
+contêiner pinado leva **~8 min**, decompostos: **2m34s recompilando 363 crates** + **5m24s** rodando os 480
+`pg_test`. Os 363 recompilam porque o comando de execução faz `cp -r /src/. /w/` para levar o código para
+dentro do contêiner, e **`cp -r` não preserva mtime** — ele carimba a hora atual em cada arquivo, e o cargo usa
+mtime para decidir o que mudou. Do ponto de vista dele, o DataFusion inteiro é novo a cada corrida. Medido com
+`cp -a` (que preserva): **363 → 109** recompilações.
+why_now: o owner interrompeu o trabalho em 2026-08-13 dizendo "7 min executando e nada? isso é impossível de
+trabalhar" — e estava certo. Três custos empilhados, e só o primeiro é inerente: (a) os 5m24s de teste são
+reais, porque cada `pg_test` sobe SQL contra um Postgres de verdade; (b) os 2m34s de recompilação são
+autoinfligidos pelo `cp -r`; (c) **o pior é de método** — eu rodava os **480** testes para validar uma mudança
+em **um** módulo, quando `cargo pgrx test pg18 lexical` filtra e roda em segundos. O ciclo lento não é só
+desconfortável: ele empurra para usar gates mais baratos e errados, que foi exatamente o achado R-8 do ciclo
+anterior.
+status: raw
+dod:
+  - o comando de execução preserva mtime (`cp -a`, `rsync -a` ou montagem direta) — provado por
+    `grep -c "^   Compiling"` numa segunda corrida consecutiva sem mudança de código, que deve dar **0**
+  - existe um caminho documentado para rodar SÓ o módulo tocado, e ele é o default do fluxo de implementação;
+    a suíte completa fica para o gate de entrega
+  - o tempo das duas formas é medido e publicado, para que a escolha seja informada e não folclore
+
+> Registrado 2026-08-13 pelo próprio ciclo que sofreu com isso. **É um item sobre o ciclo de desenvolvimento,
+> não sobre o produto** — e vale porque um ciclo de 8 minutos por iteração é o que faz alguém usar
+> `cargo check` sem `pg_test` e descobrir o erro 25 minutos depois (R-8 do review do Tier 1).
