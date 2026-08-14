@@ -87,27 +87,36 @@ fn bump_generation(index_id: i64) {
 /// ActiveSnapshot da statement → veem o MESMO snapshot: tag do cache == conteúdo, sob RC e RR; e `bm25_search`
 /// roda em read replica sem burn de XID. Retorna 0 quando o catálogo não existe (nenhum build) ou o índice
 /// não tem linha (índice vazio) — ambos estados válidos.
-fn read_generation(index_id: i64) -> u64 {
+fn read_generation(index_id: i64) -> Option<u64> {
     Spi::connect(|c| {
-        let exists = c
+        // B-048(c) — a cadeia `.ok()`/`.unwrap_or(0)` SAIU daqui, e o motivo está em
+        // `rules/error-handling.md § 2`: valor mágico para sinalizar falha é proibido. Antes, um erro do SPI ao
+        // consultar o catálogo produzia o MESMO `0` de um índice legitimamente não construído, e o chamador não
+        // tinha como distinguir. Agora o erro do SPI propaga (o `expect` vira `ereport(ERROR)` sob pgrx) e a
+        // ausência de linha é `None` — dois estados, dois valores.
+        let exists: bool = c
             .select("SELECT to_regclass('theodb.lexical_index_meta') IS NOT NULL", Some(1), &[])
-            .ok()
-            .and_then(|t| t.into_iter().next())
-            .and_then(|r| r.get::<bool>(1).ok().flatten())
+            .expect("lexical: consulta ao catálogo falhou")
+            .into_iter()
+            .next()
+            .and_then(|r| r.get::<bool>(1).expect("lexical: coluna to_regclass"))
             .unwrap_or(false);
         if !exists {
-            return 0u64;
+            // O catálogo inteiro não existe: nenhum build jamais aconteceu neste banco. É ausência, não erro.
+            return None;
         }
+        // Sem `coalesce`: o que interessa agora é a PRESENÇA da linha, e o `coalesce` a apagava ao devolver 0
+        // tanto para "não tem linha" quanto para "tem linha com generation 0".
         c.select(
-            "SELECT coalesce((SELECT generation FROM theodb.lexical_index_meta WHERE index_id = $1), 0)",
+            "SELECT generation FROM theodb.lexical_index_meta WHERE index_id = $1",
             Some(1),
             &[index_id.into()],
         )
-        .ok()
-        .and_then(|t| t.into_iter().next())
-        .and_then(|r| r.get::<i64>(1).ok().flatten())
-        .unwrap_or(0)
-        .max(0) as u64
+        .expect("lexical: consulta a lexical_index_meta falhou")
+        .into_iter()
+        .next()
+        .and_then(|r| r.get::<i64>(1).expect("lexical: coluna generation"))
+        .map(|g| g.max(0) as u64)
     })
 }
 
@@ -154,7 +163,16 @@ fn bm25_build(index_id: i64, table: &str, id_col: &str, text_col: &str) -> i64 {
             let rows = c.select(&sql, None, &[]).expect("lexical: build select");
             for r in rows {
                 let id: i64 = r.get::<i64>(1).expect("id col").expect("id not null");
-                let body: String = r.get::<String>(2).expect("body col").unwrap_or_default();
+                // B-048(a) — o `unwrap_or_default()` que estava aqui transformava `body` NULL num documento
+                // VAZIO: ele entrava no índice, contava no retorno e não casava consulta nenhuma. Medido: 3
+                // linhas com um NULL devolviam `3`, e só dois ids apareciam em qualquer busca — quem conferia o
+                // retorno acreditava que os três estavam buscáveis.
+                //
+                // NULL não é erro: um corpus com `body` NULL é dado legítimo do usuário, e o `bm25_build` não
+                // decide o esquema de ninguém. O que ele deve é RELATAR honestamente quantos indexou.
+                let Some(body) = r.get::<String>(2).expect("body col") else {
+                    continue;
+                };
                 w.add_document(tantivy::doc!(id_f => id, body_f => body))
                     .expect("lexical: add_document");
                 count += 1;
@@ -187,11 +205,23 @@ fn bm25_search(
         return TableIterator::new(Vec::new().into_iter());
     }
 
-    let generation = read_generation(index_id);
-    if generation == 0 {
-        // índice sem build — estado válido, 0 linhas.
-        return TableIterator::new(Vec::new().into_iter());
-    }
+    // B-041 — o índice que nunca foi construído passa a RECUSAR, em vez de devolver zero linhas.
+    //
+    // Zero é resposta legítima num pilar de busca ("nada casou"), e é isso que torna o silêncio caro: a
+    // aplicação que esqueceu o `bm25_build` — ou o perdeu num restore, ou o construiu com outro `index_id` —
+    // concluía que o corpus não tinha o documento. O cliente do VectorDBBench precisou consultar
+    // `lexical_index_meta` por conta própria para conseguir falhar alto, o que é a evidência de que a
+    // informação estava no lugar certo e a função no lugar errado.
+    //
+    // O guard consulta PRESENÇA no catálogo, nunca contagem de documentos: medido, um `bm25_build` sobre corpus
+    // vazio registra `generation 1`. Errar por "zero documentos" trocaria um falso-silêncio por um falso-alarme,
+    // e `search_on_built_but_empty_index_returns_zero_rows_without_error` existe para provar que não trocamos.
+    let Some(generation) = read_generation(index_id) else {
+        error!(
+            "bm25_search: index_id {index_id} nunca foi construído (sem linha em theodb.lexical_index_meta) — \
+uma busca sobre índice inexistente devolveria zero linhas, indistinguível de 'nada casou'"
+        );
+    };
 
     // Recupera o poison (review M140.3 HIGH): o closure de build roda com o guard tomado; um panic
     // nele (ex.: `open_from_heap` sobre bytes de heap inconsistentes) envenenaria o `Mutex` static
@@ -411,12 +441,18 @@ mod tests {
         assert_eq!(top, Some(2), "the doc with the rare term ranks first");
     }
 
-    #[pg_test]
-    fn test_bm25_search_empty_index_returns_no_rows() {
-        let n: Option<i64> =
-            Spi::get_one("SELECT count(*) FROM bm25_search(999, 'anything', 10)").unwrap();
-        assert_eq!(n, Some(0), "index with no build -> 0 rows, not an error");
-    }
+    // B-041 — `test_bm25_search_empty_index_returns_no_rows` foi REMOVIDO daqui, e a razão é que ele
+    // codificava o defeito como contrato: `assert_eq!(n, Some(0), "index with no build -> 0 rows, not an
+    // error")` sobre o `index_id` 999, que nunca passou por `bm25_build`.
+    //
+    // Dois erros somados, e o segundo escondia o primeiro: o NOME dizia "empty index" e a MONTAGEM usava um
+    // índice nunca construído. São estados diferentes — um é resposta legítima, o outro é a aplicação não saber
+    // que esqueceu o build —, e o nome fazia o primeiro cobrir o segundo.
+    //
+    // Nenhuma cobertura se perdeu; os dois estados ganharam teste próprio, cada um afirmando o que o seu nome
+    // diz: `search_on_never_built_index_raises_typed_error` e
+    // `search_on_built_but_empty_index_returns_zero_rows_without_error`.
+
 
     #[pg_test]
     fn test_bm25_search_empty_query_returns_no_rows() {
@@ -441,5 +477,83 @@ mod tests {
         )
         .unwrap();
         assert_eq!(hit, Some(2), "search after rebuild sees the new generation's docs");
+    }
+
+    // ---- B-041 / B-048: a superfície para de responder onde deveria recusar ----
+    //
+    // A classe que estes três testes fecham já foi consertada TRÊS vezes neste projeto (explain_scan/scan_stats
+    // com zeros silenciosos, o contador do chunk-skip do colunar, o gerador de script de upgrade) e reapareceu
+    // outras três. O que a torna cara não é cada instância — é que zero, num pilar de busca, é uma resposta
+    // legítima, então o silêncio é indistinguível do resultado.
+
+    /// B-041 — buscar num `index_id` que nunca passou por `bm25_build` levanta erro tipado, em vez de devolver
+    /// zero linhas. Medido antes do conserto contra `theodb:b036`: `bm25_search(999,'lazy dog',5)` devolvia
+    /// **0 linhas, sem erro nem aviso**.
+    #[pg_test(error = "bm25_search: index_id 999 nunca foi construído (sem linha em theodb.lexical_index_meta) — \
+uma busca sobre índice inexistente devolveria zero linhas, indistinguível de \'nada casou\'")]
+    fn search_on_never_built_index_raises_typed_error() {
+        let _ = pgrx::Spi::get_one::<i64>("SELECT count(*) FROM bm25_search(999, 'lazy dog', 5)");
+    }
+
+    /// B-041, a outra metade — e é ELA que impede o conserto de virar regressão.
+    ///
+    /// Um índice construído sobre corpus vazio é estado VÁLIDO: devolve zero linhas e **não** deve erguer. Foi
+    /// medido que esse build registra `generation 1` no catálogo, e é por isso que o guard consulta PRESENÇA e
+    /// nunca contagem de documentos — a implementação ingênua (errar quando não há documento) reprovaria aqui.
+    #[pg_test]
+    fn search_on_built_but_empty_index_returns_zero_rows_without_error() {
+        pgrx::Spi::run("CREATE TABLE b041_vazio(id bigint PRIMARY KEY, body text)").unwrap();
+        let built = pgrx::Spi::get_one::<i64>(
+            "SELECT bm25_build(4242::bigint, 'b041_vazio', 'id', 'body')",
+        )
+        .unwrap();
+        assert_eq!(built, Some(0), "corpus vazio indexa zero documentos");
+        let registrado = pgrx::Spi::get_one::<i64>(
+            "SELECT count(*) FROM theodb.lexical_index_meta WHERE index_id = 4242",
+        )
+        .unwrap();
+        assert_eq!(registrado, Some(1), "o build vazio TEM de registrar — é o que distingue dos nunca-construídos");
+        let n = pgrx::Spi::get_one::<i64>("SELECT count(*) FROM bm25_search(4242, 'qualquer', 5)").unwrap();
+        assert_eq!(n, Some(0), "corpus vazio é resultado legítimo, não erro");
+    }
+
+    /// B-048(a) — `bm25_build` conta o que é ACHÁVEL. Medido antes do conserto: 3 linhas com um `body` NULL
+    /// devolviam **3**, e só os ids 1 e 3 apareciam em qualquer busca — o `unwrap_or_default()` fazia do NULL
+    /// um documento vazio que contava e nunca casava.
+    ///
+    /// A segunda asserção é a que impede contar certo por outro caminho errado: o retorno tem de BATER com o
+    /// que a busca de fato encontra.
+    #[pg_test]
+    fn build_counts_only_findable_documents() {
+        pgrx::Spi::run("CREATE TABLE b048_d(id bigint PRIMARY KEY, body text)").unwrap();
+        pgrx::Spi::run("INSERT INTO b048_d VALUES (1,'alpha'),(2,NULL),(3,'beta')").unwrap();
+        let n = pgrx::Spi::get_one::<i64>(
+            "SELECT bm25_build(4243::bigint, 'b048_d', 'id', 'body')",
+        )
+        .unwrap();
+        assert_eq!(n, Some(2), "o NULL não é achável e não deve ser contado");
+        let achaveis =
+            pgrx::Spi::get_one::<i64>("SELECT count(*) FROM bm25_search(4243, 'alpha beta', 10)").unwrap();
+        assert_eq!(achaveis, Some(2), "o retorno do build tem de bater com o que a busca encontra");
+    }
+
+    /// B-048(a), o caso extremo: TODOS os `body` NULL. Zero documentos acháveis continua sendo build válido —
+    /// registra no catálogo, e a busca subsequente devolve zero SEM erro.
+    #[pg_test]
+    fn build_over_all_null_bodies_is_a_valid_empty_build() {
+        pgrx::Spi::run("CREATE TABLE b048_nulos(id bigint PRIMARY KEY, body text)").unwrap();
+        pgrx::Spi::run("INSERT INTO b048_nulos VALUES (1,NULL),(2,NULL)").unwrap();
+        let n = pgrx::Spi::get_one::<i64>(
+            "SELECT bm25_build(4244::bigint, 'b048_nulos', 'id', 'body')",
+        )
+        .unwrap();
+        assert_eq!(n, Some(0), "nenhum documento achável");
+        let registrado = pgrx::Spi::get_one::<i64>(
+            "SELECT count(*) FROM theodb.lexical_index_meta WHERE index_id = 4244",
+        )
+        .unwrap();
+        assert_eq!(registrado, Some(1), "build válido registra, mesmo sem documento achável");
+        let n2 = pgrx::Spi::get_one::<i64>("SELECT count(*) FROM bm25_search(4244, 'x', 5)").unwrap();
+        assert_eq!(n2, Some(0), "zero linhas SEM erro — o índice existe, o corpus é que não tem termo");
     }
 }
