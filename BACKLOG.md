@@ -2042,3 +2042,47 @@ dod:
 > Registrado 2026-08-13 pelo próprio ciclo que sofreu com isso. **É um item sobre o ciclo de desenvolvimento,
 > não sobre o produto** — e vale porque um ciclo de 8 minutos por iteração é o que faz alguém usar
 > `cargo check` sem `pg_test` e descobrir o erro 25 minutos depois (R-8 do review do Tier 1).
+
+## B-055 — Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança"   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: review
+source: human
+evidence: medido por leitura de código em 2026-08-13, a partir de pergunta do owner. **Zero menções** a
+`pgbouncer|pooler|connection pool|pgcat|odyssey` em `wiki/`, `README.md`, `PRD.md` e `CHANGELOG.md` — o tema
+nunca foi levantado. E o `README.md:49` afirma, sem qualificação: *"100% compatível com PostgreSQL. Seus
+drivers, ferramentas e aplicações funcionam sem mudança."* Um pooler é uma ferramenta, e sob **transaction
+pooling** a afirmação tem três problemas concretos no nosso código:
+  (a) **42 GUCs**, e os de tuning são estado de sessão. `SET theodb_hnsw.ef_search = 100` fora de transação não
+      sobrevive à devolução da conexão ao pool: a busca seguinte roda com o default 64 **em silêncio** — a
+      classe do [[B-034]] (knob aceito que não se aplica) e do [[B-041]] (zero indistinguível de resposta).
+  (b) **Sete blocos de estado por backend** contaminam a instrumentação: `SCAN_PAGES_READ`/`SCAN_CANDIDATES`
+      (`am/autotune.rs`) alimentam `theodb.explain_scan` e o recomendador de `ef`; mais `BREAKERS` (`http.rs`),
+      `CSR_CACHE` (`graph.rs`), `AI_CALLS` (`chat.rs`), `WRITE_STATES` (`am/columnar.rs`).
+  (c) **statement pooling** quebra temp table e prepared statement — inclusive a sonda do nosso próprio cliente
+      de benchmark, que faz `CREATE TEMP TABLE`.
+  O que **não** é risco, e a medição corrigiu a hipótese inicial: as chaves de API (`theodb.llm_api_key`,
+  `embedding_api_key`, `rerank_api_key`) são `GucContext::Suset` — só superusuário faz `SET`, endurecido no M134
+  precisamente porque antes eram nomes livres que qualquer papel podia definir. Não são estado de sessão na
+  prática e não vazam entre clientes.
+why_now: um pooler é a primeira peça que qualquer instalação séria coloca na frente do banco, e a promessa do
+README é justamente a que faz alguém não verificar antes. **Nada aqui foi executado** — é leitura de código, e
+a diferença importa: eu não medi se o `ef_search` de fato se perde entre transações nem se os contadores de
+fato se misturam. São predições fundamentadas, não resultados, e publicar a matriz sem medir seria o
+`cobertura-alegada-sem-execucao` que este projeto persegue.
+status: raw
+dod:
+  - PgBouncer sobe nos **três** modos (`session`, `transaction`, `statement`) contra a imagem do produto, e
+    cada hipótese acima é confirmada ou refutada **por execução**
+  - especificamente: um `SET theodb_hnsw.ef_search = 200` seguido de busca noutra transação **mede** recall/ef
+    efetivo — se cair para o default, o número prova a perda; se não cair, a hipótese (a) é refutada e isso é
+    registrado com o mesmo peso
+  - os contadores de `theodb.explain_scan` são lidos por dois clientes concorrentes sob transaction pooling, e
+    o resultado diz se contaminam
+  - a matriz de compatibilidade entra em `wiki/` como conceito, com o comando de reprodução
+  - o `README.md:49` é qualificado pelo que a medição mostrar — `rules/public-copy.md § 3` proíbe afirmação
+    absoluta sem evidência sustentada, e "funcionam sem mudança" é absoluta
+
+> Registrado 2026-08-13 a partir de pergunta direta do owner ("nosso banco de dados suporta PgBouncer?"). A
+> pergunta não tinha resposta no projeto — e a ausência é o achado tanto quanto a análise.
