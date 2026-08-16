@@ -1,5 +1,7 @@
 //! SPI-orchestration adapter (blueprint M19, ADR-C): hybrid search (FTS + vector) fused by Reciprocal Rank Fusion,
-//! ported from the plpgsql `ai.hybrid_search_rrf`/`ai.hybrid_search` (sql/40). The Rust function is the
+//! ported from the plpgsql `ai.hybrid_search_rrf`/`ai.hybrid_search` (que vivia em `sql/40-theodb-hybrid.sql`,
+//! REMOVIDO em `d0771b3` — a migração M19 o esvaziou e o arquivo virou 17 linhas de comentário; o conteúdo
+//! citado está em `git show d0771b3^:sql/40-theodb-hybrid.sql`). The Rust function is the
 //! ENTRYPOINT and owns orchestration; the RRF fusion itself stays ONE SQL string (RANK per leg → FULL
 //! OUTER JOIN → summed COALESCE(1/(k+rank))), run via SPI. We do NOT reimplement RRF/RANK/FULL-OUTER-JOIN
 //! in Rust — that would fork the fusion math (ADR-C / D2: one fusion source of truth). IDENTIFIER args
@@ -28,7 +30,9 @@ use crate::pg::{err_input, err_unsupported};
 /// numeric literals — injection-safe; default 1.0 each = the pre-M106 unweighted fusion) — all substituted by
 /// Postgres `format()`. The `$1..$6` placeholders are LITERAL here (format only touches `%` specifiers) and
 /// bind at execution: $1=qvec(text→::vector), $2=query_text, $3=per_leg_limit, $4=k, $5=result_limit,
-/// $6=language(regconfig). Byte-faithful to sql/40:76-106 when both weights are 1.0.
+/// $6=language(regconfig). Byte-faithful ao original em `git show d0771b3^:sql/40-theodb-hybrid.sql`
+/// quando ambos os pesos são 1.0. (As faixas de linha que esta nota citava já não resolviam antes da
+/// remoção: apontavam para o arquivo ANTES do M19 o esvaziar.)
 const FUSION_TEMPLATE_TSRANK: &str = r#"WITH vec AS (
     SELECT %1$I AS _id,
            RANK() OVER (ORDER BY %2$I <=> $1::vector) AS rank
@@ -106,7 +110,7 @@ pub(crate) fn run_rrf(
     vec_weight: f64,
     text_weight: f64,
 ) -> Vec<(String, f32)> {
-    // Fail-fast, typed (Rule 8) — mirror sql/40:45-57.
+    // Fail-fast, typed (Rule 8) — espelha o original em `git show d0771b3^:sql/40-theodb-hybrid.sql`.
     if k <= 0 {
         err_input(&format!("ai.hybrid_search_rrf: k must be > 0 (got {k})"));
     }

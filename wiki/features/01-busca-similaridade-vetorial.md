@@ -45,7 +45,7 @@ A ordenação **crescente** coloca os vetores mais semelhantes no topo, porque a
 # Habilitando a extensão
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
+CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 ```
 
 Isso provê o tipo `vector` próprio e os access methods ANN. Aplicações que escrevem

@@ -32,7 +32,7 @@ Cada registro segue a forma do Pinecone:
 # 2. Criar a tabela alvo
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
+CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 
 CREATE TABLE items (
   id        text PRIMARY KEY,   -- id do Pinecone

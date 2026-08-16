@@ -19,7 +19,6 @@
 //! exists precisely for large vectors — its own upstream comment says "TOAST not included in seq scan cost" —
 //! so the regime where it was dismissed as negligible is the regime where it is decisive. Constant tuning
 //! remains out of scope (D5).
-use crate::am::build::HNSW_M;
 use crate::am::hnsw_page::HNSW_STRUCT_MAGIC;
 use crate::am::{guc, page};
 use pgrx::pg_sys;
@@ -104,8 +103,12 @@ pub(crate) fn toast_startup_correction(
 /// Read the meta (already locked by the planner — NoLock, pgvector pattern) and compute the visit ratio.
 /// EC-3 contract: EVERY meta read is fail-safe — `peek_magic` failure → `None` → 1.0; a torn/corrupt IVF meta
 /// under a concurrent fold → `dir.len()` unread → `lists == 0` → 1.0. `amcostestimate` must NEVER error, or it
-/// would abort ALL query planning while a VACUUM momentarily makes the meta unreadable. HNSW's `m` is a fixed
-/// build constant (no reloption), so no second meta read is needed for it — avoiding another `Err` surface.
+/// would abort ALL query planning while a VACUUM momentarily makes the meta unreadable. B-036 made `m` a real
+/// reloption, and o custo passa a lê-la — mas da RELAÇÃO (`rd_options`, já em memória e infalível), nunca do
+/// meta: uma segunda leitura de página aqui seria uma superfície de `Err` nova no planner, que é justamente o
+/// que este contrato proíbe. O desvio possível (alguém fez `ALTER INDEX ... SET (m=…)` sem `REINDEX`) deixa a
+/// estimativa descrever o `m` declarado em vez do gravado — uma aproximação melhor que o 16 fixo de antes, e
+/// que não pode abortar plano nenhum.
 pub(crate) unsafe fn scan_visit_ratio(rel: pg_sys::Relation, tuples: f64) -> f64 {
     let magic = page::peek_magic(rel).ok();
     let lists = if magic == Some(page::IVF_STRUCT_MAGIC) {
@@ -120,7 +123,14 @@ pub(crate) unsafe fn scan_visit_ratio(rel: pg_sys::Relation, tuples: f64) -> f64
     } else {
         0
     };
-    ratio_for(magic, tuples, guc::probes(), lists, HNSW_M, guc::ef_search())
+    ratio_for(
+        magic,
+        tuples,
+        guc::probes(),
+        lists,
+        unsafe { crate::am::options::hnsw_m_from_relation(rel) },
+        guc::ef_search(),
+    )
 }
 
 // ---- M95: honest cost model for the vecfilter Custom Scan node ----
@@ -260,7 +270,8 @@ mod tests {
         assert_eq!(ratio_for(None, 50_000.0, 10, 100, 16, 64), 1.0); // peek_magic Err → None
         assert_eq!(ratio_for(Some(UNKNOWN_MAGIC), 50_000.0, 10, 100, 16, 64), 1.0); // v1/blob/garbage
         assert_eq!(ratio_for(Some(page::IVF_STRUCT_MAGIC), 0.0, 10, 100, 16, 64), 1.0); // tuples == 0
-        assert_eq!(ratio_for(Some(page::IVF_STRUCT_MAGIC), 50_000.0, 10, 0, 16, 64), 1.0); // torn IVF meta → lists 0
+        assert_eq!(ratio_for(Some(page::IVF_STRUCT_MAGIC), 50_000.0, 10, 0, 16, 64), 1.0);
+        // torn IVF meta → lists 0
     }
 
     #[test]

@@ -24,7 +24,7 @@ docker run -d --name theodb -e POSTGRES_PASSWORD=postgres -p 5432:5432 \
 ```
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
+CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 ```
 
 A imagem roda isso automaticamente na primeira inicialização. Em qualquer outro PostgreSQL, execute
@@ -136,7 +136,7 @@ Prove que o índice é usado com `EXPLAIN (ANALYZE, BUFFERS)`.
 # Upgrades
 
 ```sql
-ALTER EXTENSION theodb UPDATE;
+ALTER EXTENSION theodb_rs UPDATE;
 ```
 
 Encadeia os scripts de upgrade até a versão instalada mais nova. A disciplina que torna isso confiável

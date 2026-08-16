@@ -1993,6 +1993,188 @@ mod tests {
              — top-k ids were {ids:?}"
         );
     }
+
+    // ---- B-036: `m` e `ef_construction` como reloptions de verdade ----
+    //
+    // O caminho de LEITURA já era por índice antes deste item: `search.rs`, `store.rs` e `scan.rs` leem `meta.m`,
+    // nunca a constante. O que faltava era a ponta da ESCRITA. Por isso os testes abaixo checam o que foi GRAVADO
+    // e o que o build de fato CONSUMIU — nunca que o `CREATE INDEX` foi aceito, que é a forma barata de passar
+    // sem ligar nada.
+
+    /// Lê o `m`/`m0` que o build gravou no meta da página, abrindo a relação do índice pelo nome.
+    fn meta_m_m0(index_name: &str) -> (u16, u16) {
+        unsafe {
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one(&format!("SELECT '{index_name}'::regclass::oid"))
+                    .unwrap()
+                    .expect("index oid");
+            let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            (meta.m, meta.m0)
+        }
+    }
+
+    fn seed_small_table(table: &str) {
+        pgrx::Spi::run(&format!("CREATE TEMP TABLE {table} (id int PRIMARY KEY, e vector(4))"))
+            .unwrap();
+        for i in 0..40i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO {table} VALUES ({i}, '[{a},{b},{c},{d}]')"))
+                .unwrap();
+        }
+    }
+
+    /// `WITH (m=8)` tem de chegar ao grafo GRAVADO, não só ao parser: `meta.m` é 8 e `meta.m0` é 16 (= 2m).
+    #[pgrx::pg_test]
+    fn create_index_with_m_persists_it_in_the_meta() {
+        seed_small_table("bm");
+        pgrx::Spi::run("CREATE INDEX bm_idx ON bm USING theodb_hnsw (e) WITH (m = 8)").unwrap();
+        let (m, m0) = meta_m_m0("bm_idx");
+        assert_eq!(m, 8, "o build tem de usar o `m` da reloption, não a constante");
+        assert_eq!(m0, 16, "m0 = 2m, derivado do m pedido");
+    }
+
+    /// Sem `WITH`, o default shipado continua sendo 16/32 — é o que preserva b035/b040/b044/b047 como
+    /// ponto de operação padrão. Um teste de regressão sobre a decisão D1 do plano, não sobre o parser.
+    #[pgrx::pg_test]
+    fn create_index_without_options_keeps_the_shipped_default() {
+        seed_small_table("bd");
+        pgrx::Spi::run("CREATE INDEX bd_idx ON bd USING theodb_hnsw (e)").unwrap();
+        assert_eq!(meta_m_m0("bd_idx"), (16, 32), "default inalterado (m=16, m0=32)");
+    }
+
+    /// `ef_construction` não é persistido em lugar nenhum — então o que se prova aqui é o elo do meio: o valor
+    /// pedido no SQL chega ao acessor que o build consome. O elo seguinte (o builder de fato usa `efc`) é uma
+    /// propriedade pura, provada sem banco em `ann::hnsw`.
+    #[pgrx::pg_test]
+    fn ef_construction_reloption_reaches_the_accessor() {
+        seed_small_table("be");
+        pgrx::Spi::run(
+            "CREATE INDEX be_idx ON be USING theodb_hnsw (e) WITH (ef_construction = 200)",
+        )
+        .unwrap();
+        pgrx::Spi::run("CREATE TEMP TABLE be2 (id int PRIMARY KEY, e vector(4))").unwrap();
+        pgrx::Spi::run("INSERT INTO be2 VALUES (1, '[1,2,3,4]')").unwrap();
+        pgrx::Spi::run("CREATE INDEX be2_idx ON be2 USING theodb_hnsw (e)").unwrap();
+        unsafe {
+            for (name, expected) in [("be_idx", 200usize), ("be2_idx", 64usize)] {
+                let oid: pg_sys::Oid =
+                    pgrx::Spi::get_one(&format!("SELECT '{name}'::regclass::oid"))
+                        .unwrap()
+                        .unwrap();
+                let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+                let got = crate::am::options::hnsw_ef_construction_from_relation(rel);
+                let got_m = crate::am::options::hnsw_m_from_relation(rel);
+                pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+                assert_eq!(got, expected, "{name}: ef_construction efetivo");
+                assert_eq!(got_m, 16, "{name}: m default quando não pedido");
+            }
+        }
+    }
+
+    /// Fora da faixa é RECUSADO no `CREATE INDEX`, não truncado em silêncio — a diferença entre o usuário
+    /// saber o que construiu e achar que sabe. É a classe do B-048 aplicada ao próprio item.
+    #[pgrx::pg_test(error = "value 1 out of bounds for option \"m\"")]
+    fn m_below_range_is_rejected_not_clamped() {
+        seed_small_table("bl");
+        pgrx::Spi::run("CREATE INDEX bl_idx ON bl USING theodb_hnsw (e) WITH (m = 1)").unwrap();
+    }
+
+    #[pgrx::pg_test(error = "value 2 out of bounds for option \"ef_construction\"")]
+    fn ef_construction_below_range_is_rejected_not_clamped() {
+        seed_small_table("bf");
+        pgrx::Spi::run(
+            "CREATE INDEX bf_idx ON bf USING theodb_hnsw (e) WITH (ef_construction = 2)",
+        )
+        .unwrap();
+    }
+
+    /// O teto de `m` vem do page layout, não de cópia do pgvector: no pior caso um nó ocupa
+    /// `HNSW_MAX_LEVEL·m + m0 = 34m` slots, e a tupla de vizinhos tem de caber numa página. m=40 estoura.
+    #[pgrx::pg_test(error = "value 40 out of bounds for option \"m\"")]
+    fn m_above_the_page_layout_ceiling_is_rejected() {
+        seed_small_table("bc");
+        pgrx::Spi::run("CREATE INDEX bc_idx ON bc USING theodb_hnsw (e) WITH (m = 40)").unwrap();
+    }
+
+    /// O elo ponta a ponta que o plano (T1.2) exige: `ef_construction` pedido no SQL tem de mudar o RESULTADO,
+    /// não só chegar ao acessor. Mede recall@10 contra o oráculo exato (seqscan) em dois índices sobre o MESMO
+    /// corpus, `efc=4` contra `efc=400`.
+    ///
+    /// A asserção é de EFEITO (`>=` com diferença estrita em algum ponto), não de monotonicidade global: o
+    /// próprio projeto mediu no M57 que subir `efc` de 64 para 200 **piorou** o recall a 100k-500k
+    /// (`build.rs:15-21`). Exigir "maior sempre" seria codificar uma propriedade que a nossa medição já
+    /// refutou — a 300 nós com `efc=4` a busca gulosa é pobre demais para empatar, e é isso que se afirma aqui.
+    #[pgrx::pg_test]
+    fn ef_construction_changes_the_measured_recall_end_to_end() {
+        pgrx::Spi::run("CREATE TEMP TABLE bq (id int PRIMARY KEY, e vector(8))").unwrap();
+        for i in 0..300i32 {
+            let v: Vec<String> = (0..8)
+                .map(|j| format!("{:.3}", ((i * 7 + j * 13) % 29) as f32 * 0.3 + i as f32 * 0.01))
+                .collect();
+            pgrx::Spi::run(&format!("INSERT INTO bq VALUES ({i}, '[{}]')", v.join(","))).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX bq_lo ON bq USING theodb_hnsw (e) WITH (ef_construction = 4)")
+            .unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 10").unwrap();
+        let probe = "[12.0,13.0,11.5,12.5,12.0,13.5,11.0,12.0]";
+
+        let recall_of = |idx: &str| -> f64 {
+            pgrx::Spi::run(&format!(
+                "SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on"
+            ))
+            .unwrap();
+            let exact: std::collections::HashSet<i32> =
+                topk_ids_tbl("bq", probe, 10).into_iter().collect();
+            pgrx::Spi::run(
+                "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+            )
+            .unwrap();
+            let got: std::collections::HashSet<i32> =
+                topk_ids_tbl("bq", probe, 10).into_iter().collect();
+            assert!(!got.is_empty(), "{idx}: o índice tem de ser varrível");
+            exact.intersection(&got).count() as f64 / 10.0
+        };
+        let low = recall_of("bq_lo");
+        pgrx::Spi::run("DROP INDEX bq_lo").unwrap();
+        pgrx::Spi::run(
+            "CREATE INDEX bq_hi ON bq USING theodb_hnsw (e) WITH (ef_construction = 400)",
+        )
+        .unwrap();
+        let high = recall_of("bq_hi");
+        assert!(
+            high > low,
+            "efc=400 tem de recuperar mais que efc=4 neste corpus (medido: {high:.2} vs {low:.2}) — se \
+             empatarem, `ef_construction` não chegou ao builder pelo caminho do SQL"
+        );
+    }
+
+    /// O risco central que a descoberta apontou: com o fold lendo a CONSTANTE, um VACUUM reconstruiria o grafo
+    /// com m=16 depois de o usuário ter pedido m=8 — em silêncio, e sem nada no caminho de leitura para
+    /// perceber, porque o meta reescrito seria autoconsistente. Este teste falha exatamente nesse cenário.
+    #[pgrx::pg_test]
+    fn the_vacuum_fold_rebuilds_with_the_requested_m_not_the_default() {
+        seed_small_table("bv");
+        pgrx::Spi::run("CREATE INDEX bv_idx ON bv USING theodb_hnsw (e) WITH (m = 8)").unwrap();
+        assert_eq!(meta_m_m0("bv_idx"), (8, 16), "pré-condição: o build inicial honrou m=8");
+        // VACUUM como comando não roda dentro da transação do teste; o fold é chamado direto pela FFI, que é
+        // exatamente o caminho que `ambulkdelete` percorre.
+        unsafe {
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 'bv_idx'::regclass::oid").unwrap().unwrap();
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let mut none_dead = |_tid: i64| false;
+            let live = crate::am::build::vacuum_rebuild_hnsw_structured(rel, &mut none_dead);
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            assert_eq!(live, 40, "o fold preserva as 40 linhas vivas");
+        }
+        assert_eq!(
+            meta_m_m0("bv_idx"),
+            (8, 16),
+            "o fold tem de reconstruir com o m DE CRIAÇÃO — com a constante, viraria (16, 32) em silêncio"
+        );
+    }
 }
 
 // M56 — pure unit tests for the tombstone byte-layout (CI-runnable via `cargo test`, no DB/pgrx needed).

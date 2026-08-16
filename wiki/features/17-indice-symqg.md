@@ -37,7 +37,7 @@ aqui.
 # Superfície
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
+CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 
 CREATE INDEX itens_symqg
 ON itens

@@ -1,5 +1,5 @@
 //! SPI-orchestration adapter (blueprint M19): safe natural-language → SQL with layered anti-prompt-injection
-//! guards, ported from the plpython3u `ai.nl_to_sql`/`ai.nl_query` (sql/60) — the LAST plpython3u in the
+//! guards, ported from the plpython3u `ai.nl_to_sql`/`ai.nl_query` (theodb_rs/sql/surface/60-nl.sql) — the LAST plpython3u in the
 //! surface. Unlike the portable `embed`/`chat` modules (all ABI access via `crate::pg`), this module talks to
 //! Postgres directly through `Spi`/pgrx (the L4 EXPLAIN call) — that SPI use IS the accepted ADR-C boundary.
 //!
@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use crate::pg::err_input;
 
-/// The banned-token denylist (verbatim from sql/60:74-78). A generated SQL token equal to any of these is
+/// The banned-token denylist (verbatim from theodb_rs/sql/surface/60-nl.sql:74-78). A generated SQL token equal to any of these is
 /// rejected (file/exfil/DDL/DML family). `pg_ls_` is the bare-prefix sibling the first cut missed.
 const BANNED: &[&str] = &[
     "drop",
@@ -78,7 +78,7 @@ pub(crate) fn nl_to_sql(
         err_input("ai.nl_to_sql: allowed_relations must be a non-empty list");
     }
 
-    // L1 — constrain the model (byte-identical to sql/60:44-49; the stub routes on this text).
+    // L1 — constrain the model (byte-identical to theodb_rs/sql/surface/60-nl.sql:44-49; the stub routes on this text).
     let mut sorted = allow.clone();
     sorted.sort();
     let system = format!(
@@ -168,7 +168,7 @@ fn l4_validate_relations(sql: &str, allow: &[String]) {
     }
 }
 
-// NOTE (M19 ADR-F): `ai.nl_query` (L3 read-only sandbox execution) stays a thin plpgsql keeper in sql/60,
+// NOTE (M19 ADR-F): `ai.nl_query` (L3 read-only sandbox execution) stays a thin plpgsql keeper in theodb_rs/sql/surface/60-nl.sql,
 // NOT a Rust function. L3 is transaction-control (`SET LOCAL transaction_read_only`) + dynamic `EXECUTE` —
 // inherently SQL/plpgsql operations (the M18 precedent: the chunked import PROCEDURE stayed plpgsql, ADR-D).
 // Critically, it MUST call `ai.nl_to_sql` at the SQL level (`validated := ai.nl_to_sql(...)`) so nl_to_sql's
@@ -176,7 +176,7 @@ fn l4_validate_relations(sql: &str, allow: &[String]) {
 // `nl_query` frame makes the nested EXPLAIN-SPI fail. The anti-injection core (L1/L2/L4) is 100% Rust here.
 
 /// Strip an optional leading ```` ```lang ```` fence + trailing ```` ``` ```` — the nl variant
-/// (`^```[a-zA-Z]*\n?` / `\n?```$`, sql/60:57-58), DISTINCT from `chat::strip_fence`.
+/// (`^```[a-zA-Z]*\n?` / `\n?```$`, theodb_rs/sql/surface/60-nl.sql:57-58), DISTINCT from `chat::strip_fence`.
 fn nl_fence_strip(s: &str) -> String {
     let mut t = s;
     if let Some(rest) = t.strip_prefix("```") {
@@ -191,7 +191,7 @@ fn nl_fence_strip(s: &str) -> String {
     owned.trim().to_string()
 }
 
-/// Remove `-- line` comments and `/* block */` comments (DOTALL), each → a space (sql/60:61-62).
+/// Remove `-- line` comments and `/* block */` comments (DOTALL), each → a space (theodb_rs/sql/surface/60-nl.sql:61-62).
 fn strip_sql_comments(s: &str) -> String {
     // line comments: from "--" to end-of-line.
     let mut out = String::with_capacity(s.len());
@@ -302,7 +302,7 @@ fn has_do_block(low: &str) -> bool {
     false
 }
 
-/// Recursively collect every `(schema, relation)` from an EXPLAIN (FORMAT JSON) plan tree (sql/60:97-107).
+/// Recursively collect every `(schema, relation)` from an EXPLAIN (FORMAT JSON) plan tree (theodb_rs/sql/surface/60-nl.sql:97-107).
 fn collect_relations(node: &Value, acc: &mut Vec<(String, String)>) {
     match node {
         Value::Object(map) => {

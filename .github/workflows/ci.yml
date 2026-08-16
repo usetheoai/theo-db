@@ -11,8 +11,9 @@ name: CI
 # disparou CI + publish + ci-canary + lint-rust + cassert, cinco runs numa fila serial.
 #
 # A lista abaixo é derivada do que a esteira de fato lê, não de memória:
-#   - `Dockerfile` / `.dockerignore` / `*.control` / `sql/` / `theodb_rs/` — entram na imagem
-#     (conferido nos `COPY` do Dockerfile)
+#   - `Dockerfile` / `.dockerignore` / `vector/` / `theodb_rs/` — entram na imagem
+#     (conferido nos `COPY` do Dockerfile). B-030: o `sql/` de topo e os `*.control` de raiz deixaram
+#     de existir — a superfície do produto vive em `theodb_rs/`, e o shim é a unidade `vector/`.
 #   - `scripts/`   — smoke.sh, migrate-*.sh
 #   - `benchmarks/`— o harness pytest + requirements.txt
 #   - `packaging/` — Dockerfile.regress / .bm25 / .columnar + license-sweep.sh
@@ -47,11 +48,12 @@ on:
     paths:
       - 'Dockerfile'
       - '.dockerignore'
-      - 'Makefile'
-      - 'theodb.control'
-      - 'vector.control'
+      # B-030: `Makefile` e `theodb.control` saíram com o umbrella `theodb`, absorvido pelo `theodb_rs`.
+      # A superfície SQL que eles construíam agora vive em `theodb_rs/sql/surface/`, já coberta pelo
+      # `theodb_rs/**` abaixo. O shim `vector` continua separado e virou unidade autocontida em `vector/`
+      # (control + script de instalação juntos), então o `sql/` de topo deixou de existir.
+      - 'vector/**'
       - 'theodb_rs/**'
-      - 'sql/**'
       - 'scripts/**'
       - 'benchmarks/**'
       - 'packaging/**'

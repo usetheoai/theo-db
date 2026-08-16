@@ -1,0 +1,7 @@
+== sem-stemming (imagem b034) ==
+   stemming ativo: 0  (1 = sim, 0 = não)
+2026-08-13 03:28:04,811 | INFO |TheoDB | sem-stemming    FTS BM25 Performance - MS MARCO Small (100K documents) 116a7dde4b554db3b2719d7cd101276c | 26.8444     1722.5838    0.0039          0.0034          0.8025        0           
+== com-stemming (imagem b044) ==
+   stemming ativo: 1  (1 = sim, 0 = não)
+2026-08-13 03:34:48,101 | INFO |TheoDB | com-stemming    FTS BM25 Performance - MS MARCO Small (100K documents) d5073bfaf3454bcc97a39bfa7cbff284 | 27.6584     1910.3461    0.0035          0.0031          0.8464        0           
+== A/B completo ==

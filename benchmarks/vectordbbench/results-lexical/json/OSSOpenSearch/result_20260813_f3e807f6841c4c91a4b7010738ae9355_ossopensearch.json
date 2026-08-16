@@ -1,0 +1,150 @@
+{
+  "run_id": "f3e807f6841c4c91a4b7010738ae9355",
+  "task_label": "f3e807f6841c4c91a4b7010738ae9355",
+  "results": [
+    {
+      "metrics": {
+        "max_load_count": 0,
+        "insert_duration": 27.4478,
+        "optimize_duration": 31.1803,
+        "load_duration": 58.6281,
+        "qps": 6269.0977,
+        "serial_latency_p99": 0.003,
+        "serial_latency_p95": 0.0026,
+        "recall": 0.7975,
+        "ndcg": 0.691,
+        "mrr": 0.6617,
+        "conc_num_list": [
+          1,
+          5,
+          10,
+          20,
+          30,
+          40,
+          60,
+          80
+        ],
+        "conc_qps_list": [
+          527.3661,
+          2362.2023,
+          3702.9555,
+          5044.4181,
+          5566.2275,
+          5839.6822,
+          6215.7155,
+          6269.0977
+        ],
+        "conc_latency_p99_list": [
+          0.0036199584300379687,
+          0.003778759900014849,
+          0.0051220269999976125,
+          0.008466742560046892,
+          0.011746966840055391,
+          0.014931760839908744,
+          0.023152788020061044,
+          0.030022376120323303
+        ],
+        "conc_latency_p95_list": [
+          0.002806570599932456,
+          0.003110507499945923,
+          0.004124519199967834,
+          0.00657674675007911,
+          0.008997161599882019,
+          0.011489655899958961,
+          0.01709481000007145,
+          0.022077154400267317
+        ],
+        "conc_latency_avg_list": [
+          0.0018940644090618723,
+          0.0021134886166094863,
+          0.0026963109536922106,
+          0.003957104649020061,
+          0.005378013534425783,
+          0.006826927955565741,
+          0.009610819248436674,
+          0.012681509136690229
+        ],
+        "payload_profile": "ids_only",
+        "payload_estimated_bytes_per_query": 200,
+        "inserted_count": 100000,
+        "insert_rows_per_second": 0.0,
+        "insert_completion_seconds": 0.0,
+        "searchable_after_insert_seconds": 0.0,
+        "indexed_after_searchable_seconds": 0.0,
+        "additional_parameters": {
+          "num_per_batch": 100,
+          "load_concurrency": 0
+        },
+        "st_ideal_insert_duration": 0,
+        "st_search_stage_list": [],
+        "st_search_time_list": [],
+        "st_max_qps_list_list": [],
+        "st_recall_list": [],
+        "st_ndcg_list": [],
+        "st_serial_latency_p99_list": [],
+        "st_serial_latency_p95_list": [],
+        "st_conc_failed_rate_list": [],
+        "st_conc_num_list_list": [],
+        "st_conc_qps_list_list": [],
+        "st_conc_latency_p99_list_list": [],
+        "st_conc_latency_p95_list_list": [],
+        "st_conc_latency_avg_list_list": []
+      },
+      "task_config": {
+        "db": "OSSOpenSearch",
+        "db_config": {
+          "db_label": "",
+          "version": "",
+          "note": "",
+          "index_name": "vdb_bench_index",
+          "host": "127.0.0.1",
+          "port": 9201,
+          "user": null,
+          "password": ""
+        },
+        "db_case_config": {
+          "number_of_shards": 1,
+          "number_of_replicas": 0,
+          "refresh_interval": "60s",
+          "force_merge_enabled": true,
+          "metric_type": "BM25",
+          "bm25_k1": null,
+          "bm25_b": null
+        },
+        "case_config": {
+          "case_id": 503,
+          "custom_case": {
+            "dataset_with_size_type": "MS MARCO Small (100K documents)",
+            "payload_profile": "ids_only"
+          },
+          "k": 10,
+          "concurrency_search_config": {
+            "num_concurrency": [
+              1,
+              5,
+              10,
+              20,
+              30,
+              40,
+              60,
+              80
+            ],
+            "concurrency_duration": 30,
+            "concurrency_timeout": 3600,
+            "serial_cooldown": 0.0
+          }
+        },
+        "stages": [
+          "drop_old",
+          "load",
+          "search_serial",
+          "search_concurrent"
+        ],
+        "load_concurrency": 0
+      },
+      "label": ":)"
+    }
+  ],
+  "file_fmt": "result_{}_{}_{}.json",
+  "timestamp": 1786579200.0
+}

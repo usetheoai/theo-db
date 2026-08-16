@@ -1,0 +1,147 @@
+{
+  "run_id": "6ed9bcba3cf64b90ab37ee986ae58434",
+  "task_label": "6ed9bcba3cf64b90ab37ee986ae58434",
+  "results": [
+    {
+      "metrics": {
+        "max_load_count": 0,
+        "insert_duration": 19.6619,
+        "optimize_duration": 125.0913,
+        "load_duration": 144.7532,
+        "qps": 4536.8084,
+        "serial_latency_p99": 0.0038,
+        "serial_latency_p95": 0.003,
+        "recall": 0.96,
+        "ndcg": 0.965,
+        "mrr": 0.0,
+        "conc_num_list": [
+          1,
+          5,
+          10,
+          20,
+          30,
+          40,
+          60,
+          80
+        ],
+        "conc_qps_list": [
+          419.9654,
+          1905.0867,
+          3404.2978,
+          3957.0366,
+          4456.9805,
+          4495.6922,
+          4536.8084,
+          4535.479
+        ],
+        "conc_latency_p99_list": [
+          0.0032336871400593732,
+          0.0036129043501659905,
+          0.004296571600116292,
+          0.00941115787981289,
+          0.013677329500082993,
+          0.018984032469893452,
+          0.031873592600331874,
+          0.04558693523000777
+        ],
+        "conc_latency_p95_list": [
+          0.0029352117500593524,
+          0.003272205000030226,
+          0.003676456999983202,
+          0.007737456899940298,
+          0.010708223000165162,
+          0.014632450749763846,
+          0.024193212000045605,
+          0.033981124150000146
+        ],
+        "conc_latency_avg_list": [
+          0.002376430038462897,
+          0.002616918532312968,
+          0.0029241396525118207,
+          0.0050254536717412365,
+          0.006677841924877855,
+          0.008824509406143793,
+          0.013039242156327631,
+          0.01735647076930388
+        ],
+        "payload_profile": "ids_only",
+        "payload_estimated_bytes_per_query": 200,
+        "inserted_count": 50000,
+        "insert_rows_per_second": 0.0,
+        "insert_completion_seconds": 0.0,
+        "searchable_after_insert_seconds": 0.0,
+        "indexed_after_searchable_seconds": 0.0,
+        "additional_parameters": {
+          "num_per_batch": 100,
+          "load_concurrency": 0
+        },
+        "st_ideal_insert_duration": 0,
+        "st_search_stage_list": [],
+        "st_search_time_list": [],
+        "st_max_qps_list_list": [],
+        "st_recall_list": [],
+        "st_ndcg_list": [],
+        "st_serial_latency_p99_list": [],
+        "st_serial_latency_p95_list": [],
+        "st_conc_failed_rate_list": [],
+        "st_conc_num_list_list": [],
+        "st_conc_qps_list_list": [],
+        "st_conc_latency_p99_list_list": [],
+        "st_conc_latency_p95_list_list": [],
+        "st_conc_latency_avg_list_list": []
+      },
+      "task_config": {
+        "db": "TheoDB",
+        "db_config": {
+          "db_label": "theodb-pg18",
+          "version": "",
+          "note": "",
+          "user_name": "**********",
+          "password": "**********",
+          "host": "127.0.0.1",
+          "port": 55435,
+          "db_name": "theo"
+        },
+        "db_case_config": {
+          "metric_type": "COSINE",
+          "create_index_before_load": false,
+          "create_index_after_load": true,
+          "index": "HNSW",
+          "m": null,
+          "ef_construction": null,
+          "ef_search": 64
+        },
+        "case_config": {
+          "case_id": 50,
+          "custom_case": {},
+          "k": 10,
+          "concurrency_search_config": {
+            "num_concurrency": [
+              1,
+              5,
+              10,
+              20,
+              30,
+              40,
+              60,
+              80
+            ],
+            "concurrency_duration": 30,
+            "concurrency_timeout": 3600,
+            "serial_cooldown": 0.0
+          }
+        },
+        "stages": [
+          "drop_old",
+          "load",
+          "search_serial",
+          "search_concurrent"
+        ],
+        "load_concurrency": 0
+      },
+      "label": ":)"
+    }
+  ],
+  "file_fmt": "result_{}_{}_{}.json",
+  "timestamp": 1786492800.0
+}

@@ -1,3 +1,150 @@
+#
+## 2026-08-12
+
+**b035 — a comparação que só existe com recall casado.**
+
+Acrescentado `benchmarks/b035-theodb-vs-pgvector-pg18.md` — primeira corrida do VectorDBBench com cliente
+próprio, contra pgvector 0.8.6, os dois em PostgreSQL 18.4, num droplet `g-16vcpu-64gb` (o `16c64g` que é o
+rótulo de referência do upstream), destruído ao fim.
+
+**A recall casado (~0,983) o pgvector faz +16% de QPS.** A leitura ingênua da mesma tabela — `ef_search=64`
+dos dois lados, que *parece* a comparação justa — diria TheoDB +26%, porque nesse ponto o TheoDB entrega
+recall 0,96 contra 0,9835. Ele é mais rápido porque procura menos.
+
+Registro isto por acréscimo e com destaque porque o defeito é sedutor: o parâmetro estava igual dos dois
+lados, e mesmo assim o ponto de operação não estava.
+
+**Não contradiz o [m72](benchmarks/m72-qps-multiclient.md)**, que mede +11% para o índice próprio a 1M × 128d
+e recall ~0,91. São regimes diferentes (50K × 1536d, recall ~0,983 aqui) e o M72 já se declarava num regime
+favorável. O que a corrida mostra é que aquele resultado **não generaliza** — não que fosse falso.
+# 2026-08-12
+
+## 2026-08-13
+
+**b045 — a paridade lexical passa de observada a demonstrada.**
+
+Teste de permutação pareada sobre **6.980 consultas**: TheoDB vs Elasticsearch **p=0,477**, vs OpenSearch
+**p=0,466**, com IC 95% de [−0,0011, +0,0025] em NDCG e `d_z` de 0,009. **6.484 consultas empatam
+exatamente**; as 496 restantes se dividem 233 a 263.
+
+**É a espécie certa de não-significância** — e a ferramenta distingue as duas explicitamente, porque tratá-las
+como iguais é como se afirma paridade sem tê-la medido: `p` alto com IC **estreito** em torno de zero é
+evidência de equivalência; `p` alto com IC **largo** é falta de poder.
+
+O dado por consulta veio **por fora do arnês**: ele computa métrica por consulta em `serial_runner.py` e a
+descarta no `return`, e persistí-la lá atravessaria o núcleo que a Política de Fork manda não tocar. O
+avaliador reusa a porta `VectorDB.search_documents` e as funções de métrica do próprio arnês — idênticas por
+construção — e a média por consulta foi **verificada contra o agregado publicado** antes de qualquer `p` sair.
+
+**O guard do [[B-041]] disparou de verdade** durante a execução: apontei o avaliador para um nome de coleção
+errado e o cliente recusou buscar, em vez de devolver 6.980 zeros que virariam NDCG 0.
+
+**O que segue sem teste:** os 4,3× de QPS (QPS não tem valor por consulta — o caminho é N corridas
+repetidas) e o +5,6% do stemming (os arrays do lado sem stemming não foram preservados).
+
+## 2026-08-13
+
+**b047 — a comparação lexical real, e a terceira variação do mesmo erro.**
+
+TheoDB × Elasticsearch 9.1.2 × OpenSearch 2.17.1, MS MARCO 100K, mesma máquina, mesma corrida. **Com o
+analisador casado, a qualidade é paridade** (NDCG 0,7351 contra 0,7343 e 0,7344 — terceira casa decimal) e o
+**Elasticsearch faz 4,3× o nosso QPS**, com p99 2,3× menor. Somos **2× mais rápidos na carga**.
+
+**A tabela que eu quase publiquei dizia +6,4% de NDCG para nós.** Era product-default: o mapeamento que o
+arnês configura para Elastic e OpenSearch usa o analisador `standard`, que **não stemiza**. Dando `english`
+aos dois, o NDCG deles sobe de 0,6908 para 0,7343 e a vantagem some inteira.
+
+É a terceira variação do mesmo erro em três ciclos: no b035 o **parâmetro** era igual e o ponto de operação
+não; no b044 o **rótulo** era igual e a máquina não; aqui a **configuração padrão** era a de cada um e o
+pré-processamento não. O ADR-0061 passa a exigir também o pré-processamento casado.
+
+As duas rodadas ficam publicadas, porque respondem perguntas diferentes: product-default diz o que o usuário
+recebe ao instalar; analisador casado diz qual motor ranqueia melhor.
+
+**Dois defeitos de ferramenta no caminho:** o cliente OpenSearch do arnês era inrodável (`"30m"` passado como
+timeout numérico — corrigido no fork, candidato a PR upstream), e o `elasticsearch-py` não-pinado instala 9.x,
+que contra servidor 8.15 dá um 400 opaco na criação do índice.
+
+## 2026-08-13
+
+**b044 — stemming entra, e o controle na mesma máquina desfaz uma conclusão minha.**
+
+A/B controlado (mesma máquina, mesmo caso, mesmo dataset em cache, só a imagem muda): NDCG@10 **+5,6%**,
+recall **+5,5%**, MRR **+5,5%** — e **QPS +10,9%**, com p99 10% menor. Remover stopwords encurta as listas
+de postings mais do que o stemmer as alonga. O único custo é o build: +1,03 s sobre 100.000 documentos.
+
+**Minha primeira leitura dizia −31,8% de QPS e estava errada.** Eu comparara a corrida com stemming (Xeon
+8168) contra a corrida sem, feita antes noutro droplet (Xeon 8358). NDCG/recall/MRR são independentes de
+hardware; QPS e latência não são. Refeito na mesma máquina, o sinal inverte.
+
+É o erro do b035 num eixo novo: lá o parâmetro era igual e o ponto de operação não; aqui o rótulo era igual
+e a máquina não. O ADR-0061 já exigia mesma máquina para concorrentes — vale igual para antes-e-depois do
+mesmo motor, e o ADR passa a dizer isso.
+
+**Desenho que tornou tudo isso barato:** o analisador é registrado sob nome próprio (`theodb_en`), nunca
+redefinindo `default`. O Tantivy serializa o nome no schema de cada índice, então índice antigo continua
+respondendo igual, sem migração — provado por teste que constrói um índice legado e verifica que ele NÃO
+stemiza.
+
+## 2026-08-13
+
+**ADR-0061 — todo pilar mensurável tem benchmark oficial público.**
+
+Decisão do owner depois das duas primeiras corridas: arnês de terceiros (não caseiro), concorrentes na mesma
+máquina e na mesma corrida, métrica de qualidade ao lado de toda métrica de velocidade, e ponto de operação
+casado — não parâmetro casado.
+
+**A decisão diz o próprio limite:** não é mecanizada (nenhum hook verifica) e ainda não inclui significância
+estatística. Enquanto o B-045 estiver aberto, toda diferença publicada é observada, não demonstrada.
+
+**Uma correção de número publicado, feita no mesmo dia.** O artefato do b035 dizia "pgvector constrói o
+índice 2,7× mais rápido", citando `load_duration` — que soma inserção e construção. Decomposto: a inserção
+está em paridade (18,80 s contra 19,66 s) e o **build é 3,6× mais lento** (35,09 s contra 125,09 s). A
+redação anterior atribuía à carga um custo que é do build.
+
+## 2026-08-13
+
+**b040 — o pilar lexical entra no arnês, e o handicap vem antes do número.**
+
+Acrescentado `benchmarks/b040-theodb-fts-msmarco.md`. MS MARCO 100K, num droplet `g-16vcpu-64gb` destruído
+ao fim: **NDCG@10 0,6962, recall@10 0,8025, MRR 0,667**, 1.616 QPS de pico, p99 serial 4,8 ms.
+
+O artefato abre declarando que o TheoDB **não faz stemming**, não tem operadores de consulta e não expõe
+`k1`/`b` — porque Elasticsearch e OpenSearch, os motores da mesma tabela, stemmizam por padrão. Um número de
+NDCG lido sem isso atribui ao motor de ranqueamento uma diferença que é de pré-processamento.
+
+**Não há comparação com outro motor neste artefato**, e isso é deliberado: citar os números publicados do
+leaderboard ao lado destes compararia corridas em máquinas, versões e datas diferentes — o mesmo erro que o
+b035 documentou no eixo vetorial.
+
+Correção medida a caminho: a nota do B-004 dizia que "a superfície não expõe busca multi-termo". **Falso como
+escrito** — multi-termo funciona com scores acumulados corretos. O que falta são operadores e stemming.
+
+**B-030/B-031 — uma extensão, e o que a wiki teve de deixar como estava.**
+
+`CREATE EXTENSION theodb CASCADE` deixou de funcionar: o umbrella `theodb` foi absorvido pelo
+`theodb_rs` e não existe mais como extensão instalável. **13 linhas em 12 arquivos** foram atualizadas
+para `theodb_rs` — os guias e as páginas de feature que *instruem* o leitor a instalar. Um guia que manda
+rodar um comando que falha é pior que nenhum guia.
+
+**Três ocorrências ficaram deliberadamente intactas**, e a distinção é a mesma que o bundle já aplica em
+outros pontos: elas não instruem, elas **registram**.
+
+* `wiki/decisions/0029-m70-drop-pgvector.md` (duas) — o ADR descreve uma decisão **como ela foi tomada**,
+  num momento em que `CREATE EXTENSION theodb` era o comando correto. Reescrevê-lo faria o registro
+  afirmar que a decisão de 2026 previa um mundo que só passou a existir agora.
+* `wiki/benchmarks/m184-pilares-superficie-medida-verdict.md` — o veredito registra **o comando que foi de
+  fato executado** na medição. Trocá-lo transformaria um relato de execução em ficção, exatamente o
+  `cobertura-alegada-sem-execucao` que este acervo documenta como classe de defeito.
+
+**Correção registrada por acréscimo.** Durante a análise que originou o B-031, afirmei — citando o
+cabeçalho de `theodb_rs/sql/schema_snapshot.sql` — que o oráculo da cadeia de upgrade não cobre ACL.
+**Está errado.** O arquivo tem um segundo bloco que faz snapshot de `proacl` e declara fechar a lacuna; o
+cabeçalho é que ficou obsoleto quando a lacuna foi fechada. O problema real é outro e permanece: quem
+comparava aquele snapshot contra uma baseline era um script removido em `8605677`, de modo que a cobertura
+existia como SQL e não como verificação. Fica por acréscimo porque a leitura errada chegou a ser
+comunicada ao owner e baseou a redação inicial do item de backlog.
+
 ## 2026-08-11
 
 * **Creation**: `benchmarks/b015-cinco-contadores-em-zero-duas-causas.md` — a medição do B-015. Registra
@@ -61,3 +208,15 @@
 * **Nenhum conceito carrega `verified`.** Todo o conteúdo foi gerado por agente a partir dos documentos de origem; nenhuma confirmação humana ocorreu. Semear esse campo inflaria o tier de confiança que um consumidor calcula.
 * **A entity pass é fechada sobre os nomes que os conceitos ligam.** Nomes que aparecem apenas dentro dos conceitos de entidade (por exemplo, bibliotecas citadas dentro de `technologies/`) permaneceram como prosa, conforme a regra de recursão de um anel.
 * **O acervo de referências primárias do projeto não foi convertido.** O catálogo de papers e repositórios clonados citado no `CLAUDE.md` está fora do versionamento e fora do escopo desta conversão.
+
+## 2026-08-13 — B-036: `m` e `ef_construction` deixam de ser constantes de compilação
+
+`features/02-indice-hnsw.md` **atualizado** (não duplicado): a seção "A armadilha dos parâmetros de build"
+descrevia como verdade permanente algo que era estado — `WITH (m = …)` falhava com `unrecognized parameter`.
+Virou "Parâmetros de build", com a tabela de faixas, os quatro caminhos que honram o valor, e o teto de `m`
+derivado do page layout (39, não o 100 do pgvector, cujo teto de nível é outro).
+
+Acrescentado à seção de qualidade do grafo o honest-negative que o knob torna relevante: **`ef_construction`
+maior não é sempre melhor** — o M57 mediu 64→200 *piorando* o recall a 100k–500k, e `m` 16→32 idem (0,952).
+O knob existe para ser varrido por medição, não subido no escuro; sem essa linha ao lado da tabela, a tabela
+convida exatamente ao erro que o projeto já pagou.

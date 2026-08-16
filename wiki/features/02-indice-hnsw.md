@@ -1,11 +1,11 @@
 ---
 type: Feature
 title: Índice HNSW (theodb_hnsw)
-description: Access method HNSW próprio, page-native com travessia sob demanda; o recall se ajusta em tempo de query por ef_search, não por opções de build.
+description: Access method HNSW próprio, page-native com travessia sob demanda; o recall se ajusta em tempo de query por ef_search e, desde o B-036, a qualidade do grafo por m e ef_construction no CREATE INDEX.
 resource: git:f7c7b93:docs/features/02-indice-hnsw.md
 tags: [feature, indice, hnsw, ann, access-method]
 feature_status: entregue
-milestone: M21+M35
+milestone: M21+M35+B-036
 generated: { by: claude-code/opus-5, at: 2026-08-07T16:12:05Z }
 sources:
   - id: feat02
@@ -21,7 +21,7 @@ recall contra o HNSW do [pgvector](/technologies/pgvector.md) como baseline.
 # Criar o índice
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
+CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 
 CREATE INDEX products_hnsw
 ON products
@@ -40,18 +40,45 @@ Aplicações que escrevem a sintaxe do pgvector (`USING hnsw (col vector_cosine_
 alias descrito no [ADR 0058](/decisions/0058-pgvector-compat-shim.md) — que aponta para **este mesmo
 handler**, sem segunda implementação.
 
-# A armadilha dos parâmetros de build
+# Parâmetros de build
 
-**`m` e `ef_construction` NÃO são opções de `WITH`.** São constantes do build — `m` fixo em 16 e
-`ef_construction` fixo em 64 —, e o segundo só muda por variável de ambiente, para benchmarks.
+**`m` e `ef_construction` são opções de `WITH` desde o B-036.** Até então eram constantes de compilação
+(16 e 64), e a segunda só mudava por variável de ambiente do servidor — o que fazia `CREATE INDEX … WITH
+(m = 32)` falhar com `unrecognized parameter "m"`, a confusão mais provável para quem vinha do
+[pgvector](/technologies/pgvector.md).
 
-Passar `WITH (m = …)` ou `WITH (ef_construction = …)` faz o `CREATE INDEX` **falhar** com
-`unrecognized parameter`. Esta é a confusão mais provável para quem vem do pgvector.
+```sql
+CREATE INDEX products_hnsw ON products
+USING theodb_hnsw (description_embedding theodb_hnsw_cosine_ops)
+WITH (m = 32, ef_construction = 200);
+```
 
-As opções de `WITH` que este access method aceita são de **quantização e storage**, compartilhadas com
-os demais: `sbq_bits`, `pq_subspaces`, `pq_bits` (que só aceita `4`), `aq_threshold`,
-`separate_storage` e `refine`. Sem nenhuma delas, o índice guarda os vetores em precisão plena. Ver
+| Opção | Default | Faixa | O que controla |
+|---|---|---|---|
+| `m` | 16 | 2 – 39 | grau máximo de vizinhos acima do nível 0 (`m0 = 2m` no nível de solo) |
+| `ef_construction` | 64 | 4 – 1000 | tamanho da lista de candidatos durante o build |
+
+Os defaults **coincidem com os do pgvector**, o que mantém comparável toda medição já publicada. Valor
+fora da faixa é **recusado nomeando a opção**, não truncado em silêncio.
+
+**O teto de `m` é 39, e não o 100 do pgvector**, porque é derivado do nosso page layout: no pior caso um
+nó ocupa `HNSW_MAX_LEVEL·m + m0 = 34m` slots de 6 bytes, e a tupla de vizinhos tem de caber nos 8.168
+bytes úteis de uma página. Copiar o número do pgvector — cujo teto de nível é outro — daria um índice que
+não cabe.
+
+O valor pedido é honrado nos **quatro** caminhos que constroem grafo: o build inicial, o índice vazio de
+tabela `UNLOGGED`, o INSERT posterior e o fold do VACUUM. Os dois últimos importam mais do que parece:
+`ef_construction` **não é persistido em lugar nenhum**, então um índice que voltasse ao default a cada
+INSERT — ou que o VACUUM reconstruísse com outro `m` — não teria nada no disco que denunciasse.
+
+As demais opções de `WITH` são de **quantização e storage**, compartilhadas com os demais access methods:
+`sbq_bits`, `pq_subspaces`, `pq_bits` (que só aceita `4`), `aq_threshold`, `separate_storage` e `refine`.
+Sem nenhuma delas, o índice guarda os vetores em precisão plena. Ver
 [quantização vetorial](/features/19-quantizacao-vetorial.md).
+
+**Ressalva honesta:** o item entrega a *capacidade* de variar a qualidade do grafo, não a evidência de que
+variar ajuda. Se `m=32` bate `m=16` a 100k–1M é pergunta em aberto, e é o que o benchmark do B-046 existe
+para medir.
 
 # O knob de recall é em tempo de query
 
@@ -87,6 +114,10 @@ Duas decisões medidas afetam diretamente o recall deste índice:
 - O critério de recall do projeto é **paridade com o pgvector**, e não um valor absoluto
   ([ADR 0030](/decisions/0030-m60-recall-parity-not-absolute-099.md)) — porque o próprio pgvector não
   alcança 0,99 no corpus medido.
+- **`ef_construction` maior não é sempre melhor.** O M57 mediu que subir de 64 para 200 **piorou** o
+  recall a 100k–500k, e `m` de 16 para 32 também piorou (0,952). É por isso que a faixa é larga e o
+  default é conservador: o knob agora existe para ser *varrido por medição*, não para ser subido no
+  escuro.
 
 # Manutenção
 

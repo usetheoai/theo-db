@@ -11,7 +11,7 @@ sources:
     title: Migração pgvector → tipo vector own-code
 ---
 
-> **Instalações novas não precisam disto.** `CREATE EXTENSION theodb CASCADE` já instala o tipo próprio,
+> **Instalações novas não precisam disto.** `CREATE EXTENSION theodb_rs CASCADE` já instala o tipo próprio,
 > sem pgvector. Este playbook é **só para upgrades** de bancos que já têm colunas `vector` do
 > [pgvector](/technologies/pgvector.md).
 
@@ -40,7 +40,7 @@ DROP EXTENSION IF EXISTS vectorscale CASCADE;
 DROP EXTENSION IF EXISTS vector CASCADE;
 
 -- 3. Instalar o TheoDB (provê public.vector próprio — agora sem colisão).
-CREATE EXTENSION theodb CASCADE;
+CREATE EXTENSION theodb_rs CASCADE;
 
 -- 4. Converter de volta. O cast rejeita NaN e infinito, e valida a dimensão.
 ALTER TABLE minha_tabela ALTER COLUMN emb TYPE vector USING emb::vector;

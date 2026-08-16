@@ -652,4 +652,33 @@ mod tests {
         let recall = total / nq as f64;
         assert!(recall >= 0.85, "parallel build recall@10 too low: {recall:.3}");
     }
+
+    /// B-036 — o elo que nenhum teste de SQL alcança: `ef_construction` NÃO é persistido em lugar nenhum, então
+    /// provar que a reloption chega ao acessor não prova que o builder a USA. Aqui, mesmo corpus, mesmo `m`,
+    /// mesma semente, só `efc` muda — e o grafo resultante tem de mudar. Se este teste passar a falhar, `efc`
+    /// virou um knob inerte, e o `p` de qualquer varredura de `efc` estaria medindo ruído.
+    #[pgrx::pg_test]
+    fn the_builder_actually_consumes_ef_construction() {
+        let corpus: Vec<(i64, Vec<f32>)> = (0..300)
+            .map(|i| {
+                (
+                    i as i64,
+                    (0..8)
+                        .map(|j| ((i * 7 + j * 13) % 29) as f32 * 0.3 + i as f32 * 0.01)
+                        .collect(),
+                )
+            })
+            .collect();
+        let low = HnswIndex::build(&corpus, 16, 8, Metric::L2, 42);
+        let high = HnswIndex::build(&corpus, 16, 400, Metric::L2, 42);
+        assert_ne!(
+            low.to_bytes(),
+            high.to_bytes(),
+            "efc=8 e efc=400 produziram grafos idênticos — `ef_construction` não está sendo consumido"
+        );
+        // E o mesmo `efc` tem de produzir o MESMO grafo: sem isso, a diferença acima seria não-determinismo,
+        // não efeito do parâmetro. É o controle que separa as duas explicações.
+        let again = HnswIndex::build(&corpus, 16, 400, Metric::L2, 42);
+        assert_eq!(again.to_bytes(), high.to_bytes(), "build é determinístico dada a semente");
+    }
 }

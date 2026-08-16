@@ -2,7 +2,7 @@
 # Owns the Rust `theodb.embed` during the incremental plpython3u→Rust rewrite (plan ADR D1).
 # The SQL-only `theodb` umbrella no longer defines theodb.embed (removed from sql/30 in M17).
 comment = 'TheoDB own Rust extension (pgrx): theodb.embed in Rust (M17)'
-default_version = '1.4.0'
+default_version = '1.5.0'
 module_pathname = '$libdir/theodb_rs'
 relocatable = false
 # theodb.embed makes server-side outbound HTTP to the configured endpoint — privileged, like the

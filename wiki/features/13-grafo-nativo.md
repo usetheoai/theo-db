@@ -35,7 +35,7 @@ query.
 # Uso
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
+CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 
 CREATE TABLE friendship (src bigint, dst bigint);
 INSERT INTO friendship VALUES (0,1),(1,2),(2,3),(3,4),(0,2),(0,3);

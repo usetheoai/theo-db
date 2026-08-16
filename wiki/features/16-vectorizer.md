@@ -30,7 +30,7 @@ vectorizer não fica refém da latência do endpoint.
 # Configuração
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
+CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 
 ALTER SYSTEM SET theodb.embedding_endpoint = 'https://api.openai.com/v1/embeddings';
 ALTER SYSTEM SET theodb.embedding_api_key  = 'sk-...';

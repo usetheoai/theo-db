@@ -1,0 +1,7 @@
+droplet: g-16vcpu-64gb nyc3
+ip: 164.90.141.31
+vcpu: 16
+Model name:                              Intel(R) Xeon(R) Platinum 8168 CPU @ 2.70GHz
+ram_gb: 62
+kernel: 5.15.0-186-generic
+Docker version 29.7.1, build e9452d6

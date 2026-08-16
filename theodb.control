@@ -1,5 +1,0 @@
-comment = 'TheoDB AI + vector surface (embed, hybrid search, generative ai.*, NL->SQL, model registry)'
-default_version = '1.6'
-requires = 'theodb_rs'
-superuser = true
-relocatable = false
