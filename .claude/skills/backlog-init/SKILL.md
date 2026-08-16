@@ -82,7 +82,17 @@ Structure, in this order:
 1. **Header** — what the registry is, and the one-line rule that governs it: *ids are monotonic and never renumbered*.
 2. **How an item gets here** — the two producers (`/backlog-item` human, `/discover --sweep` measured), pointing at `cycle-backlog.md` for the schema rather than restating it. The registry is data; the contract lives in the rule.
 3. **Domain routing table** — as confirmed in Step 2, with the exclusions and their reasons.
-4. **`## Items`** — empty, with the next free id declared as `B-001`.
+4. **`## Index`** — the three-bucket summary (`cycle-backlog.md § The index that opens the
+   registry`). Do **not** hand-write it; run it, even on an empty registry:
+
+   ```bash
+   python3 .claude/skills/backlog-review/scripts/backlog_index.py BACKLOG.md --write
+   ```
+
+   Generating it now, over zero items, is what makes the section exist before anyone has a reason
+   to skip it. `check_backlog_structure.py` treats an absent index as stale, so a registry created
+   without one is born non-conformant.
+5. **`## Items`** — empty, with the next free id declared as `B-001`.
 
 Seed **no items**. An item nobody filed has no `why_now`, no DoD and no owner — it is a placeholder that will be inherited as though it were a decision.
 

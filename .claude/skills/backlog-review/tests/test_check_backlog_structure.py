@@ -224,3 +224,30 @@ def test_every_finding_declares_its_kind(tmp_path: Path) -> None:
     assert report["findings"]
     for f in report["findings"]:
         assert f["kind"] in ("deterministic", "heuristic"), f
+
+
+def test_a_duplicated_status_is_a_blocker(tmp_path: Path) -> None:
+    """Two `status:` lines leave the block with two answers, and every reader takes the last.
+
+    Measured on theo-db: B-021 carries `raw` then `triaged`, B-022 `planned` then `raw`. The
+    index buckets on status, so an ambiguous one makes the summary arbitrary rather than
+    wrong-in-a-way-you-can-see.
+    """
+    backlog = write_backlog(tmp_path, item_block("B-001", status="raw", extra="status: triaged\n"))
+    report = check_backlog(backlog)
+    dup = [f for f in report["findings"] if f["check"] == "duplicate_field"]
+    assert len(dup) == 1
+    assert dup[0]["severity"] == "blocker"
+    assert "raw then triaged" in dup[0]["message"]
+
+
+def test_other_repeated_fields_are_not_reported(tmp_path: Path) -> None:
+    """`partial_progress` four times on theo-cloud's B-031 is an append-one-line-per-increment
+    log the team keeps on purpose, and `evidence: none-yet` followed by a pointer is an item that
+    advanced. A gate that reports those is one people learn to override."""
+    backlog = write_backlog(
+        tmp_path,
+        item_block("B-001", extra="partial_progress: primeira metade\npartial_progress: segunda\n"),
+    )
+    report = check_backlog(backlog)
+    assert [f for f in report["findings"] if f["check"] == "duplicate_field"] == []

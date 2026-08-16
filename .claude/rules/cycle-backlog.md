@@ -156,6 +156,33 @@ Intake deliberately has **no evidence gate**. Requiring evidence here would coll
 - **`dod` that restates the title.** "DoD: the trace explorer being faster" is the title again, not a criterion.
 - **Treating `suggested_mode` as binding.** It is the filer's guess. Locking DISCOVER to it defeats the purpose of measuring.
 
+## The index that opens the registry
+
+`BACKLOG.md` MUST carry an `## Index` section immediately before the item blocks, listing **every**
+item — one row each, linked to its own detail block — grouped into three buckets:
+
+| Bucket | Statuses | The question it answers |
+|---|---|---|
+| **Open** | `raw`, `triaged` | registered, measured or not, but nothing is being built |
+| **In flight** | `planned` | a plan exists; work is under way |
+| **Closed** | `shipped`, `killed` | the chain ended — and `killed` is a *successful* ending |
+
+`triaged` sits under **Open** deliberately. Measurement has run, but no plan exists, so nothing is
+in flight; folding it into the in-flight count would make that number answer a different question
+than the one people ask of it.
+
+**The index is generated, never written.** `skills/backlog-review/scripts/backlog_index.py --write`
+derives it from the blocks; `--check` exits 1 when it has drifted. `check_backlog_structure.py`
+reports `index_stale` (major) when the file's index does not match the one the generator would
+produce, and treats **absent as stale** — otherwise a registry opts out of the check by never
+having the section, which is how the four registries in this ecosystem reached 592 items with
+zero index rows.
+
+This is not ceremony. A summary that disagrees with the items below it is worse than no summary:
+a reader stops at the summary, so a wrong one reports absence where evidence exists — the same
+failure `rules/knowledge-base-location.md` records for a split knowledge-base. Nothing forces the
+index and the items to move together, so the gate is what keeps them honest.
+
 ## Output
 
 - `BACKLOG.md` at the umbrella root — the single registry, spanning all repos in the inventory.
