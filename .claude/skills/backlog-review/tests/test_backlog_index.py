@@ -133,6 +133,23 @@ class TestPlacement:
         twice = apply_index(once, render_index(once, _parse_items(once)))
         assert twice.count(START) == 1
 
+    def test_it_does_not_land_inside_another_derived_block(self) -> None:
+        """`theo` opens its BACKLOG with a derived block of its own titled `## Itens abertos`.
+
+        Anchoring on the registry heading's TEXT matched that heading, so the index was inserted
+        inside somebody else's generated block — and the next regeneration of it ate the
+        insertion silently. `--write` reported success and the marker was gone afterwards.
+        The anchor is now a position (the last heading before the first item), not a name.
+        """
+        body = (
+            "# Backlog\n\n"
+            "<!-- OPEN-INDEX:BEGIN -->\n\n## Itens abertos\n\n| x |\n\n<!-- OPEN-INDEX:END -->\n\n"
+            "## Items\n\n"
+        ) + item_block("B-001")
+        out = apply_index(body, render_index(body, _parse_items(body)))
+        assert out.index("<!-- OPEN-INDEX:END -->") < out.index(START)
+        assert out.index(START) < out.index("## Items")
+
 
 class TestUnknownStatus:
     def test_an_unknown_status_is_surfaced_not_swallowed(self, tmp_path: Path) -> None:

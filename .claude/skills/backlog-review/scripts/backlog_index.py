@@ -141,12 +141,18 @@ def apply_index(content: str, index_block: str) -> str:
         _, _, tail = rest.partition(END)
         return head + index_block + tail
 
-    # `Items`, `Itens`, `Itens abertos` — all three are on disk in this ecosystem right now, so
-    # anchoring on one spelling would silently append the index to the end of the file for the
-    # other two, which is the one place nobody reads.
-    marker = re.search(r"^##\s+Ite[mn]s\b.*$", content, re.MULTILINE)
-    if marker:
-        cut = marker.start()
+    # Anchored STRUCTURALLY — on the heading that immediately precedes the first item block —
+    # rather than on the registry heading's text. Matching `## Ite[mn]s` looked equivalent and was
+    # not: `theo` opens its file with a derived block of its own titled `## Itens abertos`, so the
+    # text match landed the index INSIDE that block, where the next regeneration of it silently
+    # ate the insertion. Measured: `--write` reported success and the marker was absent afterwards.
+    # Names drift and repeat; "the last heading before the first item" is a position, and positions
+    # do not.
+    first_item = BLOCK_RE.search(content)
+    if first_item:
+        headings = [m for m in re.finditer(r"^##\s+.*$", content, re.MULTILINE)
+                    if m.start() < first_item.start()]
+        cut = headings[-1].start() if headings else first_item.start()
         return content[:cut] + index_block + "\n\n" + content[cut:]
     return content.rstrip() + "\n\n" + index_block + "\n"
 
