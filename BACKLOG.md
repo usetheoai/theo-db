@@ -2117,3 +2117,40 @@ dod:
 
 > Registrado 2026-08-13 a partir de pergunta direta do owner ("nosso banco de dados suporta PgBouncer?"). A
 > pergunta não tinha resposta no projeto — e a ausência é o achado tanto quanto a análise.
+
+## B-056 — O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito   [ ]
+
+domain: theo-db
+repo: theo-db
+suggested_mode: review
+source: human
+evidence: medido em 2026-08-13/14. O Stop hook do `/goal` bloqueou o encerramento **cinco vezes seguidas** com
+a mesma razão, depois de o trabalho estar entregue, commitado e empurrado. Na quinta, ele **concede o ponto
+explicitamente**: *"The condition as stated is not satisfied by transcript evidence alone; it is satisfied by
+external git history and disk artifacts, which the hook cannot directly verify within this conversation
+boundary."* Ou seja: o gate reconhece que a condição está cumprida no repositório e bloqueia mesmo assim,
+porque só enxerga a janela de conversa. As respostas anteriores dele pediam, em texto, "re-demonstration of
+code changes, RED→GREEN cycles, per-item build results **in this transcript**" — para 12 itens já entregues em
+`73162d8` e `2daac5b`→`1dbf7f8`.
+why_now: o custo não é o incômodo, é o **incentivo**. Um gate que só aceita evidência dentro da janela empurra
+para (a) refazer trabalho entregue, que a diretiva do owner proíbe em texto ("NUNCA FAÇA WORKAROUNDS, NUNCA
+TOME O CAMINHO MAIS CURTO"), ou (b) inflar a conversa com re-execuções para caber na janela — que é
+performance de completude, exatamente a classe que o [[B-048]] persegue no produto. Nesta sessão eu escolhi
+(c): consolidar a evidência em `knowledge-base/maintenance-runs/` e re-executar as verificações. O gate
+recusou as três. E há um agravante de método: o `cycle-acceptance.md` já estabelece que **o veredito é
+computado por script a partir de artefato em disco, nunca asserido pelo agente** — o gate do `/goal` faz o
+oposto, julgando por leitura de prosa.
+status: raw
+dod:
+  - o gate lê **estado do repositório** (commits, artefatos em `knowledge-base/`, status no `BACKLOG.md`) e não
+    a janela de conversa — provado por um caso em que o trabalho está commitado e a sessão encerra
+  - a condição de parada aceita o **registro de execução** (`maintenance-runs/*.md`) como evidência de primeira
+    classe, que é o formato que o próprio `cycle-maintenance.md` define para isto
+  - existe um teto de reprovações repetidas com a MESMA razão: N bloqueios idênticos escalam para o humano em
+    vez de repetir, porque um gate que repete a mesma recusa deixou de ser sinal — a lição textual do [[B-039]]
+  - o custo é medido: quantos turnos e quantos minutos os bloqueios repetidos consumiram nesta sessão
+
+> Registrado 2026-08-14 pelo ciclo Tier 0 + Tier 1, que terminou entregue e bloqueado ao mesmo tempo. **É um
+> item sobre o ferramental do ciclo, não sobre o produto** — e vale porque o ferramental decide o que o
+> trabalho parece ser. Um gate que pede para refazer o feito não protege qualidade: ele treina a produzir
+> aparência de execução, que é a única coisa que ele sabe ler.
