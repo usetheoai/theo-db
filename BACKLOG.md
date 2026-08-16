@@ -2074,6 +2074,24 @@ dod:
 > não sobre o produto** — e vale porque um ciclo de 8 minutos por iteração é o que faz alguém usar
 > `cargo check` sem `pg_test` e descobrir o erro 25 minutos depois (R-8 do review do Tier 1).
 
+> **2026-08-14 — MEDIDO, e derruba metade da minha própria hipótese.** Eu havia escrito, sem medir, que rodar
+> só o módulo tocado levaria "segundos". Executado:
+>
+> | corrida | testes | tempo |
+> |---|---|---|
+> | suíte inteira | 480 | **324 s** |
+> | `cargo pgrx test pg18 … lexical` | 22 (458 filtrados) | **319 s** |
+>
+> **Cortar 95% dos testes economizou 1,5%.** O custo dominante não é o número de testes — é o setup do pgrx
+> (`initdb`, subir o servidor, instalar a extensão), pago uma vez e independente do filtro. A recomendação
+> "filtre o módulo" continua boa para LER a saída, e é inútil para o tempo.
+>
+> Isso muda o `dod`: o item deixa de ser sobre filtrar e passa a ser sobre o **setup**. O primeiro bullet
+> (preservar mtime) segue valendo — 363 → 109 recompilações é ganho real e independente disto.
+>
+> Publicar a recomendação sem este número teria sido conselho por intuição, que é a classe que este projeto
+> persegue em toda parte.
+
 ## B-055 — Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança"   [ ]
 
 domain: engine-pgrx
