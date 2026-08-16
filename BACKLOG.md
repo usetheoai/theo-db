@@ -1600,7 +1600,7 @@ suggested_mode: bug
 source: discover-evolve
 evidence: medido em 2026-08-12 contra `theodb:b034`. `SELECT count(*) FROM bm25_search(999,'lazy dog',5)` — onde 999 nunca passou por `bm25_build` — devolve **0**, sem erro nem aviso. O catálogo sabe a diferença: `theodb.lexical_index_meta` tem uma linha por índice construído (`index_id`, `generation`), e o 999 não está lá. A informação existe; a função apenas não a consulta. Contraste medido no mesmo banco: índice 102, construído, devolve resultados.
 why_now: **zero resultados é indistinguível de "nada casou"**, e essa é a forma mais cara de falhar num pilar de busca. Uma aplicação que esqueceu o `bm25_build` — ou que o perdeu num restore, ou cujo índice foi construído com outro `index_id` — não recebe erro: recebe silêncio, e conclui que o corpus não tem o documento. É a mesma classe do B-034 (botão aceito que não faz nada) e do achado do B-035 (cliente que aceitava o banco errado), agora no pilar lexical. Descoberto ao construir o cliente FTS do [[B-040]]: o cliente teve de consultar `lexical_index_meta` por conta própria para conseguir falhar alto, o que é a evidência de que a informação está no lugar certo e a função no lugar errado.
-status: triaged
+status: planned
 dod:
   - `bm25_search` sobre `index_id` ausente de `theodb.lexical_index_meta` levanta erro tipado nomeando o `index_id` e dizendo que ele nunca foi construído — provado por teste que hoje falharia
   - índice construído e depois **esvaziado** (corpus sem documentos) continua devolvendo zero linhas **sem** erro: é resultado legítimo, e o teste distingue os dois casos
@@ -1631,6 +1631,19 @@ dod:
 > precisa: ausente → erro; presente com zero hits → resultado legítimo.
 >
 > Oportunidade: `.claude/knowledge-base/discoveries/opportunities/b041-b048-silencio-opportunity.md`
+
+> **2026-08-13 — `triaged` → `planned`. ENTREGUE.** `bm25_search` sobre `index_id` sem linha em
+> `theodb.lexical_index_meta` levanta erro tipado nomeando o id. Os dois bullets do `dod` fechados, e o segundo
+> é o que importa: **índice construído sobre corpus vazio continua devolvendo zero linhas sem erro** —
+> `search_on_built_but_empty_index_returns_zero_rows_without_error` existe precisamente porque a implementação
+> ingênua (errar quando não há documento) reprovaria ali.
+>
+> O custo do guard é zero consulta a mais: `read_generation` já era chamada por busca. O que mudou é o que se
+> faz com o resultado.
+>
+> Suíte: **480 passed; 0 failed**. Review:
+> `.claude/knowledge-base/reviews/b041-b048-silencio-review-2026-08-13.md` (`READY_TO_MERGE`).
+> `planned` e não `shipped` porque a última release é a **v0.158.0** e este conserto não está nela.
 
 ## B-042 — O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior   [ ]
 
@@ -1829,7 +1842,7 @@ suggested_mode: bug
 source: discover-review
 evidence: medido em 2026-08-13 contra `theodb:b044`. **(a) `bm25_build` conta documento que nunca será achável.** Com uma tabela de 3 linhas onde uma tem `body` NULL, `bm25_build` devolve **3** — o `unwrap_or_default()` de `engine.rs:157` transforma o NULL em documento vazio, que entra no índice, conta no retorno e não casa consulta nenhuma. Quem confere o valor de retorno acredita que os 3 estão buscáveis; a busca por termos dos outros dois devolve `3,1` e nunca o 2. **(b) `pg_backing.rs:201`: `Index::open` que falha devolve `0`** em vez de erro — bytes de heap ilegíveis viram "índice vazio". Visível no código; **não** reproduzido por execução (exigiria corromper heap de propósito), e a distinção está dita. **(c) `engine.rs:109`: `read_generation` cai para 0** por cadeia de `.ok()`, misturando "índice sem build" (estado válido) com "a consulta ao catálogo falhou" (não é).
 why_now: a classe **não é nova, e é aí que está o problema**. O próprio backlog registra que ela já foi encontrada e consertada ao menos três vezes: o `explain_scan`/`scan_stats` devolvendo "zeros silenciosos" (consertado com erro tipado, e a justificativa escrita lá vale palavra por palavra aqui — *"os números seguintes viriam de um seqscan, e reportá-los sob o nome `explain_scan` seria medir uma coisa e rotular outra"*), o contador do chunk-skip do colunar, e o gerador de script de upgrade. Somados aos [[B-034]] (GUC aceito sem efeito), [[B-041]] (busca em índice não construído) e ao erro de parse engolido que o [[B-044]] corrigiu, são **seis instâncias da mesma classe consertadas uma a uma**, sem que a classe tenha nome. Cada conserto local é correto e nenhum impede o sétimo.
-status: triaged
+status: planned
 dod:
   - as três instâncias medidas acima corrigidas: `body` NULL **não** conta como indexado (ou o retorno distingue indexados de pulados); `Index::open` que falha **levanta**; `read_generation` separa "sem build" de "catálogo ilegível"
   - **um teste por instância**, que hoje falharia — para (a), a asserção é sobre o valor de retorno de `bm25_build`, não sobre a busca
@@ -1853,6 +1866,24 @@ dod:
 >   de propósito —, e a distinção fica dita em vez de suposta.
 >
 > Oportunidade: `.claude/knowledge-base/discoveries/opportunities/b041-b048-silencio-opportunity.md`
+
+> **2026-08-13 — `triaged` → `planned`. ENTREGUE, com o escopo que a medição definiu.**
+>
+> - **(a)** `bm25_build` conta só o achável. O teste compara o retorno com o que a busca **de fato encontra**,
+>   não com uma constante — 3 linhas com um `body` NULL agora devolvem `2`, e a busca encontra `2`.
+> - **(b)** fora do escopo de produto: vive em `#[cfg(feature = "spike-lexical")]`.
+> - **(c)** `read_generation` devolve `Option` e o erro do SPI propaga. `unwrap_or(0)` sumiu do arquivo.
+>
+> **A classe foi CONTADA, não declarada resolvida** (T1.4). Varredura por valores-mágicos em código executável
+> do pilar — comentários excluídos, porque as três primeiras ocorrências que o `grep` devolveu eram as minhas
+> próprias explicações, a mesma armadilha que o B-045 e o B-036 já pagaram. Resta **uma**, classificada:
+>
+> | Ocorrência | Etiqueta |
+> |---|---|
+> | `engine.rs:103` — `unwrap_or(false)` sobre `to_regclass(...) IS NOT NULL` | **`legitimo`** — ausência do catálogo significa que nenhum build jamais aconteceu, e `false` mapeia corretamente para `None` |
+>
+> Zero remanescentes sem etiqueta. Mecanizar a classe segue item próprio — consertar seis instâncias e
+> declará-la morta seria a sétima promessa.
 
 ## B-049 — As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas   [ ]
 
