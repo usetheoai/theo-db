@@ -12,6 +12,22 @@ verdict: pending
 
 ### O padrão certo, que já existe
 
+> **CORREÇÃO POR ACRÉSCIMO — 2026-08-17, medido durante o [[B-059]].** Esta seção está **errada num ponto
+> material** e é preservada em vez de reescrita porque a alegação foi citada e usada.
+>
+> O `assert_index_used` descrito abaixo **não tem chamador nenhum** no repositório (`grep -rn` devolve só a
+> definição e dois comentários) e **está quebrado se chamado**: `PgvectorAdapter` sobrescreve `_query_sql`
+> repetindo a expressão de distância — 2 placeholders — e `assert_index_used`, herdado, liga a sonda uma vez
+> (`ProgrammingError`, reproduzido contra servidor real). O `SET enable_seqscan = off` que o docstring do módulo
+> promete aparece **só** nesse docstring, em nenhum código executável.
+>
+> Logo: quando esta oportunidade chamou o método de *"o padrão certo, que já existe"* e de *"disciplina exata"*,
+> o padrão **não estava rodando**. A analogia que fundamentou o portão do knob era boa; o exemplar era morto — e
+> o portão que o B-060 entregou é hoje o **único** apply-then-verify que executa no arnês.
+>
+> O que **permanece verdadeiro**: a assimetria que decidiu o item (um eixo tinha o mecanismo escrito, o outro
+> não tinha nem isso) e tudo que o B-060 mediu e entregou. Registrado como [[B-063]].
+
 `theodb-bench/src/adapters/postgres.py:325` tem `assert_index_used`, e o docstring diz por que ele existe:
 
 > *"Forcing without verifying proves nothing: the planner may ignore the hint, and the run would report a

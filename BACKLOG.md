@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-56 items — **Open** 29 · **In flight** 23 · **Closed** 4
+63 items — **Open** 34 · **In flight** 25 · **Closed** 4
 
-### Open (29)
+### Open (34)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -103,8 +103,13 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-054`](#b-054--toda-iteração-em-rust-custa-8-minutos-e-2m34s-deles-eram-um-cp--r----) | Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r` | `raw` | — |
 | [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança----) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `raw` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `raw` | — |
+| [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `raw` | — |
+| [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `raw` | — |
+| [`B-061`](#b-061--só-duas-suites-registradas-as-duas-vetoriais-o-colunar-não-tem-onde-ser-comparado----) | Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado | `raw` | — |
+| [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default----) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `raw` | — |
+| [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado----) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `raw` | — |
 
-### In flight (23)
+### In flight (25)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -131,6 +136,8 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-047`](#b-047--rodar-os-motores-concorrentes-nos-benchmarks-oficiais-na-mesma-máquina-como-prática-recorrente----) | Rodar os motores concorrentes nos benchmarks oficiais, na mesma máquina, como prática recorrente | `planned` | — |
 | [`B-048`](#b-048--a-superfície-responde-onde-deveria-recusar-três-instâncias-novas-e-a-classe-já-foi-consertada-três-vezes----) | A superfície responde onde deveria recusar: três instâncias novas, e a classe já foi consertada três vezes | `planned` | — |
 | [`B-053`](#b-053--o-núcleo-de-distância-vetorial-é-puro-por-uma-linha-e-é-ela-que-prende-o-micro-bench-na-suíte----) | O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte | `planned` | — |
+| [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
+| [`B-060`](#b-060--o-arnês-verifica-que-o-índice-foi-usado-e-não-verifica-que-o-knob-de-busca-pegou----) | O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou | `planned` | — |
 
 ### Closed (4)
 
@@ -2338,7 +2345,23 @@ OSS, enquanto o produto expõe um access method do PostgreSQL que paga o mesmo i
 `ADR-0061` exige concorrente na mesma corrida e na mesma máquina — foi o que o b035 fez com o pgvector e o b047
 com Elasticsearch/OpenSearch. Com o AlloyDB nunca foi feito, e desde que o Omni é `docker pull
 google/alloydbomni:18` a impossibilidade deixou de existir.
-status: raw
+status: planned
+plan: .claude/knowledge-base/plans/b059-omni-adapter-plan.md
+opportunity: .claude/knowledge-base/discoveries/opportunities/b059-omni-adapter-opportunity.md
+review: .claude/knowledge-base/reviews/b059-omni-adapter-review-2026-08-17.md
+measured: DISCOVER de 2026-08-17 no droplet efêmero `138.197.22.192` contra
+  `google/alloydbomni:latest` — 12 medições. O servidor é **PostgreSQL 17.9** (o TheoDB é 18, logo a corrida
+  cruza uma major); `alloydb_scann` 0.1.4 **não** vem instalado e traz `vector 0.8.2.google-1` (fork do pgvector)
+  por CASCADE; os opclasses do AM `scann` são `cosine`/`dot_product`/`l2`, **nenhum** casando com a convenção
+  `vector_*_ops`; `quantizer='sq8'` é reloption **string**; `scann.enable_ah_quantizer` vem **off**, então medir
+  no default mede o ScaNN sem o que o torna ScaNN (fato material para o [[B-057]]); e o `google_columnar_engine`
+  vem instalado **e** pré-carregado (fato material para o [[B-058]]).
+  IMPLEMENT em `theodb-bench` `ef70a30` + `744b2d9`: adapter registrado, `LOAD 'alloydb_scann'` por sessão
+  provado por reprovação, versão lida do servidor, reloption renderizada por tipo, opclasses por adapter.
+  **667 testes** (era 637), `mypy --strict` limpo em 37 arquivos, `ruff` limpo.
+  A primeira corrida real expôs um buraco no portão do [[B-060]] — parâmetro pedido e não mapeado passava por
+  vacuidade, publicando `ef_search=16/64/256` com recall medido **0,7820 nos três**. Consertado no mesmo ciclo:
+  a mesma corrida agora reporta `INVALID`. E derivou o [[B-063]].
 dod:
   - `alloydbomni` é um `AdapterEntry` registrado, e `theodb-bench doctor` o reporta como construível ou explica
     o que falta — sem adivinhação
@@ -2480,3 +2503,45 @@ dod:
 
 > Registrado 2026-08-16 pelo RELEASE do B-060. **É item de infraestrutura de um repo irmão**, e vale porque a
 > ausência foi descoberta ao tentar cumprir o passo mais básico do ciclo: abrir um PR.
+
+## B-063 — O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado   [ ]
+
+domain: theo-db
+repo: theodb-bench
+suggested_mode: review
+source: discover-review
+evidence: medido em 2026-08-17 no droplet `138.197.22.192`, durante a integração do [[B-059]]. Quatro fatos,
+todos por execução ou grep, nenhum por leitura de documento:
+(1) **`assert_index_used` (`src/adapters/postgres.py:424`) não tem chamador nenhum.**
+`grep -rn assert_index_used src/ tests/` devolve apenas a própria definição e duas menções em comentário —
+zero invocações. `src/bench/vector.py` não verifica o plano de forma alguma.
+(2) **Está quebrado se chamado.** `PgvectorAdapter` sobrescreve `_query_sql` (`:642`) repetindo a expressão de
+distância no `ORDER BY`, o que produz **2 placeholders**, e sobrescreve `execute` (`:651`) para ligar a sonda
+duas vezes com o comentário explicando por quê. Mas `assert_index_used` é herdado de `PostgresAdapter` e liga
+**uma** vez: `psycopg.ProgrammingError: the query has 2 placeholders but 1 parameters were passed`. Reproduzido
+contra o servidor real.
+(3) **`SET enable_seqscan = off` nunca é emitido.** A string aparece exatamente uma vez no repositório, no
+docstring do módulo — em nenhum código executável.
+(4) O invariante que o docstring de `src/adapters/postgres.py:10` anuncia — *"The index is forced **and**
+verified. `SET enable_seqscan = off` alone proves nothing"*, rotulado I5 — é **falso nas duas metades**: o arnês
+nem força nem verifica.
+**O que NÃO é verdade, e a medição é que impede a exageração:** nenhum número publicado é retratado. Medido no
+tamanho exato da suíte registrada (`vector/synthetic/sweep`, 10 000 linhas × 64 dims), o planner **escolhe o
+índice** nos três motores — `pgvector hnsw`, `alloydbomni hnsw` e `alloydbomni scann`, os três com `Index Scan`
+e o nome do índice no plano. O buraco é **latente**, não uma corrupção retroativa. O que o torna real: na mesma
+sessão, 200 linhas produziram `Seq Scan` com índice `scann` presente, e o [[B-018]] já registra um caminho de
+JOIN onde nem `enable_seqscan = off` alcança o índice.
+why_now: o próprio [[B-060]] deste ecossistema abriu citando este método como *"o padrão certo, que já existe"* e
+*"disciplina exata"*, e construiu o portão do knob por analogia a ele. A analogia estava certa e o exemplar
+estava morto — de modo que o portão que o B-060 entregou é hoje o **único** apply-then-verify que roda no arnês.
+Registrar isto é o que impede a citação de continuar a circular como se o mecanismo existisse.
+status: raw
+dod:
+  - `assert_index_used` tem chamador no caminho de medição do `bench/vector.py`, e um teste falha se o chamador
+    for removido
+  - a contagem de placeholders casa: um teste exercita `assert_index_used` num adapter da família pgvector e
+    reprova contra o código atual com `ProgrammingError`
+  - o arnês emite o forçamento do índice, ou declara explicitamente que mede o que o planner escolher — uma das
+    duas, nunca um docstring afirmando a primeira enquanto o código faz a segunda
+  - existe detector de código morto no CI do repositório: o projeto não tem nenhum hoje, e é por isso que um
+    método sem chamador sobreviveu sendo citado como exemplar
