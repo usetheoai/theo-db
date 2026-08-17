@@ -104,6 +104,43 @@ fronteira de alta dimensão e alto recall permanece do pgvector.
 > Reabrir o veredito é decisão do owner, e depende do número a 1M. Evidência completa em
 > `.claude/knowledge-base/discoveries/opportunities/b057-scann-am-headtohead-opportunity.md`.
 
+> **CORREÇÃO DO ACRÉSCIMO ACIMA — 2026-08-17, mesmo dia, algumas horas depois.** O acréscimo anterior compara
+> **o índice errado do nosso lado**, e é preservado em vez de reescrito porque a alegação já estava no disco.
+>
+> Ele mediu `theodb_hnsw m=16` — **grafo puro, sem quantizador, sem AH, sem rescore** — contra o `scann` do
+> AlloyDB **com AH e rescore**. Isso compara o nosso índice de grafo com o IVF-quantizado deles: uma comparação
+> real, e **não** a que este ADR pede. O TheoDB **tem** a receita do ScaNN, e o arco no código chama-se
+> literalmente `pg_scann` (M75 construiu o algoritmo em `ann/ivf_aqah.rs`, M77 o access method com páginas v4
+> persistidas em `am/scan.rs::scan_ivf_aq`):
+>
+> | peça do ScaNN | onde está no TheoDB |
+> |---|---|
+> | partição IVF | `theodb_ivfflat` `WITH (lists = N)` |
+> | quantizador anisotrópico | `WITH (pq_subspaces = M)` → `AqQuantizer` |
+> | AH-LUT batched | `pq_bits = 4` (LUT16 `pshufb`), `ah_score_block` layout block32 |
+> | o T anisotrópico | `WITH (aq_threshold = …)` |
+> | SOAR | `WITH (soar_lambda = …)` |
+> | rescore exato (stage 2) | `WITH (separate_storage=1, refine=1)`, pool = `64 × theodb_hnsw.over_fetch` |
+>
+> Verificado por execução: `CREATE INDEX … USING theodb_ivfflat (emb theodb_ivfflat_l2_ops) WITH (lists=20,
+> pq_subspaces=16, pq_bits=4, separate_storage=1, refine=1)` constrói, e o plano usa `Index Scan using aq_i`.
+>
+> **O que o número anterior autoriza, com precisão:** *"o `scann` AM do AlloyDB é 1,2–1,6× mais rápido que o
+> `theodb_hnsw` a recall casado, a 100k SIFT-128"*. **Não** autoriza nada sobre o `pg_scann`, que é o índice
+> que este ADR de fato compara.
+>
+> Isto é a mesma classe de erro que o acréscimo anterior registra ter pego três vezes no lado do concorrente —
+> medir a configuração errada e chamar de comparação — desta vez do nosso lado. A medição pareada
+> (`vector/sift/pg-scann` × `vector/sift/scann-ah`, ambos com os dois estágios e ambos pelo arnês) está em
+> curso; o resultado entra aqui como novo acréscimo.
+>
+> **Achado intermediário, já medido e já útil:** a primeira fronteira do `pg_scann` teto em **recall 0,8212**
+> com o pool de rescore verificado em 128 candidatos para k=10. Cento e vinte e oito rescores exatos não podem
+> limitar recall a 0,82 a menos que os vizinhos verdadeiros **não estejam** no conjunto de candidatos — logo o
+> teto é erro de quantização do estágio 1, não profundidade de probe. `pq_subspaces=16` sobre 128 dimensões são
+> **8 dimensões por subespaço**; o ScaNN e o FAISS usam 2. Está sendo varrido (16/32/64) como suíte registrada,
+> porque é parâmetro de build e não de busca.
+
 ## Eixo 2 — o gap de paradigma até o ScaNN
 
 O head-to-head [m33](/benchmarks/m33-scann-headtohead.md) mediu o [ScaNN](/technologies/scann.md)
