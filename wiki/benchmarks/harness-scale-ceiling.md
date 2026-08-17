@@ -15,6 +15,10 @@ sources:
 **10 000 000 de vetores carregados em 155 s, com o corpus nunca residente.** Medido no droplet efêmero
 `138.197.22.192` (s-8vcpu-16gb, nyc3), SIFT-128 lido de HDF5 em chunks de 200 000.
 
+Contexto: o arnês é o `theodb-bench`, e a régua que ele aplica está em
+[o instrumento reporta o pedido](/guides/instrumento-reporta-o-pedido.md). A escala aqui é a do pilar vetorial,
+cujo veredito medido está em [scann AM × theodb_hnsw × pg_scann](/benchmarks/b057-scann-am-headtohead.md).
+
 # O que foi medido
 
 | | |
