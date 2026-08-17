@@ -2319,3 +2319,95 @@ dod:
 
 > Registrado 2026-08-16 a partir de avaliação independente. Os números dela são o alvo mais concreto que o
 > pilar colunar já teve.
+
+## B-059 — O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia   [ ]
+
+domain: theo-db
+repo: theodb-bench
+suggested_mode: evolve
+source: human
+evidence: lido em 2026-08-16 em `theodb-bench/src/registry.py:74-100`. Os adapters registrados são **quatro** —
+`fake`, `postgres`, `pgvector`, `theodb` — e nenhum é o AlloyDB. O caminho para acrescentar é curto e já está
+provado: `TheoDBAdapter(PgvectorAdapter)` (`src/adapters/postgres.py:518`) mostra que um motor PostgreSQL entra
+como **subclasse** de `PostgresAdapter`, herdando `start`/`wait_ready`/`load_dataset`/`build_index`/`execute`/
+`collect_stats`/`export_config`. O que um adapter do Omni precisa sobrescrever é pouco: a DDL do índice
+(`USING scann (col cosine) WITH (num_leaves=…, quantizer='sq8')`), o `wait_ready` (a extensão a checar) e o
+`capabilities()`.
+why_now: o [[B-057]] estabeleceu que o veredito LOCKED do North Star (`ADR-0035`) mediu a **biblioteca** ScaNN
+OSS, enquanto o produto expõe um access method do PostgreSQL que paga o mesmo imposto de MVCC/WAL que nós. O
+`ADR-0061` exige concorrente na mesma corrida e na mesma máquina — foi o que o b035 fez com o pgvector e o b047
+com Elasticsearch/OpenSearch. Com o AlloyDB nunca foi feito, e desde que o Omni é `docker pull
+google/alloydbomni:18` a impossibilidade deixou de existir.
+status: raw
+dod:
+  - `alloydbomni` é um `AdapterEntry` registrado, e `theodb-bench doctor` o reporta como construível ou explica
+    o que falta — sem adivinhação
+  - `capabilities()` declara **honestamente** o que o Omni é: query layer (ScaNN + colunar + planner). Ele
+    **não** tem storage desagregado, read pool nem failover gerenciado — e o adapter não pode sugerir que tem,
+    porque a corrida mediria um produto que não existe
+  - a versão medida é lida do servidor e registrada no bundle, não inferida da tag: o artigo mediu que a imagem
+    do Docker Hub ficou em PG 17 enquanto os pacotes Linux já estavam em 18
+  - uma corrida vetorial `theodb` × `alloydbomni` × `pgvector` na mesma máquina produz bundle válido
+
+## B-060 — O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou   [ ]
+
+domain: theo-db
+repo: theodb-bench
+suggested_mode: review
+source: human
+evidence: lido em 2026-08-16. `src/adapters/postgres.py:325` tem `assert_index_used`, com a razão no próprio
+docstring: *"Forcing without verifying proves nothing: the planner may ignore the hint, and the run would report
+a sequential scan under an index's name."* Disciplina correta. Mas `set_search_parameters` (`:279-280`) é o
+corpo inteiro `self._search_parameters = dict(parameters)` — **guarda e não verifica**. O framework tem o padrão
+para um eixo (o plano usou o índice?) e não tem para o outro (o parâmetro teve efeito?).
+why_now: a avaliação independente de AlloyDB (2026-08-15) mediu o custo dessa lacuna em outro arnês:
+`SET scann.num_leaves_to_search = N` **não tem efeito** sem `LOAD 'alloydb_scann'` antes, e não avisa. O
+avaliador pediu busca profunda, recebeu **recall 0,15**, e perdeu uma corrida de 10 milhões de vetores sem saber
+por quê. Para o pgvector a lacuna é benigna (um `SET` de GUC registrado funciona ou erra); para o ScaNN é fatal,
+e **o [[B-034]] provou que também é fatal para nós** — `SET hnsw.ef_search` era aceito em silêncio sem efeito.
+Um arnês que não verifica o knob publica o motor num ponto de operação que não é o declarado, que é a forma mais
+cara de errar: o número parece certo.
+status: raw
+dod:
+  - existe `assert_parameter_applied` (ou equivalente) espelhando `assert_index_used`: depois de aplicar os
+    parâmetros de busca, o adapter **lê de volta do servidor** o valor em vigor e recusa a medição se divergir
+  - o teste que prova isso **reprova** um adapter que aceita o parâmetro e o ignora — provado com um duplo que
+    faz exatamente isso, não só com o caminho feliz
+  - o valor efetivo entra no bundle, ao lado do pedido: um bundle que diga `pedido=200 efetivo=64` é honesto; um
+    que diga só `200` é asserção
+  - vale para TODO adapter, não só o do Omni — a lacuna é do framework
+
+## B-061 — Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado   [ ]
+
+domain: colunar
+repo: theodb-bench
+suggested_mode: evolve
+source: human
+evidence: lido em 2026-08-16. `grep -oE 'id="[a-z0-9/_-]+"' src/registry.py` devolve **duas**:
+`vector/synthetic/smoke` e `vector/synthetic/sweep`. O módulo `src/bench/analytical.py` existe, e
+`src/adapters/base.py` já define `AnalyticalTable`, `AnalyticalQuery` e `AnalyticalResult` — a fundação está
+lá, e **nenhuma suite analítica está registrada**. O mesmo vale para `graph.py` e `retrieval.py`.
+why_now: o [[B-058]] tem números públicos do concorrente para o eixo colunar, do isolamento mais limpo possível
+(mesma imagem Omni, mesmo storage, só a flag do engine muda): `Q6 2.681 → 69 ms` a SF10 e `182.517 → 587 ms`
+(**311×**) a SF100, `Q5 9,8×`, `Q1 2,0×`, `Q18 1,14×`, point lookup sem ganho, e o colunar **perdendo** para o
+heap abaixo de ~centenas de milhares de linhas. Do nosso lado o [[B-006]] registra 43 queries do ClickBench e a
+suíte completa nunca. Sem suite analítica registrada, esses números não têm onde ser respondidos.
+status: raw
+dod:
+  - existe suite analítica registrada, com o formato TPC-H que o concorrente publicou — a comparação exige o
+    mesmo shape de query, não um shape nosso
+  - **portão de residência antes de qualquer número**: para o Omni, `g_columnar_columns` prova que as colunas
+    estão residentes; para nós, o equivalente. O avaliador perdeu uma corrida inteira porque a população
+    automática do store falha em silêncio num engine recém-ligado (histórico de consultas vazio → recomenda
+    nada → store vazio → todo plano cai para heap → a corrida mede nada, sem erro nem aviso). É a classe
+    [[B-048]] no concorrente, e o arnês tem de recusar em vez de reportar
+  - o crossover do NOSSO colunar é medido: abaixo de quantas linhas ele perde para o heap? O concorrente mede
+    31,6 ms contra 27,5 ms a 100K linhas
+  - a contenção escrita×scan é medida nos DOIS regimes (dado em memória e em disco), porque foi exatamente aí
+    que o avaliador mediu a inversão: ligar o colunar **piorou** a contenção a SF100 (**29%** contra 16% do row
+    store), contra 13,5% ≈ 13,6% (empate) a SF10
+
+> Os três itens acima foram registrados em 2026-08-16 a partir da leitura do `theodb-bench` e da avaliação
+> independente de AlloyDB. **O B-060 é o mais valioso dos três e o menos óbvio:** os outros dois acrescentam
+> alcance ao arnês, e ele conserta uma lacuna que faria o arnês publicar número errado com aparência de certo —
+> para qualquer motor, inclusive o nosso.
