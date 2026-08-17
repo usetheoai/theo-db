@@ -2367,7 +2367,7 @@ por quê. Para o pgvector a lacuna é benigna (um `SET` de GUC registrado funcio
 e **o [[B-034]] provou que também é fatal para nós** — `SET hnsw.ef_search` era aceito em silêncio sem efeito.
 Um arnês que não verifica o knob publica o motor num ponto de operação que não é o declarado, que é a forma mais
 cara de errar: o número parece certo.
-status: triaged
+status: planned
 dod:
   - existe `assert_parameter_applied` (ou equivalente) espelhando `assert_index_used`: depois de aplicar os
     parâmetros de busca, o adapter **lê de volta do servidor** o valor em vigor e recusa a medição se divergir
@@ -2390,6 +2390,34 @@ dod:
 >
 > Dependência declarada: o [[B-059]] **depende deste** — sem o portão, a primeira corrida contra o ScaNN pode
 > publicar um default raso como vitória nossa.
+
+> **2026-08-16 — ENTREGUE.** PR [usetheoai/theodb-bench#1](https://github.com/usetheoai/theodb-bench/pull/1)
+> mergeado (`84a4143`). Suíte **637 passed; 0 failed** (era 627); `mypy --strict` limpo em 36 arquivos; `ruff`
+> limpo; e o teste do gate **reprova** contra o código anterior, verificado com `git stash`.
+>
+> **A T1.1 derrubou o instrumento que o próprio plano havia escolhido**, e é o achado que mais vale. Medido em
+> `postgres:18` puro antes de escrever uma linha do gate: `SET nao.existe = 999` sucede,
+> `current_setting('nao.existe', true)` devolve **999**, e `pg_settings` não tem a linha. Um gate sobre
+> `current_setting` pediria 200, leria 200 e mediria o default — falso-negativo perfeito para exatamente o
+> defeito que ele existe para pegar.
+>
+> **E a armadilha do concorrente existe aqui.** `pg_settings` tem **0** GUCs `theodb*` em sessão nova e **38**
+> depois de `LOAD 'theodb_rs'` — a mesma condição que faz o `scann.num_leaves_to_search` do AlloyDB falhar em
+> silêncio. Não é defeito do TheoDB (é como o PostgreSQL registra GUC de extensão); é precisamente por isso que
+> o gate pertence ao arnês.
+>
+> O bundle passou a carregar o efetivo ao lado do pedido, **sem bump de schema**: `points[].parameters` era
+> montado do PEDIDO antes de os knobs serem aplicados, e o `probes` é clampado — um bundle podia dizer
+> `probes=10000` com o clamp em vigor. O campo já é objeto aberto de escalares, então isto o usa como projetado.
+>
+> Review: `.claude/knowledge-base/reviews/b060-knob-gate-review-2026-08-16.md`.
+> **Ressalva declarada:** o gate não tem teste de integração contra servidor real — a medição do PostgreSQL foi
+> à mão e está registrada, não automatizada. É a afirmação mais fraca do ciclo.
+>
+> **Achado de infraestrutura, registrado como [[B-062]]:** o `theodb-bench` não tinha `develop` nem `main`, e
+> `workspace` era a branch default — todo push ia direto para a default, sem gate de PR, embora o `ci.yml` já
+> declare `branches: [main, develop, workspace]` e `pull_request`. Criei `develop` a partir de `b6a5bfd` para
+> que o PR tivesse alvo.
 
 ## B-061 — Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado   [ ]
 
@@ -2425,3 +2453,30 @@ dod:
 > independente de AlloyDB. **O B-060 é o mais valioso dos três e o menos óbvio:** os outros dois acrescentam
 > alcance ao arnês, e ele conserta uma lacuna que faria o arnês publicar número errado com aparência de certo —
 > para qualquer motor, inclusive o nosso.
+
+## B-062 — O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default   [ ]
+
+domain: theo-db
+repo: theodb-bench
+suggested_mode: review
+source: discover-review
+evidence: medido em 2026-08-16 ao tentar abrir o PR do [[B-060]]. `git ls-remote --heads origin` devolvia
+**uma** branch: `workspace` — que era também a `default_branch` do repositório. Não havia `develop` nem `main`.
+Consequência: **todo push ia direto para a branch default, sem gate de PR nenhum**. E o `.github/workflows/ci.yml`
+do próprio repo já declara `branches: [main, develop, workspace]` mais o gatilho `pull_request` — o fluxo estava
+previsto no workflow e não existia no remoto.
+why_now: é o [[B-052]] um repositório ao lado, e com um agravante: no `theo-db` o gate existe e olha tarde; aqui
+ele não tinha onde olhar. Criei `develop` a partir de `b6a5bfd` para que o PR #1 tivesse alvo — o que resolve o
+sintoma e **não** a estrutura: não há `main`, não há tag de release, não há branch protection, e nada impede o
+próximo push de ir direto para a default.
+status: raw
+dod:
+  - a estrutura que o `ci.yml` já declara existe no remoto: `workspace` → `develop` → `main`
+  - `main` e `develop` têm branch protection exigindo PR — sem isso o hook local garante a ORIGEM do trabalho e
+    nada torna o PR obrigatório (`rules/git-safety.md § 1`, a tabela das duas camadas)
+  - a `default_branch` deixa de ser `workspace`, porque uma default que é a branch de trabalho convida ao push
+    direto por acidente
+  - o `CLAUDE.md` do `theodb-bench` declara o fluxo, que hoje ele não menciona
+
+> Registrado 2026-08-16 pelo RELEASE do B-060. **É item de infraestrutura de um repo irmão**, e vale porque a
+> ausência foi descoberta ao tentar cumprir o passo mais básico do ciclo: abrir um PR.
