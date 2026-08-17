@@ -2251,3 +2251,71 @@ dod:
 > item sobre o ferramental do ciclo, não sobre o produto** — e vale porque o ferramental decide o que o
 > trabalho parece ser. Um gate que pede para refazer o feito não protege qualidade: ele treina a produzir
 > aparência de execução, que é a única coisa que ele sabe ler.
+
+## B-057 — O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL   [ ]
+
+domain: vetorial
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: medido por leitura dos nossos próprios artefatos em 2026-08-16, a partir da avaliação independente de
+AlloyDB publicada por Radim Marek (boringSQL, 2026-08-15). `wiki/benchmarks/m33-scann-headtohead.md:21` declara
+que *"ScaNN OSS é o proxy sancionado — é o algoritmo por trás do índice vetorial"*, e o `ADR-0035` atribui o gap
+de **~25×** em QPS a *"AH-LUT anisotrópico **+ não pagar o imposto MVCC/WAL**"*. **A segunda metade dessa causa
+não se aplica ao produto concorrente:** o AlloyDB não expõe a biblioteca, expõe `CREATE INDEX ... USING scann`
+— um access method do PostgreSQL, que paga o mesmo imposto de MVCC, WAL e página que o `theodb_hnsw`. Nunca
+medimos contra ele.
+why_now: o `ADR-0002` é LOCKED e o `ADR-0035` fecha o eixo vetorial declarando a superioridade de QPS
+"NÃO-ALCANÇÁVEL". Essa conclusão é honesta sobre o que mediu e **repousa sobre um proxy** — e o artefato real
+está a um `docker pull google/alloydbomni:18` de distância, trazendo o ScaNN e o colunar sem GCP (o próprio
+`wiki/decisions/0005` já chama o Omni de concorrente direto). O `ADR-0061` exige concorrente na mesma corrida e
+na mesma máquina; foi o que o b035 fez com o pgvector e o b047 com Elasticsearch/OpenSearch. Com o AlloyDB
+**nunca foi feito**, e é a única comparação que o North Star de fato pede.
+status: raw
+dod:
+  - o `scann` AM do Omni e o `theodb_hnsw` correm no MESMO arnês, na MESMA máquina, no MESMO caso — recall × QPS,
+    com o ponto de operação casado (a lição da terceira variação do b035)
+  - o resultado atualiza o `ADR-0035` **por acréscimo**: se o gap encolher ao medir contra o AM em vez da
+    biblioteca, isso é dito; se não encolher, a conclusão fica MAIS forte e isso também é dito
+  - a armadilha documentada pelo avaliador independente é verificada: `scann.num_leaves_to_search` **não tem
+    efeito** sem `LOAD 'alloydb_scann'`, e sem aviso. Uma corrida nossa que a ignorasse mediria o ScaNN num
+    default raso e publicaria vantagem falsa — a classe [[B-034]]/[[B-041]] no concorrente
+  - o índice é medido em TAMANHO e TEMPO DE BUILD, não só em QPS: o avaliador mediu 2,6 GB contra 76 GB do
+    ivfflat e build 7–9× mais rápido, e esse eixo o `m33` nunca cobriu
+
+> Registrado 2026-08-16. **Não é reabertura do ADR-0002 nem contestação do M73** — a vantagem algorítmica do
+> AH-LUT é real e está medida. É a observação de que a comparação usou um substituto mais favorável ao
+> concorrente do que o produto dele, e que o produto agora é obtenível.
+
+## B-058 — O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos   [ ]
+
+domain: colunar
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: a avaliação independente de AlloyDB (boringSQL, 2026-08-15) publicou o isolamento mais limpo possível
+do motor colunar — **mesma imagem Omni, mesmo storage, mesma máquina, só a flag do engine muda**:
+`Q6 2.681 → 69 ms` (39× a SF10) e `182.517 → 587 ms` (**311×** a SF100); `Q5 9,8×`; `Q12 4,8×`;
+`Q1 2,0×`; `Q18 1,14×`; **point lookup sem ganho**. Crossover medido: o colunar **perde** para o heap abaixo de
+~algumas centenas de milhares de linhas (31,6 ms contra 27,5 ms a 100K). Do nosso lado, o [[B-006]] registra
+que apenas **43 queries do ClickBench** foram medidas e a suíte completa nunca — e nenhuma comparação com
+concorrente algum existe.
+why_now: TPC-H com o engine off/on é comparação melhor que ClickBench para a nossa pergunta, porque isola o
+MESMO eixo (colunar contra heap no mesmo binário) em vez de comparar contra outro produto inteiro. E o artigo
+traz dois achados que valem mais que os speedups: **(a)** ligar o colunar PIOROU a contenção de escrita a SF100
+(**29%** contra 16% do row store) — a promessa HTAP não se sustenta na mesma máquina, e o isolamento exige nó
+separado; **(b)** a população automática do store **falha em silêncio** num engine recém-ligado ou após
+restart, porque o recomendador usa histórico de consultas que está vazio: o store fica vazio, todo plano cai
+para heap, e a corrida não mede nada sem erro nem aviso.
+status: raw
+dod:
+  - TPC-H nos mesmos moldes: `theodb_columnar` contra heap no MESMO binário, e contra o Omni com engine off/on
+    na mesma máquina
+  - o crossover do NOSSO colunar é medido, não estimado — abaixo de quantas linhas ele perde para o heap?
+  - a contenção escrita×scan é medida nos dois regimes (dado em memória e dado em disco), porque o avaliador
+    mediu a inversão exatamente aí
+  - antes de publicar qualquer número, verificar que o nosso store está de fato RESIDENTE — o avaliador perdeu
+    uma corrida inteira por isso, e a classe é a mesma do [[B-048]]
+
+> Registrado 2026-08-16 a partir de avaliação independente. Os números dela são o alvo mais concreto que o
+> pilar colunar já teve.

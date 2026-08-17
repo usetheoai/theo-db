@@ -38,6 +38,24 @@ pgvector platôa antes (~0,914) **neste regime clusterizado de 128d**, que é ju
 do extendCandidates. O build também é ~3× mais rápido. **Honesto:** é o regime favorável ao TheoDB; a
 fronteira de alta dimensão e alto recall permanece do pgvector.
 
+> **ACRÉSCIMO 2026-08-16 — o que este veredito mediu, dito com precisão.** O gap de ~25× foi medido contra a
+> **biblioteca ScaNN OSS** ([m33](/benchmarks/m33-scann-headtohead.md) a declara "proxy sancionado"). O produto
+> concorrente não expõe a biblioteca: expõe `CREATE INDEX ... USING scann`, **um access method do PostgreSQL**,
+> que paga o mesmo imposto de MVCC, WAL e página que o `theodb_hnsw`. Como este ADR atribui o gap a
+> "AH-LUT anisotrópico **+ não pagar o imposto MVCC/WAL**", **a segunda metade da causa não se aplica ao AM** —
+> só à biblioteca.
+>
+> Isto **não** invalida o veredito: a vantagem algorítmica do AH-LUT é real e medida, e nenhuma medição nova a
+> contradiz. O que muda é o que se pode afirmar sobre o **produto**: contra o `scann` AM, o gap não foi medido.
+>
+> O AlloyDB Omni traz o ScaNN e o colunar sem GCP (`docker pull google/alloydbomni:18`), então a comparação que
+> o `ADR-0061` exige — concorrente na mesma corrida, na mesma máquina — passou a ser possível. Registrado como
+> [[B-057]]. Gatilho: avaliação independente de AlloyDB publicada em 2026-08-15 (boringSQL / Radim Marek), que
+> mediu o `scann` AM com índice 30× menor que o ivfflat e build 7–9× mais rápido, e **não conseguiu estabelecer
+> a recall** — obteve 0,15 e identificou a causa: `scann.num_leaves_to_search` não tem efeito sem
+> `LOAD 'alloydb_scann'`, sem aviso. O avaliador declara não confiar no número e não o publica; registramos a
+> não-reprodução, não uma refutação.
+
 ## Eixo 2 — o gap de paradigma até o ScaNN
 
 O head-to-head [m33](/benchmarks/m33-scann-headtohead.md) mediu o [ScaNN](/technologies/scann.md)

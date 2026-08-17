@@ -209,7 +209,9 @@ comunicada ao owner e baseou a redação inicial do item de backlog.
 * **A entity pass é fechada sobre os nomes que os conceitos ligam.** Nomes que aparecem apenas dentro dos conceitos de entidade (por exemplo, bibliotecas citadas dentro de `technologies/`) permaneceram como prosa, conforme a regra de recursão de um anel.
 * **O acervo de referências primárias do projeto não foi convertido.** O catálogo de papers e repositórios clonados citado no `CLAUDE.md` está fora do versionamento e fora do escopo desta conversão.
 
-## 2026-08-13 — B-036: `m` e `ef_construction` deixam de ser constantes de compilação
+## 2026-08-13
+
+**B-036 — `m` e `ef_construction` deixam de ser constantes de compilação.**
 
 `features/02-indice-hnsw.md` **atualizado** (não duplicado): a seção "A armadilha dos parâmetros de build"
 descrevia como verdade permanente algo que era estado — `WITH (m = …)` falhava com `unrecognized parameter`.
@@ -220,3 +222,20 @@ Acrescentado à seção de qualidade do grafo o honest-negative que o knob torna
 maior não é sempre melhor** — o M57 mediu 64→200 *piorando* o recall a 100k–500k, e `m` 16→32 idem (0,952).
 O knob existe para ser varrido por medição, não subido no escuro; sem essa linha ao lado da tabela, a tabela
 convida exatamente ao erro que o projeto já pagou.
+
+## 2026-08-16
+
+**O veredito vetorial mediu a biblioteca; o concorrente é um índice do PostgreSQL.**
+`decisions/0035-m73-northstar-vector-verdict.md` recebeu acréscimo — nunca sobrescrita — registrando que o gap
+de ~25× foi medido contra o **ScaNN OSS**, e que o produto expõe `CREATE INDEX ... USING scann`, um access
+method que paga o mesmo imposto de MVCC/WAL que nós. Como o próprio ADR atribui o gap a "AH-LUT **+ não pagar o
+imposto**", metade da causa não se aplica ao AM.
+
+O veredito **não** foi invalidado: a vantagem do AH-LUT é real e medida. O que mudou é o que se pode afirmar
+sobre o *produto* — e o AlloyDB Omni, que traz o ScaNN e o colunar sem GCP, tornou a comparação do ADR-0061
+possível. Virou [[B-057]] (vetorial) e [[B-058]] (colunar).
+
+Gatilho: avaliação independente publicada em 2026-08-15, que mediu o índice ScaNN 30× menor que o ivfflat com
+build 7–9× mais rápido, e **não conseguiu estabelecer a recall** — 0,15 obtido, com a causa identificada
+(`scann.num_leaves_to_search` sem efeito sem `LOAD`, e sem aviso). Registramos a **não-reprodução**, não uma
+refutação: o avaliador declara não confiar no número e não o publica.
