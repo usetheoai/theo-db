@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-74 items — **Open** 43 · **In flight** 27 · **Closed** 4
+74 items — **Open** 40 · **In flight** 30 · **Closed** 4
 
-### Open (43)
+### Open (40)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -109,16 +109,13 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado----) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `raw` | — |
 | [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela----) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `raw` | — |
 | [`B-066`](#b-066--a-contenção-escritascan-não-é-medível-não-existe-arnês-concorrente----) | A contenção escrita×scan não é medível: não existe arnês concorrente | `raw` | — |
-| [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada----) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `raw` | — |
 | [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala----) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `raw` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `raw` | — |
-| [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala----) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `raw` | — |
 | [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `raw` | — |
 | [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem----) | Dois flags de perfil prometem gates que não existem | `raw` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `raw` | — |
-| [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina----) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `raw` | — |
 
-### In flight (27)
+### In flight (30)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -149,6 +146,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-060`](#b-060--o-arnês-verifica-que-o-índice-foi-usado-e-não-verifica-que-o-knob-de-busca-pegou----) | O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou | `planned` | — |
 | [`B-061`](#b-061--só-duas-suites-registradas-as-duas-vetoriais-o-colunar-não-tem-onde-ser-comparado----) | Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado | `planned` | — |
 | [`B-064`](#b-064--o-eixo-theodb-do-próprio-arnês-não-constrói-índice-ele-emite-a-sintaxe-do-pgvector-contra-os-ams-do-theodb----) | O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB | `planned` | — |
+| [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada----) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `planned` | — |
+| [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala----) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `planned` | — |
+| [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina----) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `planned` | — |
 
 ### Closed (4)
 
@@ -2695,7 +2695,8 @@ why_now: o primeiro bullet do DoD do [[B-061]] pede "suíte analítica **registr
 saiu para o [[B-065]]; o que sobrou — estar registrada — depende disto, e ficou **declarado e não feito**. O
 crossover do nosso colunar foi medido por script direto contra os adapters (números em
 `.claude/knowledge-base/reviews/b061-*`), que é medição legítima e **não** é bundle validado por schema.
-status: raw
+status: planned
+closed: FECHADO 2026-08-17: protocolo `Workload`/`Benchmark` em `bench/protocol.py`; runner desacoplado; suíte `analytical/synthetic/paths` registrada e com bundle **VALID** (colunar 3,5× em `total_rows`/`sum_amount`, **0,18×** em `group_by_category`); `pareto.json` e `regression.json` emitidos.
 dod:
   - existe um protocolo de benchmark que `VectorBenchmark` e `AnalyticalBenchmark` satisfazem, e o runner
     depende do protocolo em vez da classe concreta (DIP — `rules/architecture.md § 2`)
@@ -2772,7 +2773,8 @@ why_now: duplica o [[B-068]] em espírito e o supera em precisão — o B-068 es
 medido, contra "não completou em 10 minutos" que era a fase de carga **mais** o build). Manter os dois é
 redundante; este bloco carrega a medição e o [[B-068]] deve ser fechado como `killed` com `kill_reason` apontando
 para cá, ou este ser fundido nele — decisão de quem planejar.
-status: raw
+status: planned
+closed: FECHADO 2026-08-17: `COPY` binário. 1M vetores SIFT-128 — `executemany` **122 s** → COPY texto **75 s** → COPY binário **16,8 s** (7,3×). Verificado contra servidor real: 1 000 000 linhas, 5 vetores conferidos elemento a elemento, 0 divergências.
 dod:
   - a carga usa `COPY` binário, e um teste prova que o SQL emitido começa com `COPY` e não com `INSERT`
   - o tempo de carga de 1M × 128 é medido antes e depois na mesma máquina, e a razão entra no CHANGELOG
@@ -2891,7 +2893,8 @@ why_now: o teste pareado é o que torna o arnês publicável (I14), e ele acabou
 com p = 0,0001. Um veredito forte obtido sob um confundidor não controlado é mais perigoso que nenhum veredito:
 ele convida a citação. O SOTA para isto é **intercalar** — a mesma query respondida pelos dois sistemas em
 sequência imediata, alternando a ordem para não favorecer o aquecimento de nenhum lado.
-status: raw
+status: planned
+closed: FECHADO 2026-08-17: `theodb-bench head2head` intercala query a query com ordem alternada. **Mudou um veredito**: o pareado sequencial dava theodb com dz=−0,94 e 448/500; intercalado, alloydbomni vence o ponto médio. Recusa par com gap de recall > 0,01 e declara quando o vencedor operava em recall menor.
 dod:
   - existe modo de corrida intercalada: um executor que percorre a query `i` nos dois sistemas antes de passar
     para a `i+1`, com a ordem alternada por query
