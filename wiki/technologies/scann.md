@@ -47,5 +47,28 @@ QPS é não-alcançável por extensão permissiva**, por gap de paradigma — e 
 [feature correspondente](/features/05-indice-scann.md) diz isso ao usuário em vez de prometer o
 contrário.
 
+# A biblioteca e o access method são coisas diferentes — 2026-08-17
+
+O veredito acima mediu a **biblioteca**. O produto concorrente expõe `CREATE INDEX … USING scann`, um
+**access method do PostgreSQL**, que paga o mesmo imposto de página, MVCC e WAL que o `theodb_hnsw`.
+Como o [ADR 0035](/decisions/0035-m73-northstar-vector-verdict.md) atribui o gap a *"AH-LUT
+anisotrópico **+ não pagar o imposto MVCC/WAL"***, a segunda metade da causa **não se aplica ao AM**.
+
+Medido no [B-057](/benchmarks/b057-scann-am-headtohead.md): a recall casado, o AM é **1,2–1,6×** o
+`theodb_hnsw` e **0,92×** o [pg_scann](/features/05-indice-scann.md) — não os ~25×. Isso não invalida
+o veredito sobre a biblioteca; torna insustentável usá-lo como se falasse do **produto**.
+
+**A configuração do AM decide o que se mede, e três defaults enganam:**
+
+- `scann.num_leaves_to_search` **não tem efeito** sem `LOAD 'alloydb_scann'` na sessão, e o `SET`
+  sucede.
+- `quantizer='AH'` **falha** com `AH quantization is not enabled for the index` a menos que
+  `scann.enable_ah_quantizer` esteja ligado **no momento do build**; o flag vem `off`, então o default
+  constrói `SQ8`. Valores válidos: `SQ8`, `Flat`, `AH`.
+- `scann.pre_reordering_num_neighbors` — o rescore por distância exata dos candidatos quantizados —
+  vem `-1`. Com AH e 80 de 316 leaves: `-1` dá recall **0,6568**, `100` dá **0,9964**, `500` dá
+  **0,9998**. **O teto é do quantizador, não do índice**, e medi-lo no default produziria alegação
+  falsa contra o produto.
+
 [^scann-repo]: ScaNN, repositório oficial
 [^recalled]: Conhecimento do produtor, não verificado contra fonte nesta redação

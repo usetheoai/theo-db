@@ -239,3 +239,44 @@ Gatilho: avaliação independente publicada em 2026-08-15, que mediu o índice S
 build 7–9× mais rápido, e **não conseguiu estabelecer a recall** — 0,15 obtido, com a causa identificada
 (`scann.num_leaves_to_search` sem efeito sem `LOAD`, e sem aviso). Registramos a **não-reprodução**, não uma
 refutação: o avaliador declara não confiar no número e não o publica.
+
+---
+
+## 2026-08-17 — a comparação do ADR-0061 foi feita, e três configurações erradas vieram antes da certa
+
+**O gap contra o access method foi medido, e ele colapsa.** `benchmarks/b057-scann-am-headtohead.md`:
+a recall casado no SIFT-128 a 100k, na mesma máquina e no mesmo arnês, o `scann` AM é **1,2–1,6×** o
+`theodb_hnsw` — não os ~25× que o ADR-0035 registrou contra a biblioteca. A entrada de 2026-08-16 acima
+previu exatamente isto; a medição a confirmou.
+
+**Duas correções ao que eu mesmo escrevi, ambas por acréscimo no ADR-0035.** A primeira comparou
+`theodb_hnsw` — grafo puro, sem quantizador — contra o `scann` com AH e rescore: nosso grafo contra o
+IVF-quantizado deles, comparação real e pergunta errada. O TheoDB **tem** a receita, e o arco no código
+chama-se `pg_scann` (`ann/ivf_aqah.rs` no M75, `am/scan.rs::scan_ivf_aq` no M77): `pq_subspaces` é o
+quantizador anisotrópico, `pq_bits=4` a largura LUT16, `aq_threshold` o T, `soar_lambda` o SOAR,
+`separate_storage=1, refine=1` o rescore exato. A recall casado ≈ 0,957, o `pg_scann` faz **476,5 QPS**
+contra **438,8** do `scann` — um ponto, não uma fronteira.
+
+A segunda: `benchmarks/b061-columnar-crossover.md` preserva a retratação de que o `theodb_columnar` seria
+14–20× mais lento que o heap sem crossover. Medi no default, e `theodb.enable_columnar_agg` vem **`off`** —
+1407 ms com `Seq Scan` contra 108 ms com `Custom Scan (theodb_columnar_agg)`, mesma tabela, mesma query.
+Com o pushdown ligado o crossover existe entre 10 mil e 100 mil linhas.
+
+**A classe que atravessa tudo virou guia.** `guides/instrumento-reporta-o-pedido.md`: quatro instrumentos
+respondem o que foi *pedido* em vez do que está *em vigor* — `current_setting` contra `pg_settings`,
+`g_columnar_columns` contra `Memory Used`, residência contra o plano (e por query), e o default contra o
+flag verificado. Nenhum falha; três produziram bundle `VALID` com fronteira plausível.
+
+A assimetria é o que torna isto sério e está escrita lá: medir-nos num default aleijado custa um número;
+**medir o concorrente num default aleijado produz alegação falsa que nos favorece**. O resultado que estava
+na mão era "o scann teto em 0,66 de recall enquanto o nosso chega a 0,9956" — e o teto era o rescore
+desligado, não o índice.
+
+**`technologies/alloydb.md` e `technologies/scann.md` deixaram de ser escritos por documentação.** O Omni
+foi executado: query layer sem storage desagregado, imagem em PostgreSQL 17.9, nada instalado por default,
+opclasses `cosine`/`dot_product`/`l2`, e um engine colunar com quatro estados dos quais três caem para heap
+em silêncio.
+
+**Limite honesto:** três destas medições saíram de script direto contra os adapters, não de bundle do arnês —
+corretas e **não reproduzíveis por terceiros**. Virou [[B-069]], e a regra de que toda medição publicável sai
+do `theodb-bench` passou a ser invariante do repositório do arnês.
