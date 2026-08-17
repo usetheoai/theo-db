@@ -56,6 +56,54 @@ fronteira de alta dimensão e alto recall permanece do pgvector.
 > `LOAD 'alloydb_scann'`, sem aviso. O avaliador declara não confiar no número e não o publica; registramos a
 > não-reprodução, não uma refutação.
 
+> **ACRÉSCIMO 2026-08-17 — o gap FOI medido contra o access method, e ele colapsa.** O [[B-057]] rodou a
+> comparação que o acréscimo acima dizia ser possível: `theodb_hnsw` e `scann` no **mesmo arnês**
+> (`theodb-bench`), na **mesma máquina** (droplet efêmero `138.197.22.192`, 8 vCPU / 16 GB), com o **mesmo
+> SIFT-128** verificado por checksum (`dd6f0a6e…ca5984`), comparados a **recall casado**.
+>
+> A **100 000 vetores**, k=10, 500 queries:
+>
+> | recall casado | `theodb_hnsw` | `scann` AH + rescore | razão |
+> |---|---|---|---|
+> | ≈ 0,96 | 365,6 QPS @ 0,9616 | 438,8 QPS @ 0,9590 | scann **1,20×** |
+> | ≈ 0,996 | 148,9 QPS @ 0,9956 | 244,7 QPS @ 0,9958 | scann **1,64×** |
+>
+> **1,2–1,6×, não 25×.** A hipótese do B-057 estava certa: a segunda metade da causa que este ADR atribui ao gap
+> — "não pagar o imposto MVCC/WAL" — é o que respondia pela maior parte dele. O AM paga o mesmo imposto que nós,
+> e sobra a vantagem algorítmica do AH-LUT, que nesta medição vale **menos de 2×**.
+>
+> **A configuração importou mais que o resultado, e três tentativas erradas vieram antes da certa** — cada uma
+> produzindo um número que parecia publicável:
+>
+> 1. Sem `LOAD 'alloydb_scann'`: `SET scann.num_leaves_to_search` sucede, `pg_settings` não lista o GUC, a busca
+>    corre no default `0`. É a armadilha que o avaliador independente documentou; o portão de knob do [[B-060]]
+>    recusou a corrida.
+> 2. Com `quantizer='SQ8'`: `VALID`, fronteira completa — e **quantização escalar**, não o AH que este ADR
+>    credita. `quantizer='AH'` **falha** com `AH quantization is not enabled for the index` a menos que
+>    `scann.enable_ah_quantizer` esteja ligado **no build**; o flag vem `off`.
+> 3. Com AH e sem rescore: teto de recall em **0,658**, e 4× mais leaves comprando 1,4 ponto — assinatura de erro
+>    de quantização. `scann.pre_reordering_num_neighbors` vem `-1`; medido no mesmo índice e nos mesmos 80 leaves,
+>    `-1` → **0,6568**, `100` → **0,9964**, `500` → **0,9998**.
+>
+> A terceira é a que importa registrar: publicar *"o scann do AlloyDB teto em 0,66 enquanto o nosso chega a
+> 0,9956"* seria **alegação falsa contra outro produto**, e a mais perigosa das que este projeto rastreia, porque
+> nos favorecia. A classe [[B-034]]/[[B-041]] apontada para fora.
+>
+> **Ressalvas, e nenhuma é opcional.** A escala medida é **100 000**, e este ADR mediu a **1M** — índice
+> IVF-com-quantização e índice de grafo não escalam igual, e comparar as duas escalas seria comparar dois
+> experimentos. Quase todas as linhas vêm `(unstable)` do próprio arnês (perfil `smoke`, 3 repetições, sem teste
+> pareado de significância). TheoDB em PostgreSQL **18.6**, Omni em **17.9** — a corrida cruza uma major. E
+> **nenhum dos lados foi tunado**: `num_leaves=316` (≈√100 000), `pre_reordering=100` e `m=16` são escolhas.
+>
+> **O que este acréscimo autoriza e o que não autoriza.** Autoriza: dizer que *contra o access method do produto
+> concorrente, a 100k, a recall casado, o gap é de ordem 1,2–1,6× e não de 25×*. **Não** autoriza reescrever o
+> item 2 do veredito abaixo — o "NÃO-ALCANÇÁVEL" foi medido contra a biblioteca e continua verdadeiro sobre ela.
+> O que ele torna insustentável é usar aquele item como se falasse do **produto**: para o produto, a evidência
+> agora aponta na direção oposta, e fechar 1,6× é uma pergunta de engenharia, não de paradigma.
+>
+> Reabrir o veredito é decisão do owner, e depende do número a 1M. Evidência completa em
+> `.claude/knowledge-base/discoveries/opportunities/b057-scann-am-headtohead-opportunity.md`.
+
 ## Eixo 2 — o gap de paradigma até o ScaNN
 
 O head-to-head [m33](/benchmarks/m33-scann-headtohead.md) mediu o [ScaNN](/technologies/scann.md)

@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-67 items — **Open** 36 · **In flight** 27 · **Closed** 4
+70 items — **Open** 39 · **In flight** 27 · **Closed** 4
 
-### Open (36)
+### Open (39)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -110,6 +110,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela----) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `raw` | — |
 | [`B-066`](#b-066--a-contenção-escritascan-não-é-medível-não-existe-arnês-concorrente----) | A contenção escrita×scan não é medível: não existe arnês concorrente | `raw` | — |
 | [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada----) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `raw` | — |
+| [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala----) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `raw` | — |
+| [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `raw` | — |
+| [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala----) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `raw` | — |
 
 ### In flight (27)
 
@@ -2696,3 +2699,78 @@ dod:
   - o artefato do benchmark carrega os campos da família de workload que rodou, sem campos vetoriais vazios
     fingindo forma
   - `theodb-bench list` mostra a suíte analítica ao lado das vetoriais
+
+## B-068 — A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala   [ ]
+
+domain: theo-db
+repo: theodb-bench
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-17 no droplet `138.197.22.192`, ao tentar a corrida SIFT1M do [[B-057]].
+`PostgresAdapter.load_dataset` (`src/adapters/postgres.py:256`) e `load_analytical` carregam por
+`cursor.executemany` em lotes de `COPY_BATCH = 1000` — **mil round-trips de mil linhas** para um milhão de
+vetores. O `COPY_BATCH` está nomeado como se fosse `COPY`, e o caminho não usa `COPY` em lugar nenhum:
+`grep -n "COPY " src/adapters/postgres.py` não devolve comando SQL `COPY`, só a constante. O psycopg 3 expõe
+`cursor.copy()` com protocolo binário, que é a forma que o PostgreSQL oferece para carga em massa.
+Consequência medida: a corrida de 1M não completou em **10 minutos** na fase de carga, contra ~1 minuto para a
+mesma suíte a 100k. O tempo de carga não entra em nenhum número publicado — mas decide quais escalas são
+medíveis, e portanto quais alegações o projeto pode fazer.
+why_now: o [[B-057]] existe para responder se o gap de ~25× do `ADR-0035` sobrevive quando medido contra o
+access method em vez da biblioteca, e a ressalva decisiva da sua resposta é **escala** — o ADR mediu a 1M. Com a
+carga linha-a-linha, cada iteração dessa medição custa dezenas de minutos, o que na prática empurra o arnês para
+escalas onde a pergunta não é a mesma. O oráculo de recall, que tinha o mesmo tipo de problema (10,5 GB de RSS
+por causa de um `np.tile` de 4 GB), já foi consertado no mesmo dia; a carga é a metade que sobrou.
+status: raw
+dod:
+  - a carga usa `COPY` binário via `cursor.copy()`, e um teste prova que o caminho emitido é `COPY` e não
+    `INSERT`
+  - o tempo de carga de 1M × 128 é medido antes e depois, na mesma máquina, e a razão é registrada
+  - o número de linhas carregadas continua verificado contra o esperado (`LoadOutcome.complete`) — velocidade
+    não pode custar a prova de que tudo chegou
+  - a constante `COPY_BATCH` passa a descrever o que o código faz, ou desaparece
+
+## B-069 — Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts   [ ]
+
+domain: theo-db
+repo: theodb-bench
+suggested_mode: review
+source: human
+evidence: decisão do owner em 2026-08-17: *"nosso sistema de benchmarker está correto, TODAS as medições devem
+ser feitas através dele, e você deve evoluí-lo em SOTA level — o nosso bench vai ser publicado"*. Medido contra o
+próprio trabalho do dia: o crossover do colunar do [[B-061]] (`/root/crossover.py`), o probe de rescore do ScaNN
+(`/root/rerank-probe.py`) e a reprodução do 1M (`/root/theodb-1m.py`) rodaram **direto contra os adapters**, sem
+bundle, sem validação de schema, sem registro de ambiente e sem artefato imutável. Os números estão corretos e
+**não são reproduzíveis por terceiros**, que é o requisito que "publicado" impõe.
+why_now: três defeitos do arnês foram encontrados exatamente por tentar passar tudo por ele, e cada um bloqueava
+a passagem: o `statement_timeout` único cancelava o build de 1M (consertado — build tem orçamento próprio), o
+`sut_crashed` culpava o motor por recusa do portão (consertado — aborto classificado em três checks) e o
+`over_fetch` não era varrível (consertado). Enquanto medições saírem por fora, defeitos assim não aparecem —
+o script contorna o arnês e o arnês nunca é exercitado no caminho que o usuário final vai percorrer.
+status: raw
+dod:
+  - o crossover do colunar sai de `theodb-bench run` com bundle válido, e o número publicado cita o bundle
+  - o efeito do `pre_reordering_num_neighbors` do ScaNN é uma varredura registrada, não um script
+  - existe um teste ou gate que detecta número citado em documento sem bundle correspondente — a alegação e o
+    artefato deixam de poder divergir
+  - `docs/` do `theodb-bench` documenta que medição fora do arnês não é publicável, com a razão
+
+## B-070 — Carga de 1M por `executemany` domina o tempo de toda corrida em escala   [ ]
+
+domain: theo-db
+repo: theodb-bench
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-17 no droplet `138.197.22.192`: `load_dataset` levou **122 s** para carregar
+1 000 000 × 128 do SIFT via `cursor.executemany` em lotes de `COPY_BATCH = 1000` — mil round-trips. O nome da
+constante diz `COPY` e o código não emite `COPY` nenhum: `grep -n "COPY "` em `src/adapters/postgres.py` devolve
+só a constante. O psycopg 3 expõe `cursor.copy()` com protocolo binário.
+why_now: duplica o [[B-068]] em espírito e o supera em precisão — o B-068 estimou o custo, este o mediu (122 s,
+medido, contra "não completou em 10 minutos" que era a fase de carga **mais** o build). Manter os dois é
+redundante; este bloco carrega a medição e o [[B-068]] deve ser fechado como `killed` com `kill_reason` apontando
+para cá, ou este ser fundido nele — decisão de quem planejar.
+status: raw
+dod:
+  - a carga usa `COPY` binário, e um teste prova que o SQL emitido começa com `COPY` e não com `INSERT`
+  - o tempo de carga de 1M × 128 é medido antes e depois na mesma máquina, e a razão entra no CHANGELOG
+  - `LoadOutcome.complete` continua provando que todas as linhas chegaram — velocidade não substitui a prova
+  - a constante `COPY_BATCH` descreve o que o código faz, ou some
