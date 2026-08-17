@@ -292,3 +292,32 @@ o que justificou o terceiro (dos 75 s, **72 eram `repr()` em Python**, 128 milh�
 **284 GB livres** no host medido. A capacidade está entregue e verificada a 10M; a corrida exige outra máquina,
 e construir HNSW sobre 1B é trabalho de dias. Registrado porque um benchmark cujas alegações de escala
 ultrapassam suas medições é pior que um que declara seus limites, e este vai ser publicado.
+
+**A escala de referência passou a ser 20M, escolhida por medição e não por ambição.** `1,27 GB por milhão`
+medido no host (558 MB de heap + 724 MB de `theodb_hnsw` para 1M × 128, m=16) põe 20M em **25,4 GB — 9% do
+disco**. 100M cabe e transforma o build em horas; **~200M é o teto físico** e não deixa margem para
+`maintenance_work_mem` nem para spill de ordenação. Um bilhão são 1,27 TB e **não cabe** — o que
+`benchmarks/harness-scale-ceiling.md` já registrava por outra conta.
+
+O corpus é **real**: os primeiros 20 000 000 registros do BIGANN (`bvecs`, SIFT uint8 do TEXMEX), verificados
+por checksum. Repetir o SIFT1M vinte vezes exercitaria os mesmos bytes e produziria recall sem sentido — a
+ressalva que a medição de 10M carrega e que esta remove.
+
+Três peças tiveram que existir. Um **leitor** de `bvecs` que checa a dimensão declarada por registro (ela se
+repete; ler plano reinterpretaria todo vetor seguinte no deslocamento errado). Um **oráculo em streaming**,
+exato porque a ordem `(distância, id ascendente)` é total e o top-k de uma ordem total se recupera fundindo
+top-k por partição — um top-k corrente que guardasse "os k menores por valor" **não** seria, porque num chunk
+com mais empates que k a escolha é arbitrária e os ids menores morrem antes da fusão. E **uma abstração no
+lugar de dois `isinstance`**: o benchmark faz exatamente duas coisas com o corpus, e nenhuma delas tem
+interesse em qual forma ele tem.
+
+**A verdade fundamental (`ground truth`) é computada, nunca lida.** O BIGANN publica ids de vizinhos para o
+bilhão inteiro; contra um prefixo de 20M eles nomeiam linhas que não existem. O arnês **recusa**, em vez de
+descartar — descartar **aumentaria** o recall, removendo exatamente os vizinhos que o sistema não achou.
+
+**E a carga de 20M abortou, por defeito nosso.** `guides/orcamento-que-limita-a-coisa-errada.md` registra:
+`COPY bench_vectors, line 4569000`, cancelado pelo `statement_timeout` de **consulta** aplicado a uma
+**carga**. O arnês classificou certo — `budget_exceeded`, com a frase *"the system under test did not
+fail"* — e essa distinção é o valor inteiro: colapsá-la publicaria *"o TheoDB não aguentou 20M"* quando o
+que não aguentou foi um timeout que nós escrevemos. Build e carga agora compartilham um mecanismo só, porque
+são a mesma classe de trabalho: não medido, em massa, duração proporcional ao tamanho.

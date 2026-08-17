@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-74 items — **Open** 39 · **In flight** 31 · **Closed** 4
+75 items — **Open** 39 · **In flight** 32 · **Closed** 4
 
 ### Open (39)
 
@@ -114,7 +114,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `raw` | — |
 | [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem----) | Dois flags de perfil prometem gates que não existem | `raw` | — |
 
-### In flight (31)
+### In flight (32)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -148,6 +148,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada----) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `planned` | — |
 | [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala----) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
+| [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina----) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `planned` | — |
 
 ### Closed (4)
@@ -2884,6 +2885,41 @@ dod:
     vocabulário
   - cada pilar que ganhar adapter ganha junto o portão equivalente ao de residência do colunar: a capability
     só é declarada quando o caminho é provado, nunca quando é escrito
+
+## B-075 — A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio   [ ]
+
+domain: theo-db
+repo: theodb-bench
+suggested_mode: evolve
+source: human
+evidence: medido em 2026-08-17 no droplet efêmero `138.197.22.192` (s-8vcpu-16gb, nyc3). **1,27 GB por
+milhão** (558 MB de heap + 724 MB de `theodb_hnsw` para 1M × 128, m=16) põe 20M em **25,4 GB — 9% dos 278 GB
+livres**; 100M cabe (46%) e o build vira horas; **~200M é o teto físico** sem margem para
+`maintenance_work_mem` nem spill; 1B são 1,27 TB e não cabem. Corpus: primeiros **20 000 000 registros do
+BIGANN** (`bvecs`, uint8 SIFT/TEXMEX), formato verificado contra os bytes reais (int32 dim + 128 uint8 =
+132 B/registro), 2 640 000 000 bytes exatos, checksum `36c27c17…b148c710`, carregados: **20 000 000 linhas,
+11 GB**. Build de `theodb_hnsw` a 10M **cancelado aos 30 min sem fechar** (com pressão de memória) — o que
+dimensiona a expectativa do build de 20M em horas.
+why_now: o owner escolheu 20M como escala de referência publicável, e "publicável" exige recall real — o
+SIFT1M repetido dez vezes exercita a carga e produz recall sem sentido (ressalva que
+`benchmarks/harness-scale-ceiling.md` carrega). Sem corpus distinto, oráculo que não segure 10,2 GB e um
+orçamento de carga separado do de consulta, a escala não é medível, só declarável.
+status: planned
+closed_partially: 2026-08-17 — **corpus, leitor, oráculo, binding e carga entregues e verdes** (841 testes,
+  `mypy --strict` limpo). Entregue: `BvecsSource` (checa a dimensão declarada **por registro** — ela se repete,
+  e ler plano reinterpretaria todo vetor seguinte no deslocamento errado), `streaming_ground_truth` (exato
+  porque `(distância, id ascendente)` é ordem total e o top-k de ordem total se recupera fundindo top-k por
+  partição; empates de fronteira **re-admitidos por chunk**, senão os ids menores morrem antes da fusão),
+  `PrefixSource`, `CorpusBinding` com duas implementações, e o manifest `bigann-20m-euclidean`.
+  **Defeito do arnês encontrado pela corrida real:** a carga rodava sob o orçamento de **consulta** e abortou
+  em `COPY bench_vectors, line 4569000`. O arnês classificou certo — `budget_exceeded`, *"the system under
+  test did not fail"* — e build e carga agora compartilham `_under_bulk_budget`.
+  **Aberto:** o build de `theodb_hnsw` a 20M e a fronteira recall×QPS que ele habilita.
+dod:
+  - existe um bundle `VALID` de `vector/bigann20m/load` com 20 000 000 de linhas carregadas
+  - existe um bundle de `vector/bigann20m/hnsw` com recall real contra oráculo computado, ou o custo do build
+    registrado como limite medido quando ele não fechar
+  - nenhum número de 20M é publicado sem sair de `theodb-bench run` (invariante 11 do arnês)
 
 ## B-074 — O teste pareado cancela variância de query, e não cancela deriva temporal da máquina   [ ]
 

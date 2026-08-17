@@ -14,6 +14,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Escala de referência de 20 000 000 de vetores registrada no backlog (B-075) e documentada na wiki:
+  corpus BIGANN real verificado por checksum, oráculo em streaming e a razão de 20M e não 100M (#B-075)
+
+### Added
 - **`m` e `ef_construction` viram opções de índice de verdade** (B-036): `CREATE INDEX … USING theodb_hnsw (e) WITH (m = 32, ef_construction = 200)` passa a ser aceito **e honrado** — até aqui devolvia `unrecognized parameter "m"`, e o build era fixo em 16/64. É a sintaxe de build do pgvector, que o ADR-0029 § D2 promete como drop-in
 - O valor pedido é honrado nos **quatro** caminhos que constroem grafo, não só no `CREATE INDEX`: build inicial, índice vazio, INSERT posterior e o fold do VACUUM. Um índice criado com `ef_construction=200` deixaria de honrá-lo a cada linha inserida depois, e um VACUUM o reconstruiria com o default — em silêncio nos dois casos, porque `ef_construction` não é persistido em lugar nenhum (B-036)
 - Fora de faixa é **recusado nomeando a opção** (`m` em 2..39, `ef_construction` em 4..1000), não truncado em silêncio. O teto de `m` é derivado do page layout — no pior caso um nó ocupa `HNSW_MAX_LEVEL·m + m0 = 34m` slots e a tupla de vizinhos tem de caber em 8.168 bytes, o que dá 39; não é o 100 do pgvector, cujo teto de nível é outro (B-036)
