@@ -47,18 +47,24 @@ paralelo e os números (250k → 1076 MB, 500k → 1037 MB) não faziam sentido 
 |---|---|---|---|
 | 250 000 | **606 MB** | 84 s | 181 MB |
 | 1 000 000 | **1871 MB** | 422 s | 724 MB |
+| 2 000 000 | **3629 MB** | 1096 s | 1448 MB |
 
-- Ajuste: **~184 MB fixos + ~1687 MB por milhão**.
-- Projeção a 20M: **~34 GB**, contra 16 GB — coerente com a morte aos 10 GB (não chegou a pedir tudo).
-- O índice **em disco** é exatamente linear (4× linhas → 4× tamanho). O problema é o build, não o artefato.
-- Tempo é super-linear: 4× as linhas custaram **5,0×** (~N^1,16).
+- Ajuste nos três pontos: **~174 MB fixos + ~1727 MB por milhão**. O terceiro ponto foi previsto pelo
+  ajuste dos dois primeiros com **2,0% de erro** — é isso que torna a projeção utilizável, porque não há
+  economia de escala esperando adiante.
+- Projeção a 20M: **~34,7 GB**, contra 16 GB — coerente com a morte aos 10 GB (não chegou a pedir tudo).
+- **Teto medido deste host** (≈8,3 GB disponíveis): **~4,7M vetores**.
+- O índice **em disco** é exatamente linear: **724 MB por milhão nos três pontos, sem desvio**. O custo
+  está no build, não no artefato.
+- Tempo é super-linear **e piorando**: 4× as linhas custaram **5,0×**, 2× custaram **2,6×**
+  (≈N^1,16 e N^1,38).
 
 # Os dois tetos, lado a lado
 
 | | por disco (1,27 GB/milhão) | por RAM (1,69 GB/milhão) |
 |---|---|---|
 | host medido | 309 GB | 16 GB (≈10 GB úteis) |
-| escala comportada | **~200M** | **~5,8M** |
+| escala comportada | **~200M** | **~4,7M** (medido, não projetado) |
 
 **A escala de 20M carrega e consulta** — 20 000 000 de linhas, 11 GB de tabela, consultas exatas
 respondendo. Ela **não constrói grafo** neste host. As duas coisas são verdade ao mesmo tempo, e reportar

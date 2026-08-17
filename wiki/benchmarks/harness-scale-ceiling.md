@@ -15,7 +15,7 @@ sources:
 > **Correção por acréscimo (2026-08-17).** As contas de teto abaixo são de **disco**, e continuam certas
 > sobre disco. Elas são **silenciosas sobre RAM**, e é a RAM que decide a construção de índice: medido em
 > [o teto de escala do build de HNSW é RAM](/benchmarks/build-hnsw-teto-de-ram.md), o build mantém
-> **~1,7 GB por milhão** em memória do backend, o que põe o teto de construção deste host em **~5,8M** —
+> **~1,7 GB por milhão** em memória do backend, o que põe o teto de construção deste host em **~4,7M** —
 > não nos ~200M que o disco comportaria. Carga e consulta a 20M funcionam; construção de grafo não.
 
 **10 000 000 de vetores carregados em 155 s, com o corpus nunca residente.** Medido no droplet efêmero
