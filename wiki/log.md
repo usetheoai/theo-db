@@ -321,3 +321,24 @@ descartar — descartar **aumentaria** o recall, removendo exatamente os vizinho
 fail"* — e essa distinção é o valor inteiro: colapsá-la publicaria *"o TheoDB não aguentou 20M"* quando o
 que não aguentou foi um timeout que nós escrevemos. Build e carga agora compartilham um mecanismo só, porque
 são a mesma classe de trabalho: não medido, em massa, duração proporcional ao tamanho.
+
+
+**E a escala de 20M produziu o achado que corrige a própria recomendação que a escolheu.** O
+`CREATE INDEX … USING theodb_hnsw` sobre 20M foi **morto pelo OOM killer** — `anon-rss:10033724kB`, com o
+`DETAIL` do PostgreSQL nomeando exatamente esse comando. `benchmarks/build-hnsw-teto-de-ram.md` registra a
+curva medida isoladamente: **250k → 606 MB**, **1M → 1871 MB**, ou **~1687 MB por milhão** — e
+`maintenance_work_mem` estava em 64 MB o tempo todo.
+
+**O dimensionamento que eu publiquei horas antes olhava o disco.** 1,27 GB/milhão dizia que ~200M cabiam;
+pela RAM, o host de 16 GB comporta **~5,8M**. As duas contas estão certas sobre o que mediram, e escolher
+20M com base só na primeira foi a omissão. A correção entrou **por acréscimo** em
+`benchmarks/harness-scale-ceiling.md`, não por reescrita.
+
+Causa-raiz localizada e filada como **#230**: `am/build.rs:403` chama `collect_corpus` incondicionalmente
+no `ambuild_hnsw`, enquanto a rota de memória limitada do M96 (`should_stream`, que já lê o GUC certo) fica
+atrás de um gate de opções do **IVFFlat**. E a **#221** registra a mesma classe no colunar — dois
+componentes ignorando o mesmo orçamento é ausência de contrato de memória, não dois bugs.
+
+**O que a escala de 20M de fato entrega, dito inteiro:** carrega (20 000 000 de linhas, 11 GB) e consulta
+por varredura exata; **não** constrói índice de grafo neste host. Reportar só a primeira metade seria a
+omissão que o acervo existe para impedir.

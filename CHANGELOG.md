@@ -13,6 +13,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Documentado que o build de `theodb_hnsw` mantém ~1,7 GB por milhão de vetores em memória do
+  backend e é morto pelo OOM killer a 20M — o teto de escala do build é RAM, não disco (#230)
+
 ### Added
 - Escala de referência de 20 000 000 de vetores registrada no backlog (B-075) e documentada na wiki:
   corpus BIGANN real verificado por checksum, oráculo em streaming e a razão de 20M e não 100M (#B-075)

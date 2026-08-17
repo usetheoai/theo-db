@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-75 items — **Open** 39 · **In flight** 32 · **Closed** 4
+76 items — **Open** 40 · **In flight** 32 · **Closed** 4
 
-### Open (39)
+### Open (40)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -104,6 +104,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança----) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `raw` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `raw` | — |
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `raw` | — |
+| [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `raw` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `raw` | — |
 | [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default----) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `raw` | — |
 | [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado----) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `raw` | — |
@@ -2305,6 +2306,34 @@ dod:
 > Registrado 2026-08-16. **Não é reabertura do ADR-0002 nem contestação do M73** — a vantagem algorítmica do
 > AH-LUT é real e está medida. É a observação de que a comparação usou um substituto mais favorável ao
 > concorrente do que o produto dele, e que o produto agora é obtenível.
+
+## B-076 — O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco   [ ]
+
+domain: theo-db
+repo: theo-db
+suggested_mode: bug
+source: discover-live-test
+evidence: medido em 2026-08-17 no droplet efêmero `138.197.22.192` (s-8vcpu-16gb). `CREATE INDEX … USING
+theodb_hnsw … WITH (m=16)` sobre 20 000 000 de vetores foi **morto pelo OOM killer**:
+`Out of memory: Killed process 209232 (postgres) … anon-rss:10033724kB`, com o `DETAIL` do PostgreSQL
+nomeando exatamente esse `CREATE INDEX`. Curva medida isoladamente, `maintenance_work_mem=64MB`:
+**250k → 606 MB** de pico de `VmRSS` do backend / 84 s / índice 181 MB; **1M → 1871 MB** / 422 s /
+índice 724 MB. Ajuste: **~184 MB fixos + ~1687 MB por milhão**; projeção a 20M **~34 GB** contra 16 GB
+do host. O índice em **disco** é exatamente linear (4× linhas → 4× tamanho), então o problema é o build.
+Causa-raiz localizada: `am/build.rs:403` chama `collect_corpus` **incondicionalmente** no `ambuild_hnsw`,
+e a rota de memória limitada do M96 (`build_stream.rs::should_stream`, que já lê o GUC certo) está atrás
+do gate `pq_subspaces > 0 && separate_storage` — opções do **IVFFlat**. Issue: **#230**.
+why_now: a escala de referência de 20M ([[B-075]]) carrega e consulta (20M linhas, 11 GB) mas **não
+constrói grafo** neste host, e o dimensionamento que eu mesmo publiquei olhava o disco: 1,27 GB/milhão
+dizia que ~200M cabiam. Pela RAM, um host de 16 GB comporta **~5,8M**. Qualquer fronteira recall×QPS a
+20M e qualquer alegação de escala bilhão dependem disto.
+status: raw
+dod:
+  - o build do `theodb_hnsw` respeita um orçamento de memória declarado, ou **falha cedo com mensagem que
+    o nomeie** — hoje o operador recebe um servidor reiniciado e nenhuma pista
+  - a curva de memória é re-medida depois do fix nos mesmos 3 pontos, pelo `theodb-bench`
+  - a relação com [[B-058]] e a issue #221 é resolvida por escrito: dois componentes ignorando o mesmo
+    orçamento é ausência de contrato de memória, não dois bugs isolados
 
 ## B-058 — O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos   [ ]
 
