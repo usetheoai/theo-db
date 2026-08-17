@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-73 items — **Open** 42 · **In flight** 27 · **Closed** 4
+74 items — **Open** 43 · **In flight** 27 · **Closed** 4
 
-### Open (42)
+### Open (43)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -116,6 +116,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `raw` | — |
 | [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem----) | Dois flags de perfil prometem gates que não existem | `raw` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `raw` | — |
+| [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina----) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `raw` | — |
 
 ### In flight (27)
 
@@ -2869,3 +2870,33 @@ dod:
     vocabulário
   - cada pilar que ganhar adapter ganha junto o portão equivalente ao de residência do colunar: a capability
     só é declarada quando o caminho é provado, nunca quando é escrito
+
+## B-074 — O teste pareado cancela variância de query, e não cancela deriva temporal da máquina   [ ]
+
+domain: theo-db
+repo: theodb-bench
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-17, logo depois de o teste pareado passar a rodar ([[B-071]]). A comparação
+`theodb × alloydbomni` a recall casado devolveu p = 0,0001, n = 500, IC 95% [−0,753, −0,624] ms, dz = −0,94 e
+**448 de 500 queries** a favor do `theodb` — sinal nítido. **Mas as duas corridas foram sequenciais**, com
+~4 minutos de intervalo, e o pareamento remove a variância de **dificuldade de query**, não a de **estado da
+máquina**.
+Que a segunda é grande está medido no mesmo dia: a mesma configuração `pg_scann probes=20` deu **476,5**,
+**385,0** e **402,8** QPS em três corridas (24% de amplitude), e `scann leaves=20` deu **438,8** e **299,6**
+(46%). Se a máquina estava mais carregada durante uma das corridas do par, o teste pareado atribui essa
+diferença ao motor com a mesma confiança com que atribuiria uma diferença real — e o IC estreito **não**
+protege disso, porque ele mede a dispersão entre queries, não entre corridas.
+why_now: o teste pareado é o que torna o arnês publicável (I14), e ele acabou de produzir seu primeiro veredito
+com p = 0,0001. Um veredito forte obtido sob um confundidor não controlado é mais perigoso que nenhum veredito:
+ele convida a citação. O SOTA para isto é **intercalar** — a mesma query respondida pelos dois sistemas em
+sequência imediata, alternando a ordem para não favorecer o aquecimento de nenhum lado.
+status: raw
+dod:
+  - existe modo de corrida intercalada: um executor que percorre a query `i` nos dois sistemas antes de passar
+    para a `i+1`, com a ordem alternada por query
+  - o artefato registra se o par veio de corridas sequenciais ou intercaladas, e o veredito **diz qual** — um
+    leitor não pode ter de adivinhar qual confundidor está em jogo
+  - a mesma comparação é rodada nos dois modos na mesma máquina, e a diferença entre os vereditos é medida:
+    se intercalar não muda o resultado, isso é um honest-negative que vale registrar
+  - enquanto o modo intercalado não existir, o rodapé do veredito pareado declara o limite em vez de omiti-lo
