@@ -282,3 +282,13 @@ em silêncio.
 **Limite honesto:** três destas medições saíram de script direto contra os adapters, não de bundle do arnês —
 corretas e **não reproduzíveis por terceiros**. Virou [[B-069]], e a regra de que toda medição publicável sai
 do `theodb-bench` passou a ser invariante do repositório do arnês.
+
+**Teto de escala do arnês, medido.** `benchmarks/harness-scale-ceiling.md` registra 10 000 000 de vetores
+carregados em 155 s com **1,16 GB de RSS** contra 5,1 GB de corpus — o corpus nunca residente. A escada até
+lá: `executemany` **122 s** → COPY texto **75 s** → COPY binário **16,8 s** por milhão, e o degrau do meio é
+o que justificou o terceiro (dos 75 s, **72 eram `repr()` em Python**, 128 milhões deles).
+
+**O bilhão está quantificado e não alcançado:** 520 GB de tabela, ~780 GB com HNSW, 4,3 h de carga — contra
+**284 GB livres** no host medido. A capacidade está entregue e verificada a 10M; a corrida exige outra máquina,
+e construir HNSW sobre 1B é trabalho de dias. Registrado porque um benchmark cujas alegações de escala
+ultrapassam suas medições é pior que um que declara seus limites, e este vai ser publicado.

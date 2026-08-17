@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-74 items — **Open** 40 · **In flight** 30 · **Closed** 4
+74 items — **Open** 39 · **In flight** 31 · **Closed** 4
 
-### Open (40)
+### Open (39)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -113,9 +113,8 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `raw` | — |
 | [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `raw` | — |
 | [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem----) | Dois flags de perfil prometem gates que não existem | `raw` | — |
-| [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `raw` | — |
 
-### In flight (30)
+### In flight (31)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -148,6 +147,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-064`](#b-064--o-eixo-theodb-do-próprio-arnês-não-constrói-índice-ele-emite-a-sintaxe-do-pgvector-contra-os-ams-do-theodb----) | O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB | `planned` | — |
 | [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada----) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `planned` | — |
 | [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala----) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `planned` | — |
+| [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina----) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `planned` | — |
 
 ### Closed (4)
@@ -2864,7 +2864,19 @@ why_now: o `CLAUDE.md` do `theodb-bench` descreve sete superfícies de capacidad
 TheoDB entrega híbrido, BM25, rerank, Parquet, grafo e vectorizer como produto. Enquanto o arnês não os
 alcançar, **nenhuma alegação sobre esses pilares tem artefato** — e o bench vai ser publicado. Este item é o
 mapa; cada pilar é trabalho próprio.
-status: raw
+status: planned
+closed_partially: 2026-08-17 — **11 de 14 alcançáveis** (era 6). Acrescentados: `parquet`
+  (`write_parquet`/`read_parquet`), `lexical` (`bm25_build`/`bm25_search`), `graph` (`theodb.graph_build` +
+  `graph_expand` + `graph_expand_card`), `hybrid` (`ai.hybrid_search_rrf`) e `vector_quantized` (`pq_subspaces`,
+  já exercitado pela suíte `vector/sift/pg-scann`). Todos verificados contra servidor real, não contra duplos.
+  **As funções não estavam onde a documentação implicava** — `bm25_*` e `*_parquet` vivem em `public`, não em
+  `theodb`; achadas por `pg_proc`.
+  **Aberto, e por razão medida:** `rerank`, `vectorizer` e `ai_sql` alcançam modelo externo. Sem endpoint não há
+  o que medir, e um stub poria número onde cabe ausência. Um teste parametrizado exige que fiquem fora.
+  **Achado extra que vale registrar:** a perna lexical do híbrido na imagem publicada é `ts_rank_cd`, **não
+  BM25** — `lexical_engine='bm25'` recusa com *"requires the pg_textsearch extension … not present on the
+  shipped image"*. Um número híbrido desta imagem **não** exercita o índice BM25 que o load constrói, e o
+  docstring diz isso.
 dod:
   - existe um relatório gerado (não escrito à mão) que lista cada capability e quais adapters a exercitam,
     e ele entra no `README`
