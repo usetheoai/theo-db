@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-64 items — **Open** 34 · **In flight** 26 · **Closed** 4
+67 items — **Open** 36 · **In flight** 27 · **Closed** 4
 
-### Open (34)
+### Open (36)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -105,11 +105,13 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `raw` | — |
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `raw` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `raw` | — |
-| [`B-061`](#b-061--só-duas-suites-registradas-as-duas-vetoriais-o-colunar-não-tem-onde-ser-comparado----) | Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado | `raw` | — |
 | [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default----) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `raw` | — |
 | [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado----) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `raw` | — |
+| [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela----) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `raw` | — |
+| [`B-066`](#b-066--a-contenção-escritascan-não-é-medível-não-existe-arnês-concorrente----) | A contenção escrita×scan não é medível: não existe arnês concorrente | `raw` | — |
+| [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada----) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `raw` | — |
 
-### In flight (26)
+### In flight (27)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -138,6 +140,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-053`](#b-053--o-núcleo-de-distância-vetorial-é-puro-por-uma-linha-e-é-ela-que-prende-o-micro-bench-na-suíte----) | O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-060`](#b-060--o-arnês-verifica-que-o-índice-foi-usado-e-não-verifica-que-o-knob-de-busca-pegou----) | O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou | `planned` | — |
+| [`B-061`](#b-061--só-duas-suites-registradas-as-duas-vetoriais-o-colunar-não-tem-onde-ser-comparado----) | Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado | `planned` | — |
 | [`B-064`](#b-064--o-eixo-theodb-do-próprio-arnês-não-constrói-índice-ele-emite-a-sintaxe-do-pgvector-contra-os-ams-do-theodb----) | O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB | `planned` | — |
 
 ### Closed (4)
@@ -2347,6 +2350,7 @@ OSS, enquanto o produto expõe um access method do PostgreSQL que paga o mesmo i
 com Elasticsearch/OpenSearch. Com o AlloyDB nunca foi feito, e desde que o Omni é `docker pull
 google/alloydbomni:18` a impossibilidade deixou de existir.
 status: planned
+merged: PR #2 → `9be30b1` em `develop` (`theodb-bench`), 2026-08-17. `shipped` aguarda o corte de release (`develop → main` + tag semver), per `cycle-backlog.md`.
 plan: .claude/knowledge-base/plans/b059-omni-adapter-plan.md
 opportunity: .claude/knowledge-base/discoveries/opportunities/b059-omni-adapter-opportunity.md
 review: .claude/knowledge-base/reviews/b059-omni-adapter-review-2026-08-17.md
@@ -2458,7 +2462,26 @@ why_now: o [[B-058]] tem números públicos do concorrente para o eixo colunar, 
 (**311×**) a SF100, `Q5 9,8×`, `Q1 2,0×`, `Q18 1,14×`, point lookup sem ganho, e o colunar **perdendo** para o
 heap abaixo de ~centenas de milhares de linhas. Do nosso lado o [[B-006]] registra 43 queries do ClickBench e a
 suíte completa nunca. Sem suite analítica registrada, esses números não têm onde ser respondidos.
-status: raw
+status: planned
+opportunity: .claude/knowledge-base/discoveries/opportunities/b061-analytical-suite-opportunity.md
+review: .claude/knowledge-base/reviews/b061-analytical-suite-review-2026-08-17.md
+measured: `theodb-bench` `4055420`, droplet `138.197.22.192`. **700 testes** (era 673), mypy strict e ruff
+  limpos. Dois dos quatro bullets FEITOS, dois registrados como itens próprios.
+  **Portão de residência (bullet 2) — FEITO.** O achado central: `g_columnar_columns`, que a avaliação
+  independente recomenda como prova de residência, reporta **registro e não residência** — medido, 4 colunas
+  reportadas com `Memory Used = 0 MB` e plano `Seq Scan`. Causa: o refresh falha por memória compartilhada
+  (`could not resize shared memory segment`) porque o `/dev/shm` default do Docker é 64 MB. O portão distingue
+  os quatro estados do Omni com mensagem própria para cada, e `google_columnar_engine.enabled` tem
+  `context=postmaster` — exige restart, não é flag de sessão (fato de desenho para o [[B-058]]).
+  **Crossover (bullet 3) — FEITO, e retratou um número meu.** A primeira medição, no default do motor, dizia
+  colunar 14–20× mais lento que heap e nenhum crossover. Errado: `theodb.enable_columnar_agg` vem **off**, e
+  mede-se armazenamento colunar sem o pushdown. Mesma tabela de 1M, mesma query: `off` → `Seq Scan` **1407 ms**;
+  `on` → `Custom Scan (theodb_columnar_agg)` **108 ms**. Com o pushdown ligado e verificado, o crossover existe:
+  `sum_amount` passa o heap entre 10 000 (0,80×) e 100 000 linhas (**1,75×**). Ressalvas: heap corre paralelo e
+  colunar serial; 5 repetições e mediana, sem significância — não é claim.
+  **Achado extra, e vale mais que o crossover:** o `GROUP BY` **não é coberto** pelo pushdown — cai para
+  `Seq Scan → Sort` externo com 25 456 kB em disco e é **14× mais lento que heap** a 1M linhas.
+  **Bullets fora:** shape TPC-H → [[B-065]]; estar *registrada* no runner → [[B-067]]; contenção → [[B-066]].
 dod:
   - existe suite analítica registrada, com o formato TPC-H que o concorrente publicou — a comparação exige o
     mesmo shape de query, não um shape nosso
@@ -2576,6 +2599,7 @@ máquina, e ela **não fecha** enquanto isto existir. O eixo do Omni foi consert
 opclasses do motor por adapter (o `scann` usa `cosine`/`dot_product`/`l2`); o TheoDB precisa do mesmo tratamento
 mais um: o **nome do access method** também difere, o que o Omni não exigia.
 status: planned
+merged: PR #2 → `9be30b1` em `develop` (`theodb-bench`), 2026-08-17. `shipped` aguarda o corte de release (`develop → main` + tag semver), per `cycle-backlog.md`.
 plan: consertado dentro do ciclo do [[B-059]], cujo DoD não fechava sem isto
 review: .claude/knowledge-base/reviews/b059-omni-adapter-review-2026-08-17.md § R-10
 measured_after: `theodb-bench` `a0ded65` — três bundles **VALID** na mesma máquina
@@ -2596,3 +2620,79 @@ dod:
   - a superfície de compatibilidade (`USING hnsw` via shim `vector`) fica declarada como eixo **separado** e não
     medida por default: ela é a mesma engine pelo mesmo handler, então medi-la como se fosse a nativa não
     acrescenta informação e esconde qual superfície a corrida exercitou
+
+## B-065 — O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela   [ ]
+
+domain: colunar
+repo: theodb-bench
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-17 lendo `theodb-bench` em `9be30b1`. `AnalyticalTable` (`src/adapters/base.py`)
+carrega `name`, `columns` e `path` — **uma** tabela. As quatro queries de `src/bench/analytical.py` são
+`total_rows`, `sum_amount`, `group_by_category` e `filtered_sum`: agregação sobre tabela única, com oráculo
+próprio em `expected_answer`. **Nenhuma junção é expressável.** A avaliação independente de AlloyDB publicou
+Q1/Q5/Q6/Q18 do TPC-H, e a **Q5 junta seis tabelas** (`customer`, `orders`, `lineitem`, `supplier`, `nation`,
+`region`). Suportar esse shape é redesenhar o contrato analítico — tabela múltipla, chaves, e um oráculo capaz
+de junção —, não registrar uma suíte a mais.
+why_now: o [[B-061]] entregou a suíte analítica e o portão de residência sobre o contrato que existe, e o
+primeiro bullet do seu DoD (shape TPC-H) ficou **declarado e não feito** por esta razão. Sem isto, os números
+do concorrente para Q1/Q5/Q6/Q18 não têm onde ser respondidos com o mesmo shape — e responder com shape nosso
+mede outra coisa e chama de comparação.
+status: raw
+dod:
+  - `AnalyticalTable` (ou sucessor) expressa esquema multi-tabela com chaves, e o oráculo calcula a resposta
+    esperada de uma junção sem consultar nenhum dos caminhos medidos
+  - Q1, Q6 e Q18 do TPC-H registradas como suíte, com o mesmo shape que o concorrente publicou
+  - Q5 registrada ou explicitamente declarada fora de escopo com a razão — seis junções não são um detalhe
+  - o gerador de dados é semeado e reprodutível, e o fator de escala aparece no rótulo do bundle
+
+## B-066 — A contenção escrita×scan não é medível: não existe arnês concorrente   [ ]
+
+domain: colunar
+repo: theodb-bench
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-17 em `9be30b1`. Nenhum módulo de `src/bench/` executa carga concorrente:
+`vector.py`, `analytical.py`, `graph.py` e `retrieval.py` medem sequencialmente, um ponto de operação por vez.
+`grep -rn "thread\|asyncio\|multiprocessing\|concurrent" src/bench/` não devolve nenhum executor. O
+`AnalyticalBenchmark.run` itera queries em série.
+why_now: o quarto bullet do DoD do [[B-061]] pede contenção escrita×scan **nos dois regimes** (dado em memória e
+em disco), porque foi exatamente aí que a avaliação independente mediu uma **inversão**: ligar o colunar
+**piorou** a contenção a SF100 (29% contra 16% do row store), contra empate a SF10 (13,5% ≈ 13,6%). É o único
+número do artigo em que o colunar do concorrente sai **pior**, e é portanto o mais interessante de responder —
+e o que não temos instrumento para medir. Ficou declarado e não feito no B-061.
+status: raw
+dod:
+  - existe executor concorrente que roda escrita e scan simultaneamente, com p95/p99 medidos por lado
+  - a degradação é reportada como **razão** contra a linha de base isolada, não como número absoluto
+  - os dois regimes são distinguidos no artefato: dado residente em memória e dado que excede o cache
+  - o arnês recusa reportar contenção quando a linha de base isolada não foi medida na mesma sessão — comparar
+    contra baseline de outra corrida é a classe de erro que o [[B-060]] e o [[B-063]] documentam
+
+## B-067 — O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada   [ ]
+
+domain: colunar
+repo: theodb-bench
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-17 em `4055420`. `BenchmarkEntry.workload` (`src/registry.py:132`) é tipado
+`VectorWorkload`; `runner.py:238` constrói `VectorBenchmark(request.workload, request.corpus, request.queries)`
+diretamente, e o `RunRequest` carrega `corpus`/`queries`, que são conceitos vetoriais. O `cmd_run` do
+`src/cli.py` lê `workload.corpus_size`, `.dimension`, `.query_count`, `.k`, `.metric`, `.indexes` e
+`.search_sweep` para montar o artefato do benchmark — **sete campos que `AnalyticalWorkload` não tem**.
+Consequência: a superfície analítica funciona pelos adapters (entregue no [[B-061]]: `load_analytical`,
+`execute_analytical`, portão de residência de quatro estados, pushdown verificado, prova de plano por query) e
+**não há como invocá-la por `theodb-bench run`**, porque registrar a suíte exige que o orquestrador despache por
+família de workload.
+why_now: o primeiro bullet do DoD do [[B-061]] pede "suíte analítica **registrada**". A parte de shape TPC-H
+saiu para o [[B-065]]; o que sobrou — estar registrada — depende disto, e ficou **declarado e não feito**. O
+crossover do nosso colunar foi medido por script direto contra os adapters (números em
+`.claude/knowledge-base/reviews/b061-*`), que é medição legítima e **não** é bundle validado por schema.
+status: raw
+dod:
+  - existe um protocolo de benchmark que `VectorBenchmark` e `AnalyticalBenchmark` satisfazem, e o runner
+    depende do protocolo em vez da classe concreta (DIP — `rules/architecture.md § 2`)
+  - `theodb-bench run analytical/...` produz bundle **VALID** contra os schemas versionados
+  - o artefato do benchmark carrega os campos da família de workload que rodou, sem campos vetoriais vazios
+    fingindo forma
+  - `theodb-bench list` mostra a suíte analítica ao lado das vetoriais
