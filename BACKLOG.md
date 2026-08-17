@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-70 items — **Open** 39 · **In flight** 27 · **Closed** 4
+73 items — **Open** 42 · **In flight** 27 · **Closed** 4
 
-### Open (39)
+### Open (42)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -113,6 +113,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala----) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `raw` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `raw` | — |
 | [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala----) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `raw` | — |
+| [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `raw` | — |
+| [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem----) | Dois flags de perfil prometem gates que não existem | `raw` | — |
+| [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `raw` | — |
 
 ### In flight (27)
 
@@ -2774,3 +2777,95 @@ dod:
   - o tempo de carga de 1M × 128 é medido antes e depois na mesma máquina, e a razão entra no CHANGELOG
   - `LoadOutcome.complete` continua provando que todas as linhas chegaram — velocidade não substitui a prova
   - a constante `COPY_BATCH` descreve o que o código faz, ou some
+
+## B-071 — Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico   [ ]
+
+domain: theo-db
+repo: theodb-bench
+suggested_mode: review
+source: discover-review
+evidence: medido em 2026-08-17 em `9f02e1a`, por contagem de importadores em `src/` (excluindo o próprio
+módulo e os testes):
+
+| módulo | importadores em `src/` | o que ele implementa |
+|---|---|---|
+| `analysis/significance.py` | **0** | teste de randomização pareado, IC por bootstrap pareado, t-test pareado, Cohen's dz, correção de Monte-Carlo — os invariantes **I14 a I18** |
+| `analysis/pareto.py` | **0** | fronteira de Pareto |
+| `analysis/regression.py` | **0** | detecção de regressão contra baseline (**I22**) |
+| `bench/graph.py` | **0** | pilar de grafo |
+| `bench/retrieval.py` | **0** | pilar lexical/híbrido |
+| `bench/analytical.py` | **0** | pilar colunar (os adapters ganharam a superfície no [[B-061]]; o runner segue sem despachá-la — [[B-067]]) |
+
+O caso mais grave é o `significance`: o **I14** declara *"comparar dois sistemas exige um teste pareado —
+não uma comparação de médias"*, e `render_comparison` (`src/report.py`) é literalmente uma tabela de
+**medianas lado a lado**. O único comando que compara sistemas (`theodb-bench compare`) não chama o módulo
+que existe para tornar essa comparação válida.
+why_now: o `theodb-bench` **vai ser publicado** (decisão do owner, 2026-08-17). A maquinaria estatística é o
+que separa este arnês de um script — teste pareado com bootstrap e tamanho de efeito é mais rigor do que a
+maioria dos benchmarks vetoriais públicos declara — e ela não está no caminho de execução. É a segunda
+instância do mesmo padrão no mesmo dia: o [[B-063]] registrou o `assert_index_used` implementado, citado como
+exemplar e sem chamador. **O padrão é o item**: este repositório constrói componentes excelentes e nem sempre
+os liga.
+status: raw
+dod:
+  - `theodb-bench compare` produz teste pareado, IC e tamanho de efeito quando há repetições suficientes, e
+    **recusa** comparar médias quando não há
+  - a fronteira de Pareto é emitida por uma corrida com varredura, não só computável
+  - a detecção de regressão roda nos perfis que a declaram (ver [[B-072]])
+  - existe teste ou gate que reprova quando um módulo de `analysis/` ou `bench/` fica sem chamador em `src/` —
+    o padrão não pode reaparecer em silêncio
+
+## B-072 — Dois flags de perfil prometem gates que não existem   [ ]
+
+domain: theo-db
+repo: theodb-bench
+suggested_mode: review
+source: discover-review
+evidence: medido em 2026-08-17 em `9f02e1a`. Dos quatro flags de rigor que os perfis declaram:
+
+| flag | consumido? | onde |
+|---|---|---|
+| `publishable` | **sim** | `report.py:99,113,157` — gate real de renderização |
+| `dirty_tree_invalidates` | **sim** | `validation.py:291,298` |
+| `regression_gate` | **NÃO** | todas as 5 ocorrências estão em `profiles.py`; é a própria definição |
+| `frozen_methodology` | **NÃO** | só ecoado em `cli.py:98` (`list`), nunca enforçado |
+
+Os perfis `pr`, `nightly` e `release` declaram `regression_gate = True`, e nada roda detecção de regressão —
+consistente com `analysis/regression.py` ter **zero importadores** ([[B-071]]).
+why_now: um perfil é o contrato de rigor que separa "validação local" de "número publicável", e é o que um
+leitor externo vai consultar para saber o que aquele número vale. Um flag decorativo nesse contrato é a mesma
+classe do `assert_index_used` ([[B-063]]) e do I5 declarado-e-morto: **o documento afirma um gate que o código
+não executa**.
+status: raw
+dod:
+  - `regression_gate = True` faz a corrida comparar contra baseline e reprovar na ausência de baseline
+    comparável (fail-closed, como o I22 exige), ou o flag sai do perfil
+  - `frozen_methodology = True` recusa a corrida quando a metodologia divergiu do que a baseline usou, ou o
+    flag sai
+  - um teste enumera os campos de `Profile` e exige que cada um tenha consumidor fora de `profiles.py`
+
+## B-073 — Oito dos catorze pilares declarados não têm adapter nenhum   [ ]
+
+domain: theo-db
+repo: theodb-bench
+suggested_mode: evolve
+source: discover-review
+evidence: medido em 2026-08-17 em `9f02e1a`, cruzando `CAPABILITIES` (`adapters/base.py`) com o que cada
+adapter registrado declara. **Alcançáveis (6):** `vector_exact`, `vector_hnsw`, `vector_ivfflat`,
+`vector_scann`, `vector_filtered`, `columnar`. **Sem adapter nenhum (8):** `vector_quantized`, `lexical`,
+`hybrid`, `rerank`, `parquet`, `graph`, `vectorizer`, `ai_sql`.
+O `columnar` só entrou hoje, pelo [[B-061]], e ainda não é invocável por `theodb-bench run` ([[B-067]]).
+O andaime de três pilares existe e está desligado: `bench/graph.py`, `bench/retrieval.py` e
+`bench/analytical.py` têm zero importadores ([[B-071]]).
+why_now: o `CLAUDE.md` do `theodb-bench` descreve sete superfícies de capacidade como o objeto do projeto, e o
+TheoDB entrega híbrido, BM25, rerank, Parquet, grafo e vectorizer como produto. Enquanto o arnês não os
+alcançar, **nenhuma alegação sobre esses pilares tem artefato** — e o bench vai ser publicado. Este item é o
+mapa; cada pilar é trabalho próprio.
+status: raw
+dod:
+  - existe um relatório gerado (não escrito à mão) que lista cada capability e quais adapters a exercitam,
+    e ele entra no `README`
+  - a ordem de ataque dos pilares é decidida por escrito, com a razão — não pela ordem em que aparecem no
+    vocabulário
+  - cada pilar que ganhar adapter ganha junto o portão equivalente ao de residência do colunar: a capability
+    só é declarada quando o caminho é provado, nunca quando é escrito
