@@ -2367,7 +2367,7 @@ por quê. Para o pgvector a lacuna é benigna (um `SET` de GUC registrado funcio
 e **o [[B-034]] provou que também é fatal para nós** — `SET hnsw.ef_search` era aceito em silêncio sem efeito.
 Um arnês que não verifica o knob publica o motor num ponto de operação que não é o declarado, que é a forma mais
 cara de errar: o número parece certo.
-status: raw
+status: triaged
 dod:
   - existe `assert_parameter_applied` (ou equivalente) espelhando `assert_index_used`: depois de aplicar os
     parâmetros de busca, o adapter **lê de volta do servidor** o valor em vigor e recusa a medição se divergir
@@ -2376,6 +2376,20 @@ dod:
   - o valor efetivo entra no bundle, ao lado do pedido: um bundle que diga `pedido=200 efetivo=64` é honesto; um
     que diga só `200` é asserção
   - vale para TODO adapter, não só o do Omni — a lacuna é do framework
+
+> **2026-08-16 — `raw` → `triaged`.** Oportunidade em
+> `.claude/knowledge-base/discoveries/opportunities/b060-knob-gate-opportunity.md`.
+>
+> O achado que a leitura acrescentou ao item: **`BuildOutcome` já tem `parameters_in_force`**
+> (`postgres.py:483`) — o caminho de *build* já distingue pedido de vigente. O de *busca* não tem equivalente.
+> A assimetria não é entre este arnês e outro; é **dentro do mesmo arquivo**.
+>
+> E a lacuna é benigna hoje **por sorte da configuração, não por desenho**: `hnsw` e `ivfflat` são namespaces
+> registrados pela extensão, então o `SET` de fato aplica. Deixa de ser benigna no instante em que um motor
+> exige passo extra (`LOAD`, o caso do ScaNN), ou a extensão não está carregada, ou o nome muda de versão.
+>
+> Dependência declarada: o [[B-059]] **depende deste** — sem o portão, a primeira corrida contra o ScaNN pode
+> publicar um default raso como vitória nossa.
 
 ## B-061 — Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado   [ ]
 
