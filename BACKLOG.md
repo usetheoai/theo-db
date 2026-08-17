@@ -2349,6 +2349,13 @@ parcial_2026-08-17: **dois dos quatro critérios já têm resposta medida, por c
   **Aberto:** o TPC-H propriamente dito (colunar × heap no mesmo binário, e contra o Omni com engine off/on)
   e a contenção escrita×scan nos dois regimes. Ambos exigem a máquina, hoje ocupada pela escala de 20M
   ([[B-075]]).
+  **E o TPC-H traz uma decisão que precisa ser tomada antes, não durante:** o `dbgen` do TPC não é licença
+  OSI, e a Regra 9 diz para não reimplementá-lo. As opções são (a) baixar o `dbgen` no host de medição sem
+  vendorizá-lo — mede o que o avaliador independente mediu, e nada entra na distribuição; (b) um gerador
+  próprio com o *formato* das queries analíticas, que responde "colunar × heap" mas **não** é comparável aos
+  números publicados dele; (c) trocar por um benchmark de licença permissiva e perder a comparação direta.
+  A (a) é a que responde a pergunta do item; ela precisa de confirmação do owner porque envolve licença, e
+  registrá-la aqui é preferível a escolher em silêncio no meio da corrida.
 
 > Registrado 2026-08-16 a partir de avaliação independente. Os números dela são o alvo mais concreto que o
 > pilar colunar já teve.
