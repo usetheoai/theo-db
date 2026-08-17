@@ -69,3 +69,25 @@ Um arnês que vai ser publicado precisa distinguir três coisas que se parecem n
 3. o arnês se recusou a medir → nem um nem outro, e é a recusa que impede o número falso.
 
 Colapsar 2 em 1 é caluniar o sistema sob teste. Colapsar 3 em qualquer coisa é publicar assim mesmo.
+
+# A terceira classe apareceu na corrida seguinte, e custou 31 minutos
+
+A mesma escala de 20M, com o orçamento já corrigido, terminou assim:
+
+```
+run aborted (refused): ConfigError: this benchmark streams its corpus of
+20000000 vectors and cannot hand it over as one array
+the harness refused to measure: a precondition it checks was not met, so no
+number was taken. This is the harness working, not a fault of the system under test
+```
+
+A recusa é do próprio guarda que impede materializar 10,2 GB — e ele disparou **depois** da carga, do
+aquecimento e das consultas, porque a validação de recall conferia os ids devolvidos contra
+`self.corpus.shape[0]` em vez do `row_count` do binding. Correção de uma linha, encontrada em 31 minutos.
+
+**O que vale mais que a correção é por que a suíte não pegou.** O teste ponta-a-ponta construía o
+benchmark, conferia o oráculo, e parava. Ele afirmava o **setup** e *lia* como se cobrisse o caminho — o
+recall é computado dentro de `measure`, que nada exercitava sobre corpus em streaming.
+
+É a mesma família de `cobertura-alegada-sem-execucao`: um teste verde que prova menos do que seu nome
+sugere. E a assimetria é a de sempre — a suíte roda em milissegundos, a corrida real em meia hora.
