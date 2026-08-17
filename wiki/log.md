@@ -242,7 +242,9 @@ refutação: o avaliador declara não confiar no número e não o publica.
 
 ---
 
-## 2026-08-17 — a comparação do ADR-0061 foi feita, e três configurações erradas vieram antes da certa
+## 2026-08-17
+
+**A comparação do ADR-0061 foi feita, e três configurações erradas vieram antes da certa.**
 
 **O gap contra o access method foi medido, e ele colapsa.** `benchmarks/b057-scann-am-headtohead.md`:
 a recall casado no SIFT-128 a 100k, na mesma máquina e no mesmo arnês, o `scann` AM é **1,2–1,6×** o
