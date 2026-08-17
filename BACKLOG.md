@@ -2336,6 +2336,20 @@ dod:
   - antes de publicar qualquer número, verificar que o nosso store está de fato RESIDENTE — o avaliador perdeu
     uma corrida inteira por isso, e a classe é a mesma do [[B-048]]
 
+parcial_2026-08-17: **dois dos quatro critérios já têm resposta medida, por caminho lateral.**
+  (a) *Crossover do nosso colunar* — medido pelo [[B-061]] e publicado em
+  `wiki/benchmarks/b061-columnar-crossover.md`: com `theodb.enable_columnar_agg` ligado, o colunar passa o
+  heap **entre 10 mil e 100 mil linhas** (1,75× em `sum_amount` a 100k), e **perde feio no `GROUP BY`**
+  (0,07× a 1M). O flag vinha `off` e decidia **13×** — a primeira fronteira publicada era uma retratação.
+  (b) *Instrumento de residência* — o caminho certo **existe e são contadores de efeito**:
+  `theodb_columnar_chunks_skipped` / `chunks_scanned` / `stream_chunk_groups` (`am/columnar.rs:66,72,103`),
+  que dizem o que o scan **fez**. Perguntar "a coluna está registrada?" é a pergunta que o avaliador
+  independente respondeu e que lhe custou a corrida — é a mesma classe de
+  `guides/instrumento-reporta-o-pedido.md`.
+  **Aberto:** o TPC-H propriamente dito (colunar × heap no mesmo binário, e contra o Omni com engine off/on)
+  e a contenção escrita×scan nos dois regimes. Ambos exigem a máquina, hoje ocupada pela escala de 20M
+  ([[B-075]]).
+
 > Registrado 2026-08-16 a partir de avaliação independente. Os números dela são o alvo mais concreto que o
 > pilar colunar já teve.
 
