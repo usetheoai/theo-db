@@ -4,8 +4,8 @@ item: B-059
 repo: theodb-bench
 date: 2026-08-17
 base: 84a4143
-head: 744b2d9
-verdict: pending
+head: a0ded65
+verdict: READY_TO_MERGE
 measured_on: droplet theo-b059-bench · 138.197.22.192 · s-8vcpu-16gb · nyc3
 ---
 
@@ -15,7 +15,7 @@ measured_on: droplet theo-b059-bench · 138.197.22.192 · s-8vcpu-16gb · nyc3
 
 | # | Gate | Resultado |
 |---|---|---|
-| 1 | Suíte | **667 passed; 1 skipped; 0 failed** (era 637 no merge do B-060 — 30 novos) |
+| 1 | Suíte | **673 passed; 1 skipped; 0 failed** (era 637 no merge do B-060 — 36 novos) |
 | 2 | `mypy --strict` | **limpo**, 37 arquivos |
 | 3 | `ruff check src/ tests/` | **All checks passed** (com o ruff **do venv do projeto**, 0.16.2 — ver R-5) |
 | 4 | `ruff format --check` | limpo |
@@ -168,23 +168,94 @@ A corrida recusada reportou `Run is INVALID: sut_alive`. O sistema está vivo; o
 recusa funciona e bloqueia o número, que é o que importa; a taxonomia de falha do runner é imprecisa aqui e está
 fora do escopo deste item.
 
+### R-10 — CRÍTICO · O eixo do próprio produto não construía índice, e o bundle o publicava parcial
+
+A corrida das três vias exigida pelo DoD encontrou isto no primeiro comando. O arnês emitia
+
+```
+CREATE INDEX "t_probe_hnsw_l2_idx" ON "t_probe" USING hnsw ("embedding" vector_l2_ops) WITH (m = 16)
+→ UndefinedObject: access method "hnsw" does not exist
+```
+
+contra a imagem que o `Dockerfile` deste projeto constrói (PostgreSQL 18.6, `theodb_rs` 1.5.0). O `pg_am` tem
+**`theodb_hnsw`** e **`theodb_ivfflat`**, com `theodb_hnsw_l2_ops` e companhia. O nome nu e os `vector_*_ops`
+existem — vêm do shim `vector` do ADR-0058, que o init da imagem cria com `\c template1` **de propósito**, para
+que bancos criados depois o herdem. O banco `postgres`, ao qual um cliente chega por default, recebe só o
+`theodb_rs` (verificado: `plpgsql, theodb_rs`).
+
+**Consequência que importa mais que a falha:** a linha exata media e era publicada, então o bundle não ficava
+vazio — ficava **parcial**. Um leitor vendo `theodb … recall=1.0000` estava a ver busca exata, não o
+`theodb_hnsw`.
+
+Dois defeitos irmãos na mesma corrida:
+
+- **`hnsw.ef_search` está ausente de `pg_settings` sem `LOAD 'theodb_rs'`** (medido: 0 linhas `theodb%` antes,
+  presentes depois). Todo `ef_search` varrido era placeholder e a busca corria no default 64. A mesma armadilha
+  do Omni, no nosso produto — e o portão do B-060 é o que a denunciou.
+- **O bundle do TheoDB não dizia em qual PostgreSQL rodou.** Uma máquina, uma tarde: TheoDB em 18.6, pgvector em
+  17.11, Omni em 17.9. A corrida **cruza uma major**, e o único bundle que escondia isso era o do nosso produto,
+  porque o override substituía a versão da base em vez de compor. Três implementações da mesma composição
+  passaram a uma.
+
+Registrado como [[B-064]] e consertado neste ciclo, porque o último critério do DoD do B-059 não fechava sem ele.
+
+**Medido depois:** três bundles `VALID` na mesma máquina, e o eixo `theodb` produz curva de recall real pela
+primeira vez — **0,5928 / 0,7800 / 0,9650** em `ef_search` 16 / 64 / 256.
+
+## A corrida — resultado
+
+Suíte `vector/synthetic/smoke` (exata, que os três honram), mesma máquina, mesma sessão:
+
+| sistema | status | versão registrada (lida do servidor) |
+|---|---|---|
+| `theodb` | **VALID** | `PostgreSQL 18.6 (Debian 18.6-1.pgdg12+2) / theodb_rs 1.5.0` |
+| `pgvector` | **VALID** | `PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) / vector 0.8.6` |
+| `alloydbomni` | **VALID** | `PostgreSQL 17.9 / alloydb_scann 0.1.4` |
+
+Suíte `vector/synthetic/sweep` (varre `ef_search`):
+
+| sistema | status | leitura |
+|---|---|---|
+| `theodb` | **VALID** | recall 0,5928 → 0,7800 → 0,9650 · curva real |
+| `pgvector` | **VALID** | recall 0,6204 → 0,9006 → 0,9904 |
+| `alloydbomni` | **INVALID** | **recusado corretamente**: a suíte pede `ef_search`, que o Omni não expõe |
+
+A recusa do Omni é o resultado certo, não uma falha: nenhuma suíte registrada varre
+`num_leaves_to_search`, e publicar `ef_search` contra um motor que o ignora é o defeito que o R-1 consertou.
+
+**Nenhum número aqui é claim de performance.** Todas as linhas vêm marcadas `(unstable)` pelo próprio arnês
+(perfil `smoke`, poucas repetições), e o propósito da corrida é provar que o bundle é válido — não comparar
+motores. Comparar exige `wiki/benchmarks/` e o rigor da regra 5.
+
 ## O que este review NÃO cobriu
 
 - **Nenhum agente independente.** Mesmo agente que implementou.
-- **A corrida das três vias ainda não fechou.** `pgvector` produziu bundle `VALID`; o eixo `theodb` depende de um
-  build de imagem que ainda compilava ao escrever isto. Sem ele, o critério final do DoD do B-059 está **aberto**,
-  e este review não pode declará-lo cumprido.
 - **Nenhuma corrida indexada válida do Omni existe**, e a razão é honesta: nenhuma suíte registrada varre
   `num_leaves_to_search`. O caminho `scann` está provado ponta a ponta pelo C7 (build, portão, busca, plano
   nomeia o índice), mas isso é uma verificação de integração, não um bundle. Registrar uma suíte com parâmetros
-  que ninguém mediu é o que a Q1 do plano recusou; medi-los é o B-057.
+  que ninguém mediu é o que a Q1 do plano recusou; medi-los é o [[B-057]]. **Este é o limite mais sério do
+  ciclo**: o adapter do Omni tem um caminho indexado provado e nenhum bundle indexado.
+- **A dimensão de varredura é específica do motor** (`ef_search` × `num_leaves_to_search` × `probes`) e o
+  arnês a trata como nome literal. Uma suíte que varra "profundidade de busca" logicamente, com cada adapter
+  mapeando ao seu GUC, é desenho maior que este item e não foi feito.
 - **`assert_index_used` continua morto.** Este ciclo parou a afirmação falsa; o mecanismo é o B-063.
 - **`num_leaves` não é derivado da cardinalidade** (Q1 do plano) — passável, não derivado.
 - **O AM `ivf` próprio do Omni não é coberto** (Q2 do plano).
 
 ## Veredito
 
-**Pendente** — 9 de 9 afirmações verificadas por execução, 667 testes, mypy strict e ruff limpos, e três
-consertos provados por reprovação. Mas o **último critério do DoD** (corrida das três vias com bundle válido)
-não fechou: o eixo `theodb` aguarda o build da imagem. O veredito não pode ser `READY_TO_MERGE` antes disso —
-declará-lo agora seria exatamente o `cobertura-alegada-sem-execucao` que este repositório rastreia.
+**`READY_TO_MERGE`.**
+
+10 de 10 afirmações verificadas por execução; **673 testes** (era 637); `mypy --strict` e `ruff` limpos com as
+ferramentas do venv do projeto; quatro consertos provados por reprovação; e o último critério do DoD fechado —
+**três bundles `VALID` na mesma máquina**, cada um nomeando a versão que o servidor reportou.
+
+**Ressalvas, e elas são reais:**
+
+1. Review do próprio implementador, sem agente independente.
+2. **O Omni não tem bundle indexado** — só verificação de integração. É o limite mais sério.
+3. `assert_index_used` continua morto ([[B-063]]); este ciclo parou a afirmação falsa, não consertou o mecanismo.
+4. O item entregou mais do que o seu escopo nominal: dois defeitos alheios ao adapter do Omni ([[B-063]],
+   [[B-064]]) foram encontrados por ele, e o B-064 foi consertado aqui porque o DoD não fechava sem isso.
+   Registrei ambos em vez de os corrigir em silêncio.
+5. Nenhum número desta corrida é claim de performance — todos vêm `(unstable)` do próprio arnês.

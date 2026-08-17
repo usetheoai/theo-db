@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-63 items — **Open** 34 · **In flight** 25 · **Closed** 4
+64 items — **Open** 34 · **In flight** 26 · **Closed** 4
 
 ### Open (34)
 
@@ -109,7 +109,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default----) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `raw` | — |
 | [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado----) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `raw` | — |
 
-### In flight (25)
+### In flight (26)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -138,6 +138,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-053`](#b-053--o-núcleo-de-distância-vetorial-é-puro-por-uma-linha-e-é-ela-que-prende-o-micro-bench-na-suíte----) | O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-060`](#b-060--o-arnês-verifica-que-o-índice-foi-usado-e-não-verifica-que-o-knob-de-busca-pegou----) | O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou | `planned` | — |
+| [`B-064`](#b-064--o-eixo-theodb-do-próprio-arnês-não-constrói-índice-ele-emite-a-sintaxe-do-pgvector-contra-os-ams-do-theodb----) | O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB | `planned` | — |
 
 ### Closed (4)
 
@@ -2545,3 +2546,53 @@ dod:
     duas, nunca um docstring afirmando a primeira enquanto o código faz a segunda
   - existe detector de código morto no CI do repositório: o projeto não tem nenhum hoje, e é por isso que um
     método sem chamador sobreviveu sendo citado como exemplar
+
+## B-064 — O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB   [ ]
+
+domain: theo-db
+repo: theodb-bench
+suggested_mode: bug
+source: discover-review
+evidence: medido em 2026-08-17 no droplet `138.197.22.192`, contra a imagem construída do próprio `Dockerfile`
+(`theodb:b059`, PostgreSQL 18.6, `theodb_rs 1.5.0`). A corrida `theodb-bench run vector/synthetic/sweep
+--system theodb` devolve **`INVALID`**: só a linha de busca exata mede, e toda linha indexada falha.
+Causa medida, não suposta. O DDL que o arnês emite:
+`CREATE INDEX "t_probe_hnsw_l2_idx" ON "t_probe" USING hnsw ("embedding" vector_l2_ops) WITH (m = 16)`
+→ `UndefinedObject: access method "hnsw" does not exist`.
+O que o TheoDB de fato registra em `pg_am`/`pg_opclass`: **`theodb_hnsw`** com
+`theodb_hnsw_{l2,cosine,ip}_ops` e **`theodb_ivfflat`** com `theodb_ivfflat_{l2,cosine,ip,label}_ops`.
+Nenhum nome coincide com o que o adapter herda do `PgvectorAdapter`.
+**Por que o shim não salva:** o alias `hnsw` e os `vector_*_ops` existem — vêm da extensão `vector` do
+ADR-0058 (`vector/vector--0.6.0.sql:49`, `CREATE ACCESS METHOD hnsw ... HANDLER theodb_hnsw_amhandler`) — mas
+são **outra extensão**, e o `TheoDBAdapter` só emite `CREATE EXTENSION theodb_rs`. Pior: o
+`/docker-entrypoint-initdb.d/00-create-theodb.sql` da imagem cria o shim com `\c template1`, de propósito, para
+que **bancos criados depois** o herdem. O banco `postgres` — ao qual o arnês conecta — recebe apenas o
+`theodb_rs`. Verificado: `select extname from pg_extension` em `postgres` devolve `plpgsql, theodb_rs`.
+**Consequência para as medições:** o eixo do próprio produto nunca produziu corrida indexada válida contra esta
+imagem. A linha `none` (exata) mede e é publicada, então o bundle não fica vazio — ele fica **parcial**, e um
+leitor que veja `theodb ... recall=1.0000` está a ver busca exata, não o `theodb_hnsw`.
+why_now: o [[B-059]] tem como último critério de DoD uma corrida `theodb × alloydbomni × pgvector` na mesma
+máquina, e ela **não fecha** enquanto isto existir. O eixo do Omni foi consertado no mesmo dia declarando os
+opclasses do motor por adapter (o `scann` usa `cosine`/`dot_product`/`l2`); o TheoDB precisa do mesmo tratamento
+mais um: o **nome do access method** também difere, o que o Omni não exigia.
+status: planned
+plan: consertado dentro do ciclo do [[B-059]], cujo DoD não fechava sem isto
+review: .claude/knowledge-base/reviews/b059-omni-adapter-review-2026-08-17.md § R-10
+measured_after: `theodb-bench` `a0ded65` — três bundles **VALID** na mesma máquina
+  (`138.197.22.192`), e o eixo `theodb` produz curva de recall real pela primeira vez:
+  **0,5928 / 0,7800 / 0,9650** em `ef_search` 16 / 64 / 256. As três versões passaram a constar,
+  lidas do servidor: `PostgreSQL 18.6 / theodb_rs 1.5.0`, `PostgreSQL 17.11 / vector 0.8.6`,
+  `PostgreSQL 17.9 / alloydb_scann 0.1.4` — a divergência de major deixou de ser invisível.
+  Dois defeitos irmãos consertados no mesmo commit: `hnsw.ef_search` estava ausente de `pg_settings`
+  sem `LOAD 'theodb_rs'` (todo `ef_search` varrido era placeholder, busca no default 64), e o bundle
+  do TheoDB era o único que não dizia em qual PostgreSQL rodou.
+  **Aberto do DoD:** o quarto critério (superfície de compatibilidade como eixo separado e declarado)
+  não foi feito — só o default nativo mudou.
+dod:
+  - `theodb-bench run vector/synthetic/sweep --system theodb` produz bundle **VALID** com linhas indexadas
+  - o DDL emitido nomeia `theodb_hnsw` e `theodb_hnsw_l2_ops`, e um teste reprova se voltar a emitir `hnsw`
+  - o nome do AM é declarado pela subclasse, não derivado do rótulo lógico do índice — o rótulo do bundle
+    continua `hnsw` (é a família), o AM em vigor é o do motor
+  - a superfície de compatibilidade (`USING hnsw` via shim `vector`) fica declarada como eixo **separado** e não
+    medida por default: ela é a mesma engine pelo mesmo handler, então medi-la como se fosse a nativa não
+    acrescenta informação e esconde qual superfície a corrida exercitou
