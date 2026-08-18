@@ -16,6 +16,16 @@ sources:
     last_modified: 2026-08-17
 ---
 
+> **Correção nº 2, por acréscimo (2026-08-17, mais tarde).** A projeção de ~34,7 GB abaixo era uma
+> **extrapolação** do ajuste 250k–2M, e a medição direta a 20M numa máquina de 64 GB a **contradiz por
+> ~2,6×**: o consumo privado real é **~13,0 GB** (`RssAnon`), ou **0,65 GB por milhão** contra os
+> 1,73 GB/milhão do ajuste. **O consumo é sublinear.** O ajuste era bom onde foi ajustado — o terceiro
+> ponto o confirmou com 2% de erro — e não onde foi usado; é o risco de extrapolar uma década de escala.
+> **O defeito não muda:** 13 GB de memória privada para indexar um corpus de 11 GB continua sendo o
+> corpus materializado, continua ignorando `maintenance_work_mem`, e continua matando o backend num host
+> de 16 GB (o OOM veio com `anon-rss:10033724kB`, logo abaixo dos 13 GB necessários). Muda só o teto:
+> ~15M num host de 16 GB, em vez dos ~4,7M projetados — e ainda assim não foram os 20M.
+>
 > **Este conceito corrige, por acréscimo, o dimensionamento de escala publicado horas antes.** A conta
 > anterior — em [teto de escala do arnês](/benchmarks/harness-scale-ceiling.md) e na recomendação de 20M
 > como escala de referência — era de **disco**, e estava certa sobre disco. Ela era **silenciosa sobre
@@ -52,8 +62,10 @@ paralelo e os números (250k → 1076 MB, 500k → 1037 MB) não faziam sentido 
 - Ajuste nos três pontos: **~174 MB fixos + ~1727 MB por milhão**. O terceiro ponto foi previsto pelo
   ajuste dos dois primeiros com **2,0% de erro** — é isso que torna a projeção utilizável, porque não há
   economia de escala esperando adiante.
-- Projeção a 20M: **~34,7 GB**, contra 16 GB — coerente com a morte aos 10 GB (não chegou a pedir tudo).
-- **Teto medido deste host** (≈8,3 GB disponíveis): **~4,7M vetores**.
+- ~~Projeção a 20M: **~34,7 GB**~~ — **medido a 20M: ~13,0 GB de `RssAnon`** (0,65 GB/milhão). A projeção
+  linear super-estimou em ~2,6×; ver a correção nº 2 no topo.
+- Teto deste host com o número **medido** (≈8,3 GB disponíveis): **~13M** — e o host ainda assim não
+  suportou 20M, que precisa de ~13,0 GB contra os ~10 GB que ele tinha.
 - O índice **em disco** é exatamente linear: **724 MB por milhão nos três pontos, sem desvio**. O custo
   está no build, não no artefato.
 - Tempo é super-linear **e piorando**: 4× as linhas custaram **5,0×**, 2× custaram **2,6×**
@@ -61,10 +73,10 @@ paralelo e os números (250k → 1076 MB, 500k → 1037 MB) não faziam sentido 
 
 # Os dois tetos, lado a lado
 
-| | por disco (1,27 GB/milhão) | por RAM (1,69 GB/milhão) |
+| | por disco (1,27 GB/milhão) | por RAM (**0,65 GB/milhão**, medido a 20M) |
 |---|---|---|
 | host medido | 309 GB | 16 GB (≈10 GB úteis) |
-| escala comportada | **~200M** | **~4,7M** (medido, não projetado) |
+| escala comportada | **~200M** | **~13M** (do consumo medido a 20M) |
 
 **A escala de 20M carrega e consulta** — 20 000 000 de linhas, 11 GB de tabela, consultas exatas
 respondendo. Ela **não constrói grafo** neste host. As duas coisas são verdade ao mesmo tempo, e reportar

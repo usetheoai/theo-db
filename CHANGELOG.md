@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Corrigida a projeção de memória do build de `theodb_hnsw`: a medição direta a 20M dá ~13,0 GB de
+  memória privada (0,65 GB/milhão), e não os ~34,7 GB que a extrapolação linear previa (#230)
 - Documentado que o build de `theodb_hnsw` mantém ~1,7 GB por milhão de vetores em memória do
   backend e é morto pelo OOM killer a 20M — o teto de escala do build é RAM, não disco (#230)
 

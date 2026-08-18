@@ -342,3 +342,23 @@ componentes ignorando o mesmo orçamento é ausência de contrato de memória, n
 **O que a escala de 20M de fato entrega, dito inteiro:** carrega (20 000 000 de linhas, 11 GB) e consulta
 por varredura exata; **não** constrói índice de grafo neste host. Reportar só a primeira metade seria a
 omissão que o acervo existe para impedir.
+**E a projeção que eu tinha acabado de publicar foi contradita pela medição direta, por 2,6×.** Rodei o
+build de 20M numa máquina de 64 GB em vez de extrapolar: o consumo privado real é **~13,0 GB**
+(`RssAnon`), ou **0,65 GB por milhão**, contra os 1,73 GB/milhão que o ajuste de 250k–2M dava. **O consumo
+é sublinear.**
+
+O detalhe que vale guardar é que **o ajuste era bom** — o terceiro ponto (2M) foi previsto pelos dois
+primeiros com 2% de erro. Ele era bom **onde foi ajustado**, e eu o usei uma década de escala adiante.
+Confirmar um modelo dentro da faixa medida não licencia extrapolá-lo para fora dela, e o intervalo de
+confiança de uma extrapolação não é o do ajuste.
+
+As grandezas foram verificadas antes de afirmar a contradição: o host antigo tinha `shared_buffers` de
+128 MB, então o `VmRSS` de lá é essencialmente `RssAnon`; os dois têm `max_parallel_maintenance_workers=2`
+e o build corre com um backend só. A diferença é real, não de instrumento.
+
+**O defeito não muda** — 13 GB privados para indexar 11 GB de corpus continua sendo o corpus
+materializado, continua ignorando `maintenance_work_mem`, e o OOM veio com `anon-rss:10033724kB`, **logo
+abaixo** dos 13 GB necessários. Muda só o teto: ~13M num host de 16 GB, não os ~4,7M projetados.
+
+A correção entrou na issue #230 e no conceito **por acréscimo**, com o número errado riscado e não
+apagado, porque ele foi publicado e citado.
