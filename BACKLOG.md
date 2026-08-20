@@ -3289,6 +3289,26 @@ consertado_parcialmente: 2026-08-20 — o `publish-image.yml` deixou de delegar 
   O passo seguinte é do owner: conferir em Settings > Packages da org se há pacote `theo-db`
   conflitante e se a criação de pacote por Actions está permitida.
   **Não bloqueia release:** a `v0.158.0` foi cortada com este mesmo gate vermelho.
+causa_raiz_final: 2026-08-20, encontrada pelo navegador em três níveis acima de onde eu procurava.
+  A cadeia inteira, cada elo medido na interface do GitHub:
+  (1) **Settings > Packages da org** tinha, em `Package creation`, apenas `Private` marcado — `Public` e
+  `Internal` desabilitados. A organização **proibia pacotes públicos**;
+  (2) por isso o pacote `theo-db` era `Private`, e o diálogo de visibilidade dizia, nas duas outras opções,
+  *"Setting is disabled by organization administrators"*;
+  (3) **um repositório público não pode ser vinculado a um pacote privado** — a lista de "Actions repository
+  access" só oferecia repositórios privados, e `theo-db` jamais apareceria nela;
+  (4) sem vínculo, o `GITHUB_TOKEN` do repo não tinha acesso → `read_package`.
+  **O pacote era órfão**: nenhum repositório de origem (único da lista de 30 sem o "in owner/repo"), e um
+  único membro com acesso — **`@usetheodev`**, que é conta de USUÁRIO, não a organização. É o mesmo
+  `usetheodev` do apelido errado que o README carregava e o [[B-010]] já havia corrigido no workflow.
+  **Consertos aplicados, nesta ordem, e cada um medido pelo erro seguinte:** org passa a permitir `Public`;
+  pacote vai a `Public` → o erro muda de `read_package` para **`write_package`**, provando que a leitura
+  foi resolvida e restava a escrita; pacote órfão **apagado** (confirmado pelo owner) para que o próximo
+  push o recrie vinculado — o `Inherit access from source repository` da org já está ligado.
+  **Por que NÃO gerei um PAT**, embora o owner tenha oferecido: um token com `write:packages` empurraria a
+  imagem e deixaria o pacote **privado**, então o `docker pull` do README seguiria falhando para qualquer
+  usuário. Seria trocar um erro visível por um silencioso, acrescentar credencial de longa duração à conta
+  e deixar a causa intacta.
 
 dod:
   - a causa da falha de CARREGAMENTO do `publish-image.yml` está identificada por medição, não por hipótese
