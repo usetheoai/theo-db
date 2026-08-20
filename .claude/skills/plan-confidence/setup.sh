@@ -71,6 +71,26 @@ if [[ -d "$SOURCE_SKILLS_PARENT/plan-improve" ]]; then
 fi
 
 # Clean up __pycache__ in copies
+# O resolvedor de caminho ciente de layout vive em `<ecossistema>/scripts/ecosystem_utils.py` e e
+# UMA implementacao para os tres checadores que precisam dela (B-081). Um `setup.sh` que instala a
+# skill sem ele produz `ModuleNotFoundError` no primeiro uso — a dependencia e real, e o lugar de
+# declara-la e o instalador. A alternativa seria uma copia local por checador, que e exatamente o
+# defeito que o B-081 mediu: `check_measurement_targets.py` carregava DUAS formas da mesma
+# resolucao no mesmo arquivo, uma consertada e a irma nao.
+echo "1️⃣ b  Copying the shared layout resolver to $TARGET/.claude/scripts/ ..."
+mkdir -p "$TARGET/.claude/scripts"
+# CLAUDE_DIR primeiro: ele E o diretorio do ecossistema nos dois layouts (a raiz do kit no
+# standalone, o `.claude/` num consumidor). PROJECT_ROOT e o nivel ACIMA dele, e so entra como
+# ultimo recurso — buscar la primeiro poderia casar um irmao que nao e o ecossistema desta skill.
+if [[ -f "$SOURCE_CLAUDE_DIR/scripts/ecosystem_utils.py" ]]; then
+    cp "$SOURCE_CLAUDE_DIR/scripts/ecosystem_utils.py" "$TARGET/.claude/scripts/"
+elif [[ -f "$SOURCE_PROJECT_ROOT/scripts/ecosystem_utils.py" ]]; then
+    cp "$SOURCE_PROJECT_ROOT/scripts/ecosystem_utils.py" "$TARGET/.claude/scripts/"
+else
+    echo "❌ ecosystem_utils.py not found in the source ecosystem; the skill would fail on first use" >&2
+    exit 1
+fi
+
 find "$TARGET/.claude/skills/plan-confidence" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 find "$TARGET/.claude/skills/plan-improve" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 

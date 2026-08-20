@@ -20,7 +20,16 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+import sys
 from pathlib import Path
+
+# `<ecossistema>/scripts/` visto a partir de `<ecossistema>/skills/<skill>/scripts/`. Ancorado em
+# `__file__` e não na raiz do projeto: a raiz é o que a detecção de layout resolve, e usá-la para
+# ENCONTRAR a detecção seria circular (B-081).
+_ECOSYSTEM_SCRIPTS = Path(__file__).resolve().parents[3] / "scripts"
+if str(_ECOSYSTEM_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_ECOSYSTEM_SCRIPTS))
+from ecosystem_utils import resolve_ecosystem_path  # noqa: E402
 
 UNBREAKABLE_RULE_MAX = 13
 
@@ -186,15 +195,16 @@ def _scan_rule_refs(
 def _resolve_rule_file(filename: str, project_root: Path) -> Path | None:
     """Locate filename in conventional places. None if not found."""
     # Common locations, ordered by specificity.
-    candidates = [
-        project_root / "rules" / filename,
-        project_root / ".claude" / "rules" / filename,
-        project_root / "knowledge-base" / filename,
-        project_root / filename,  # e.g. CHANGELOG.md, CLAUDE.md
-    ]
-    for c in candidates:
-        if c.exists() and c.is_file():
-            return c
+    # Os dois primeiros lugares são caminhos DO ECOSSISTEMA e vão pelo resolvedor
+    # compartilhado, que tenta os dois layouts; os outros dois são do projeto e não têm
+    # variação de layout a resolver (B-081).
+    for rel in (f"rules/{filename}", f"knowledge-base/{filename}"):
+        found = resolve_ecosystem_path(project_root, rel)
+        if found is not None:
+            return found
+    direct = project_root / filename  # e.g. CHANGELOG.md, CLAUDE.md
+    if direct.is_file():
+        return direct
     # Last-resort: shallow search inside knowledge-base/ (handles ADRs etc.).
     kb = project_root / "knowledge-base"
     if kb.exists():

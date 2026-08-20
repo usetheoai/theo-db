@@ -320,7 +320,12 @@ def validate_xrefs(ecosystem_dir: Path, strict: bool = False) -> dict[str, Any]:
         if rule_md.is_file():
             _scan_for_rule_refs(rule_md)
     for py in (ecosystem_dir / "skills").rglob("*.py"):
-        if py.is_file() and "__pycache__" not in py.parts:
+        # `tests/` fica de fora, e a razão é o que a própria varredura busca: âncoras
+        # NORMATIVAS. Um teste que exercita o caminho ausente cita `rules/<algo>` de
+        # propósito — provar que um arquivo inexistente é reportado como inexistente exige
+        # nomear um arquivo inexistente. Reportá-lo aqui é um falso positivo estrutural, e
+        # falso positivo em portão é o que ensina a ignorar portão (B-081).
+        if py.is_file() and "__pycache__" not in py.parts and "tests" not in py.parts:
             _scan_for_rule_refs(py)
     for py in (ecosystem_dir / "scripts").rglob("*.py"):
         if py.is_file() and "__pycache__" not in py.parts:

@@ -151,6 +151,15 @@ def test_walk_up_picks_closest_claude() -> None:
         src_scripts = SKILL_ROOT / "scripts"
         for py in src_scripts.glob("*.py"):
             (scripts / py.name).write_bytes(py.read_bytes())
+        # O resolvedor de caminho compartilhado (B-081). `install.sh` e o `setup.sh` desta skill
+        # o instalam em `<ecossistema>/scripts/`, e os checadores o importam de la — UMA
+        # implementacao para os tres, em vez de uma copia por checador. A fixture montava um
+        # install parcial que nenhum caminho de instalacao suportado produz.
+        eco_scripts = inner_claude / "scripts"
+        eco_scripts.mkdir(exist_ok=True)
+        shared = SKILL_ROOT.parent.parent / "scripts" / "ecosystem_utils.py"
+        (eco_scripts / "ecosystem_utils.py").write_bytes(shared.read_bytes())
+
         # Copy defaults so check_architecture_compliance has fallback
         src_defaults = SKILL_ROOT / "defaults"
         for md in src_defaults.glob("*.md"):

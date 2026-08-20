@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-85 items — **Open** 32 · **In flight** 6 · **Closed** 47
+86 items — **Open** 31 · **In flight** 8 · **Closed** 47
 
-### Open (32)
+### Open (31)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -86,7 +86,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
 | [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off----) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `triaged` | — |
 | [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `triaged` | — |
-| [`B-037`](#b-037--o-am-ivfflat-não-existe-metade-do-shim-pgvector-está-ausente----) | O AM `ivfflat` não existe: metade do shim pgvector está ausente | `triaged` | — |
 | [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta----) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `triaged` | — |
 | [`B-042`](#b-042--o-build-do-hnsw-é-36-mais-lento-que-o-do-pgvector-usando-8-mais-threads-e-o-grafo-sai-pior----) | O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior | `triaged` | — |
 | [`B-043`](#b-043--o-qps-lexical-satura-em-20-clientes-numa-máquina-de-16-vcpu-e-não-sobe-mais----) | O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais | `triaged` | — |
@@ -105,18 +104,20 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 | [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar----) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `triaged` | — |
-| [`B-083`](#b-083--42-actions-de-terceiros-fixadas-por-tag-e-nenhuma-por-sha----) | 42 actions de terceiros fixadas por TAG, e nenhuma por SHA | `triaged` | — |
+| [`B-086`](#b-086--o-teste-que-prova-o-alias-do-ef_search-passa-quando-o-guc-está-inerte----) | O teste que prova o alias do `ef_search` passa quando o GUC está inerte | `triaged` | — |
 
-### In flight (6)
+### In flight (8)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
+| [`B-037`](#b-037--o-am-ivfflat-não-existe-metade-do-shim-pgvector-está-ausente----) | O AM `ivfflat` não existe: metade do shim pgvector está ausente | `planned` | — |
 | [`B-051`](#b-051--nada-compara-o-checkbox-com-o-status-e-a-divergência-sobreviveu-meses----) | Nada compara o checkbox com o `status`, e a divergência sobreviveu meses | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado----) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `planned` | — |
 | [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
+| [`B-083`](#b-083--42-actions-de-terceiros-fixadas-por-tag-e-nenhuma-por-sha----) | 42 actions de terceiros fixadas por TAG, e nenhuma por SHA | `planned` | — |
 
 ### Closed (47)
 
@@ -210,6 +211,7 @@ O ADR previa que alguns morreriam. Nenhum morreu — mas B-007 **quase**, e a r�
 Registro isso porque "nenhum item morreu" é o resultado que mais merece desconfiança numa repriorização: ou o
 lote estava bem escolhido, ou a régua foi aplicada frouxa. Aqui foi o primeiro caso apenas porque cada item
 já nascera atado a uma medição nossa (gate G5) — o que é diferente de estar atado a um eixo.
+
 
 ## B-001 — `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext`   [x]
 
@@ -1646,7 +1648,13 @@ suggested_mode: bug
 source: discover-evolve
 evidence: medido em 2026-08-12 contra `theodb:b034`. `SELECT amname FROM pg_am WHERE amtype='i'` devolve `hnsw`, `theodb_hnsw`, `theodb_ivfflat` — **não há `ivfflat`**. Logo `CREATE INDEX ... USING ivfflat (embedding vector_l2_ops) WITH (lists=100)` falha. O shim (`vector/vector--0.6.0.sql:49-67`) registra o alias `hnsw` e as três opclasses `vector_*_ops` para ele, e **para por aí**. Enquanto isso o GUC `ivfflat.probes` **foi registrado** no B-034 — ou seja, hoje o produto aceita o botão de ajuste de um índice que não se pode criar pelo nome que a app escreve.
 why_now: a assimetria é o problema, não a ausência. O B-034 registrou `ivfflat.probes` porque o TheoDB tem `theodb_ivfflat`; um usuário que leia `pg_settings` e encontre `ivfflat.probes` conclui — razoavelmente — que `USING ivfflat` funciona. O alias é rotulagem de catálogo pura: mesmo handler own-code, mesmas opclasses, exatamente o que o `hnsw` já faz e que o próprio arquivo do shim documenta como "não é uma segunda implementação". Não fazer é deixar o shim pela metade com o botão da metade que falta já instalado.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — os quatro bullets fecharam; implementado no commit `fe92e0c` (workspace),
+  aguardando release. O bullet 3 era o único aberto e exigia **efeito medido**, não `SET` aceito: o
+  teste novo mede recall@200 contra verdade-terreno por seqscan em `probes=1` vs `probes=64`, com a
+  diferença forçada por contagem. Passou de primeira — o produto já tinha o comportamento, faltava a
+  prova. A coexistência de opclass (bullet 2, que o DoD exige por execução) é provada pelo
+  `migrate-smoke.sh` no CI, que restaura no destino TheoDB e usa `vector_l2_ops` sob os dois AMs.
 dod:
   - `CREATE ACCESS METHOD ivfflat` com o handler `theodb_ivfflat_amhandler` e as opclasses `vector_l2_ops` / `vector_cosine_ops` / `vector_ip_ops` registradas para ele — mesmo padrão do `hnsw`, no mesmo arquivo
   - **o conflito de nome de opclass está resolvido e testado**: nomes de opclass são únicos POR access method, então `vector_l2_ops` pode existir para `hnsw` e para `ivfflat` ao mesmo tempo — o item confirma isso por execução, não por leitura
@@ -3532,7 +3540,11 @@ why_now: o `dependabot.yml` entrou em 2026-08-20 e resolve a metade barata — a
 há versão nova. Ele **não** resolve a mutabilidade: com tag, a atualização silenciosa continua possível
 entre um aviso e outro. E o momento é agora porque a esteira acabou de ganhar um workflow que cria
 release com `contents: write` — o raio de alcance de uma action comprometida cresceu.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — os quatro bullets fecharam; implementado no commit `fe92e0c` (workspace),
+  aguardando release. 39 referências fixadas por SHA de 40 caracteres com a tag em comentário,
+  `actions/*` e `docker/*` incluídas; dependabot já em vigor reescreve SHA e comentário juntos; e a
+  política está em `.github/CONTRIBUTING-workflows.md`. actionlint contra os onze workflows: exit 0.
 dod:
   - toda `uses:` de terceiro fixada por SHA de 40 caracteres, com a tag legível ao lado em comentário
   - `actions/*` e `docker/*` incluídas — pertencer ao GitHub não as torna imutáveis
@@ -3618,4 +3630,31 @@ dod:
   - a imagem do produto é construída uma vez por corrida, e todo job a consome por digest
   - nenhum job declara `cache-from` de um cache que ninguém garantiu ter escrito antes
   - as imagens de CI publicadas no GHCR têm política de retenção, ou está escrito por que não têm
+## B-086 — O teste que prova o alias do `ef_search` passa quando o GUC está inerte   [ ]
 
+domain: vetorial
+repo: theo-db
+suggested_mode: review
+source: discover-review
+evidence: medido em 2026-08-20 lendo `theodb_rs/src/am/guc.rs`, ao escrever o teste irmão do [[B-037]].
+`pgvector_alias_changes_recall_end_to_end` mede recall com `hnsw.ef_search = 1` e com `= 400` e afirma
+`alto >= baixo`. A mensagem de falha do próprio teste diz *"se forem sempre iguais, o GUC está inerte"* — e
+`>=` **passa** quando são iguais. A asserção não consegue detectar a condição que a mensagem descreve: se o
+alias `hnsw.ef_search` parasse de alcançar o scan amanhã, os dois recalls ficariam idênticos e o teste
+continuaria verde. É a mesma classe do [[B-063]] (um verificador que não verifica) e do [[B-037]] (propagação
+de valor confundida com efeito), aqui na forma mais sutil: o teste EXISTE, RODA e não afirma nada.
+why_now: o teste irmão que acabou de entrar para o `ivfflat.probes` usa `>` estrito, com a desigualdade
+forçada por contagem (uma célula de Voronoi não cabe `k` vizinhos). Os dois estão lado a lado no mesmo
+repositório afirmando coisas de força diferente sobre a mesma classe de knob, e o mais fraco é o que cobre o
+AM que mais se usa.
+status: triaged
+dod:
+  - a asserção distingue "o knob mudou o resultado" de "o knob está inerte" — `>` estrito, ou a razão
+    escrita de por que `>=` é o correto naquele corpus
+  - se `>` estrito for flaky no corpus atual, o corpus muda para um em que a desigualdade seja forçada por
+    contagem, como o do [[B-037]] — nunca afrouxar a asserção para caber no dado
+  - a mensagem de falha e a asserção passam a dizer a mesma coisa
+
+> Registrado 2026-08-20 pela leitura do código durante o [[B-037]]. **Não retrata nenhum número publicado**:
+> a suíte roda verde e o `ef_search` demonstravelmente funciona (481 testes passam, e o M60/M69/M70 mediram
+> recall). O defeito é de COBERTURA — o teste não protegeria a regressão que ele existe para proteger.

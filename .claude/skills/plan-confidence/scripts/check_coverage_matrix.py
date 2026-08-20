@@ -66,11 +66,17 @@ def _read_plan(plan_path: Path) -> str:
     return plan_path.read_text(encoding="utf-8-sig")
 
 
-def _extract_coverage_section(content: str) -> str:
-    """Extract text between '## Coverage Matrix' and next H2."""
+#: O que `_extract_coverage_section` devolve quando a secao nao existe. Sentinela e nao excecao:
+#: a ausencia da secao e a condicao que o hard cap `coverage_lt_100` cobre — um veredito previsto
+#: do portao, nao uma falha dele (B-081, `rules/error-handling.md` § 2).
+MISSING_SECTION = "No '## Coverage Matrix' section found in plan"
+
+
+def _extract_coverage_section(content: str) -> str | None:
+    """O texto entre '## Coverage Matrix' e o proximo H2, ou `None` quando a secao nao existe."""
     header_match = COVERAGE_HEADER_RE.search(content)
     if header_match is None:
-        raise ValueError("No '## Coverage Matrix' section found in plan")
+        return None
     start = header_match.end()
     # Find next H2 after our header
     next_h2 = NEXT_H2_RE.search(content, pos=start)
@@ -186,6 +192,17 @@ def check_coverage_matrix(plan_path: Path) -> CoverageReport:
     """
     content = _read_plan(plan_path)
     section = _extract_coverage_section(content)
+    if section is None:
+        # Zero linhas mapeadas de zero conhecidas: `is_complete=False` e `coverage_ratio=0.0`
+        # sao a leitura honesta, e o motivo viaja em `parse_errors` para quem le o relatorio.
+        return CoverageReport(
+            total_gaps=0,
+            total_tasks_referenced=0,
+            mapped_gaps=0,
+            is_complete=False,
+            coverage_ratio=0.0,
+            parse_errors=(MISSING_SECTION,),
+        )
     rows = _parse_matrix_rows(section)
 
     total_gaps = len(rows)
