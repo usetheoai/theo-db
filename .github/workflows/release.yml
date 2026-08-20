@@ -50,7 +50,7 @@ jobs:
       #
       # A tag continua sendo verificada (o passo seguinte exige que seja ancestral de `main`) e é o
       # que a release aponta. Ela só deixa de ser de onde lemos o texto.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0   # histórico + tags, para a checagem de ancestralidade e o `--verify-tag`
 
