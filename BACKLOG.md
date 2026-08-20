@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-76 items — **Open** 40 · **In flight** 32 · **Closed** 4
+79 items — **Open** 43 · **In flight** 32 · **Closed** 4
 
-### Open (40)
+### Open (43)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -114,6 +114,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `raw` | — |
 | [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `raw` | — |
 | [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem----) | Dois flags de perfil prometem gates que não existem | `raw` | — |
+| [`B-077`](#b-077--a-tabela-de-roteamento-é-a-do-ecossistema-inteiro-e-os-dois-repos-que-existem-não-roteiam----) | A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam | `raw` | — |
+| [`B-078`](#b-078--seis-módulos-de-teste-do-kit-não-coletam-um-símbolo-removido-levou-as-suítes-junto----) | Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto | `raw` | — |
+| [`B-079`](#b-079--o-tooling-escrito-em-claude-protege-uma-máquina-até-chegar-ao-repo-do-kit----) | O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit | `raw` | — |
 
 ### In flight (32)
 
@@ -2928,6 +2931,18 @@ closed_partially: 2026-08-17 — **11 de 14 alcançáveis** (era 6). Acrescentad
   BM25** — `lexical_engine='bm25'` recusa com *"requires the pg_textsearch extension … not present on the
   shipped image"*. Um número híbrido desta imagem **não** exercita o índice BM25 que o load constrói, e o
   docstring diz isso.
+shapes: 2026-08-20 — `vector_filtered` deixa de ser **declarada** e passa a ser **exercitada**
+  (`theodb-bench` `5f4efe2`). Três suítes novas medem formas que onze das doze anteriores não
+  perguntavam: `vector/sift1m/k-sweep`, `/filtered` e `/batch`. O filtro carrega o que faltava —
+  coluna `tenant` gerada a partir do id, `WHERE` no probe e **oráculo que também filtra**, sem o
+  qual um grafo cujas arestas cruzam o filtro responde rápido e errado e é pontuado como certo.
+  O lote é uma viagem só (`UNION ALL` com `LIMIT k` por sonda) e a base **recusa** quem não tem
+  caminho, em vez de virar N singles. 974 testes verdes.
+  **A matriz gerada não mudou de 11/14, e isso é o achado:** ela deriva do que o adapter
+  *declara*, então `vector_filtered` já constava nos três adapters enquanto nenhuma suíte a
+  exercitava. O terceiro bullet do DoD abaixo — "a capability só é declarada quando o caminho é
+  provado" — não é verificado por nada hoje.
+  **Não medido:** as três suítes nunca rodaram contra servidor real; só duplos.
 dod:
   - existe um relatório gerado (não escrito à mão) que lista cada capability e quais adapters a exercitam,
     e ele entra no `README`
@@ -3001,3 +3016,83 @@ dod:
   - a mesma comparação é rodada nos dois modos na mesma máquina, e a diferença entre os vereditos é medida:
     se intercalar não muda o resultado, isso é um honest-negative que vale registrar
   - enquanto o modo intercalado não existir, o rodapé do veredito pareado declara o limite em vez de omiti-lo
+
+## B-077 — A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam   [ ]
+
+domain: theo-db
+repo: theo-db
+suggested_mode: review
+source: discover-review
+evidence: medido em 2026-08-20 rodando `.claude/scripts/route_domain.py` contra os dois repos reais.
+`theodb-bench` → **`UNROUTED`** (exit 1): não está na tabela, e é onde vivem **13** itens deste registro.
+`theo-db` → **`BROKEN ROUTE`** (exit 3): roteia para `agents/theo-db.md`, que não existe em disco — os
+especialistas em `.claude/agents/` são os nove pilares (`theo-recall`, `theo-columnar`, `theo-pgrx`, …).
+A tabela em `.claude/rules/cycle-backlog.md § Domain routing` nomeia **16 repos** (`theo`, `theo-cli`,
+`theo-cloud`, `theo-lens`, `theo-rag`, …), dos quais esta máquina tem **dois**. É exatamente o defeito que a
+própria regra documenta ter medido no `theokit-sdk`: 88 itens, todos `BLOCKER/unroutable_repo`.
+Há um conflito de MODELO por baixo, e ele é a parte que decisão nenhuma resolve sozinha: os 76 itens deste
+registro declaram **8 domínios-pilar** (`engine-pgrx` 25, `theo-db` 22, `vetorial` 8, `lexical` 7, `colunar` 9,
+`hot-path` 2, `ai-surface` 2, `acervo` 1) sobre **2 repos**, medido por
+`awk '/^domain: /{d=$2} /^repo: /{print d" | "$2}' BACKLOG.md | sort | uniq -c`. O `route_domain.py` roteia
+por **repo** e assume um-repo-um-domínio (`route()` devolve o primeiro domínio que contém o repo), então
+`theo-db` em 7 pilares é ambíguo por construção — e `detect_domains.py --from-backlog` recusa derivar por
+essa mesma razão, com a mensagem *"`theo-db` is declared in two domains"*.
+why_now: o `check_intake_gates.py` acabou de mecanizar G1 (2026-08-20, ainda não commitado quando isto foi
+medido). Enquanto a tabela estiver assim, mecanizar o gate **recusa todo item novo deste projeto** — o gate
+passa a funcionar e a resposta dele é errada, que é pior que gate nenhum, porque agora ela é automática.
+status: raw
+dod:
+  - está decidido por escrito qual é a unidade de propriedade aqui — repo ou pilar — e a razão
+  - `route_domain.py` responde `routed: true` para `theo-db` e para `theodb-bench`, com especialista que
+    existe em disco nos dois casos
+  - se a decisão for pilar, o `route_domain.py` deixa de assumir um-repo-um-domínio, ou G1 passa a rotear
+    pelo campo que é inequívoco (`domain:`) em vez de por `repo:`
+  - nenhum dos 76 itens existentes fica órfão pela mudança
+
+## B-078 — Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto   [ ]
+
+domain: theo-db
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: medido em 2026-08-20 com `python3 -m pytest skills/ -q` em `.claude/`:
+*"Interrupted: 6 errors during collection"*. A causa é uma só —
+`ImportError: cannot import name '_has_defer_corner_marker' from 'check_corner_coverage'`
+(`skills/discover-confidence/scripts/check_corner_coverage.py`). Atinge
+`skills/discover-plan-confidence/tests/` (4 módulos), `skills/plan-confidence/tests/test_check_spec_smells.py`
+e `skills/plan-improve/tests/test_apply_fixes.py`.
+O símbolo saiu por decisão registrada: `rules/discover-opportunity-golden-rule.md § 1.1` diz que o marcador
+`<!-- DEFERRED: ... -->` do ancestral **não é honrado em lugar nenhum**. A decisão está certa; o que ficou
+para trás foram os testes que importavam o símbolo.
+why_now: um `pytest skills/` no diretório inteiro **aborta na coleta**, então quem rodar a suíte do kit de
+forma ampla não vê 210 verdes — vê seis erros e nenhum resultado. E a quebra é invisível para quem roda só
+os diretórios que mexeu, que foi como ela sobreviveu.
+status: raw
+dod:
+  - `python3 -m pytest skills/ -q` coleta tudo sem erro
+  - cada teste órfão ou foi reescrito contra o contrato que sobreviveu, ou foi removido com a razão no commit
+  - nada é silenciado por `@skip` (dívida invisível, `rules/testing.md § 6`)
+
+## B-079 — O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit   [ ]
+
+domain: theo-db
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: medido em 2026-08-20. O diff em `.claude/` traz **27 arquivos modificados e 8 novos** que mecanizam
+gates que eram prosa: `coverage_gate.py` (piso de cobertura lido de relatório real, `WARN` honesto quando não
+há — nunca `PASS`), `suite_runners.py` (roda a suíte da linguagem que o repo fala; **FAIL** quando há
+manifesto e nada executou), `check_phase_review.py` (prova que a mini-review de fim de fase rodou),
+`check_intake_gates.py` (G1/G2 do intake), `detect_domains.py` (deriva a tabela de domínios do disco), e
+`consolidate_findings.py` com `READY_TO_MERGE_WITH_FOLLOWUPS` fail-closed. 210 testes verdes,
+`check_xrefs.py` PASS.
+Nada disso está no repositório do kit, e o repositório do kit **não está nesta máquina** — não há checkout de
+`squad` em `~/Projetos`. A regra global do owner é explícita: *"Uma correção escrita dentro de `.claude/` não
+existe até chegar ao repositório do kit"*.
+why_now: o trabalho está feito e verde. O custo de portar cresce com cada ciclo que roda por cima dele, e o
+`.claude/` deste repo recebe atualização do instalador — uma reinstalação sobrescreve o que não foi portado.
+status: raw
+dod:
+  - o repositório do kit está clonado nesta máquina, ou está declarado por escrito onde ele vive
+  - os 35 arquivos estão no repo do kit, ou está registrado por escrito quais foram descartados e por quê
+  - um `install.sh` a partir do kit reproduz o estado que hoje só existe em `theo-db/.claude/`
