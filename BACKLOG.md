@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-81 items — **Open** 39 · **In flight** 35 · **Closed** 7
+81 items — **Open** 39 · **In flight** 36 · **Closed** 6
 
 ### Open (39)
 
@@ -114,7 +114,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-077`](#b-077--a-tabela-de-roteamento-é-a-do-ecossistema-inteiro-e-os-dois-repos-que-existem-não-roteiam----) | A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam | `triaged` | — |
 | [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar----) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `triaged` | — |
 
-### In flight (35)
+### In flight (36)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -123,6 +123,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-011`](#b-011--o-vector-join-do-hnsw-perde-exatamente-um-elemento---x) | O vector-join do HNSW perde exatamente um elemento | `planned` | — |
 | [`B-013`](#b-013--a-suíte-não-roda-no-ci-então-a-próxima-regressão-espera-meses---x) | A suíte não roda no CI, então a próxima regressão espera meses | `planned` | — |
 | [`B-016`](#b-016--os-testes-de-egress-esbarram-na-guarda-ssrf-do-próprio-produto----) | Os testes de egress esbarram na guarda SSRF do próprio produto | `planned` | — |
+| [`B-021`](#b-021--o-diagnóstico-não-enxerga-índice-criado-pela-sintaxe-pgvector-e-o-opclass-default-não-serve-----) | O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>` | `planned` | — |
 | [`B-022`](#b-022--dois-testes-declaram-fragmento-em-pg_testerror---e-o-pgrx-compara-a-mensagem-inteira----) | Dois testes declaram FRAGMENTO em `#[pg_test(error = …)]`, e o pgrx compara a mensagem INTEIRA | `planned` | — |
 | [`B-023`](#b-023--um-teste-de-performance-mora-na-suíte-funcional-e-ele-reprovou-com-avx-51-mais-lento----) | Um teste de PERFORMANCE mora na suíte funcional, e ele reprovou com AVX 51% mais lento | `planned` | — |
 | [`B-025`](#b-025--a-imagem-theodb-builder-não-traz-cargo-clippy-então-o-gate-de-lint-não-roda-fora-do-ci----) | A imagem `theodb-builder` não traz `cargo-clippy`, então o gate de lint não roda fora do CI | `planned` | — |
@@ -154,13 +155,12 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-079`](#b-079--o-tooling-escrito-em-claude-protege-uma-máquina-até-chegar-ao-repo-do-kit----) | O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit | `planned` | — |
 
-### Closed (7)
+### Closed (6)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-019`](#b-019--create-index-de-hnsw-não-é-idempotente-estoura-em-vez-de-ser-no-op----) | `CREATE INDEX` de HNSW não é idempotente: estoura em vez de ser no-op | `killed` | — |
 | [`B-020`](#b-020--create-index-de-hnsw-é-93-mais-lento-que-inserir-as-mesmas-linhas----) | `CREATE INDEX` de HNSW é 93× mais lento que inserir as mesmas linhas | `killed` | — |
-| [`B-021`](#b-021--o-diagnóstico-não-enxerga-índice-criado-pela-sintaxe-pgvector-e-o-opclass-default-não-serve-----) | O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>` | `shipped` | — |
 | [`B-024`](#b-024--o-autotune-recomendou-ef_search-sobre-contadores-em-zero-e-ninguém-mediu-o-alcance----) | O autotune recomendou `ef_search` sobre contadores em ZERO, e ninguém mediu o alcance | `killed` | — |
 | [`B-028`](#b-028--o-harness-de-upgrade-declarou-todos-os-cenários-passaram-com-um-cenário-pulado---x) | O harness de upgrade declarou "TODOS OS CENÁRIOS PASSARAM" com um cenário PULADO | `killed` | — |
 | [`B-078`](#b-078--seis-módulos-de-teste-do-kit-não-coletam-um-símbolo-removido-levou-as-suítes-junto----) | Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto | `killed` | — |
@@ -1020,7 +1020,14 @@ suggested_mode: bug
 source: discover-bug
 evidence: medido em 2026-08-11 contra `ghcr.io/usetheoai/theo-db:0.140.0`. (a) `theodb.explain_scan` sobre uma tabela cujo índice foi criado com `USING hnsw` (o alias do shim, `sql/vector--0.6.0.sql:49`) devolve `(no theodb_hnsw index on this table)` — o alias é uma segunda entrada em `pg_am` (OID `hnsw=19173` vs `theodb_hnsw=16568`) e a resolução casa pelo nome do AM. (b) um índice criado com o opclass **default** do AM (`theodb_hnsw_l2_ops`, `opcdefault=t`) não serve o operador `<=>`: o plano medido cai em `Limit → Sort → Seq Scan`, enquanto `theodb_hnsw_cosine_ops` produz `Index Scan ... Order By`.
 why_now: os dois se somam contra o consumidor real. **Todo** índice que o `theo-rag` cria usa `USING hnsw` — portanto é invisível ao `explain_scan` e ao autotune, justamente nas consultas que o dogfood exercita. E `scan_stats` hardcoda `<=>` (`autotune.rs:210`), então quem cria o índice sem nomear o opclass (aceitando o default L2) nunca é medido e não recebe aviso — o diagnóstico devolve zeros silenciosos em vez de dizer "este índice não responde a este operador".
-status: shipped
+status: planned
+status_nota_retratacao: 2026-08-20 — **eu marquei `shipped` e estava errado.** Baseei-me nas duas entradas
+  `(#B-021)` sob `## [0.160.0]` do CHANGELOG e não verifiquei se a versão foi CORTADA. Medido depois:
+  a última tag é **v0.158.0**, `origin/main` traz `## [0.158.0]` no topo, e a `[0.160.0]` só existe em
+  `develop`/`workspace`. Entrada de CHANGELOG é intenção de release, não release — foi o mesmo erro de ler o
+  artefato errado que este dia já produziu três vezes. `planned` é o status correto, pela mesma convenção que
+  o [[B-059]] usa: entregue e mergeado, `shipped` aguarda o corte.
+
 status_nota_release: 2026-08-20 — resolvida a divergência que o `status_nota_dedup` abaixo registrou como
   minha de não resolver. O trabalho **saiu em release**: `CHANGELOG.md § [0.160.0] - 2026-08-12` traz duas
   entradas com referência `(#B-021)` — o diagnóstico que passou a enxergar índice criado pela sintaxe do
