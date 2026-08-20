@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-83 items — **Open** 41 · **In flight** 36 · **Closed** 6
+84 items — **Open** 42 · **In flight** 36 · **Closed** 6
 
-### Open (41)
+### Open (42)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -115,6 +115,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar----) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `triaged` | — |
 | [`B-082`](#b-082--o-primeiro-comando-do-readme-aponta-para-uma-org-que-não-é-a-nossa-e-a-imagem-nunca-foi-publicada----) | O primeiro comando do README aponta para uma org que não é a nossa, e a imagem nunca foi publicada | `triaged` | — |
 | [`B-083`](#b-083--42-actions-de-terceiros-fixadas-por-tag-e-nenhuma-por-sha----) | 42 actions de terceiros fixadas por TAG, e nenhuma por SHA | `triaged` | — |
+| [`B-084`](#b-084--a-esteira-do-banco-rodava-o-avaliador-e-três-constantes-fixavam-uma-versão-que-o-upstream-move----) | A esteira do banco rodava o avaliador, e três constantes fixavam uma versão que o upstream move | `triaged` | — |
 
 ### In flight (36)
 
@@ -3290,4 +3291,43 @@ dod:
   - `actions/*` e `docker/*` incluídas — pertencer ao GitHub não as torna imutáveis
   - o dependabot mantém os SHAs atualizados (ele reescreve SHA + comentário quando configurado assim)
   - a política fica escrita onde um autor de workflow a encontre, não só neste item
+
+## B-084 — A esteira do banco rodava o avaliador, e três constantes fixavam uma versão que o upstream move   [ ]
+
+domain: governanca
+repo: theo-db
+suggested_mode: review
+source: discover-review
+evidence: medido em 2026-08-20 ao migrar a esteira para runner GitHub-hosted, e os defeitos só
+apareceram porque o runner efêmero **não carrega estado**. Três classes.
+**(1) Sete jobs instalavam um arquivo que não existe.** `pip install -r requirements.txt` em
+`harness-unit`, `image-and-bench`, `hybrid-search`, `ai-sql`, `bm25-measure`, `nl-sql` e
+`columnar-measure`. O `benchmarks/` saiu em `7cd157d` (B-029) em **2026-08-12** e virou o repositório
+irmão `theodb-bench`. Nenhum `tests/test_hybrid.py`, `tests/test_integration.py` ou `tests/test_ai_sql.py`
+existe; não há `tests/`, `pytest.ini` nem `pyproject.toml` na raiz. O `harness-unit` chegava a declarar
+`working-directory: benchmarks` e lintar o pacote `theodb_bench` — hoje, literalmente, o outro projeto.
+**(2) `18.4` como constante nossa, em três lugares, contra uma imagem base que serve 18.6.**
+`cassert-sql-safety.yml` fixava `~/.pgrx/18.4/pgrx-install` (o `cargo pgrx init --pg18` instalou
+**18.6**); `packaging/Dockerfile.regress` fixava `ARG PG_TAG=REL_18_4`; e `packaging/run-regress.sh`
+comparava contra `18.4` literal, produzindo `ERROR: engine is not 18.4 (got 18.6)`.
+**(3) Componentes de toolchain que existiam só naquela máquina.** `rustfmt` e `clippy` tinham sido
+instalados à mão no runner próprio e o `rust-toolchain.toml` só fixava o canal — num runner efêmero o
+`rustup` baixa a toolchain **sem** os componentes, e o gate morreu em
+`error: 'cargo-fmt' is not installed for the toolchain '1.97.0'`.
+why_now: os três só eram invisíveis porque a máquina guardava o que o repositório não registrava. A
+migração não os criou — ela os revelou, e é por isso que valem item: a mesma classe volta em qualquer
+ambiente novo (máquina de um colaborador, contêiner limpo, outro runner).
+status: triaged
+consertado: 2026-08-20, no mesmo ciclo. (1) cirurgia por STEP e não por job — 26 steps e o
+  `harness-unit` removidos, preservando o que era do PRODUTO: golden top-k do `ai.hybrid_search_rrf`,
+  presença de função não-PUBLIC em `ai-sql`/`nl-sql`, varreduras de licença de BM25 e colunar, e o
+  `image-and-bench`, que publica o cache buildx que outros oito jobs leem. (2) as três constantes
+  derivadas, com o erro dizendo o que fazer. (3) `components = ["rustfmt", "clippy"]` declarado no
+  `rust-toolchain.toml`, onde vale para o CI, para o contêiner e para quem clonar — não num passo de
+  workflow, onde valeria para quem lembrar.
+dod:
+  - nenhuma referência da esteira a caminho que não existe no disco (verificável por script)
+  - nenhuma versão de patch de dependência upstream fixada como constante em workflow ou script
+  - a fronteira entre produto e avaliador está declarada onde um autor de workflow a encontre
+  - existe verificação que reprova quando um job instala requisito de árvore inexistente
 

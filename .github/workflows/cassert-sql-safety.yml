@@ -94,11 +94,29 @@ jobs:
           command -v cargo-pgrx >/dev/null || cargo install --locked cargo-pgrx --version 0.19.0
           cargo pgrx init --pg18 download
 
+
+      # DERIVADO, nunca hard-coded. O `18.4` que estava aqui era a versão que a máquina paga por
+      # acaso tinha; o `cargo pgrx init --pg18` baixa a ÚLTIMA da série e instalou **18.6**, então o
+      # caminho fixo apontou para um diretório inexistente e o guard reprovou — corretamente, mas
+      # pela causa errada. Uma versão de patch do PostgreSQL não é decisão nossa e não deve virar
+      # constante num workflow.
+      - name: Resolver onde o pgrx instalou o PostgreSQL
+        run: |
+          set -euo pipefail
+          PGRX_INSTALL=$(find "$HOME/.pgrx" -maxdepth 2 -type d -name pgrx-install | sort -V | tail -1)
+          [ -x "$PGRX_INSTALL/bin/pg_config" ] || {
+            echo "::error::nenhum pgrx-install com pg_config sob ~/.pgrx — o init não produziu o que promete" >&2
+            ls -la "$HOME/.pgrx" 2>/dev/null || true
+            exit 1
+          }
+          echo "PGRX_INSTALL=$PGRX_INSTALL" >> "$GITHUB_ENV"
+          echo "resolvido: $PGRX_INSTALL  ($("$PGRX_INSTALL/bin/pg_config" --version))"
+
       - name: Instalar a extensão no PG cassert do pgrx
         run: |
           set -euo pipefail
           export PATH="$HOME/.cargo/bin:$PATH"
-          PGINST="$HOME/.pgrx/18.4/pgrx-install"
+          PGINST="$PGRX_INSTALL"
           "$PGINST/bin/pg_config" --configure | grep -q -- '--enable-cassert' \
             || { echo "::error::PG do pgrx não é cassert — o smoke seria vacuoso"; exit 1; }
           cd theodb_rs
@@ -107,7 +125,7 @@ jobs:
       - name: pgspot — DDL inseguro na SQL de instalação (baseline dos 6 códigos atuais)
         run: |
           set -euo pipefail
-          PGINST="$HOME/.pgrx/18.4/pgrx-install"
+          PGINST="$PGRX_INSTALL"
           # `find` em vez de `ls`: o glob do `ls` quebra em nome com espaço/newline (SC2012), e este
           # caminho vem do layout do pgrx, que não controlamos.
           SQL=$(find "$PGINST/share/postgresql/extension" -maxdepth 1 -name 'theodb_rs--*[0-9].sql' | sort -V | tail -1)
@@ -123,4 +141,4 @@ jobs:
           set -euo pipefail
           # O job roda como ghrunner (não-root), então `initdb` roda direto — sem o dança runuser/pgtest que só
           # o teste-como-root exigia. PGINST é o pgrx do próprio ghrunner (compilado com --enable-cassert).
-          PGINST="$HOME/.pgrx/18.4/pgrx-install" PGPORT=28941 bash scripts/cassert-smoke.sh
+          PGINST="$PGRX_INSTALL" PGPORT=28941 bash scripts/cassert-smoke.sh

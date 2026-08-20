@@ -56,11 +56,10 @@ jobs:
     # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: grátis e ilimitado, e sobretudo PARALELO —
     # a máquina paga era ÚNICA e SERIAL, e os dez workflows do mesmo push enfileiravam.
     #
-    # SEM liberação prévia de disco, DE PROPÓSITO. `theodb_rs/target` mede 13 GB na máquina de
-    # desenvolvimento, e a receita conhecida de remover toolchains pré-instaladas pode ser
-    # necessária — mas aplicá-la antes de medir responderia "cabe com truque" a uma pergunta que
-    # ainda não sabemos se precisa de truque. Esta corrida É a medição. Se faltar disco, a falha
-    # diz isso, e aí a limpeza entra com número em vez de suposição.
+    # DISCO: MEDIDO, não mais suposto. A dúvida era `theodb_rs/target` medir 13 GB contra o disco do
+    # runner padrão. Corrida de 2026-08-20: a `Rust test suite` (que constrói o estágio builder e roda
+    # a suíte dentro do contêiner) passou em **19 minutos**, e NENHUM job falhou por espaço. A receita
+    # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     # A suíte leva 8 min; o build da imagem builder domina o resto. 45 min corta um travamento
     # sem cortar uma execução legítima — e travar é um modo de falha REAL aqui: antes do B-001, o
