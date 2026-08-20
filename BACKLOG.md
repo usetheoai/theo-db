@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-87 items — **Open** 32 · **In flight** 6 · **Closed** 49
+87 items — **Open** 31 · **In flight** 7 · **Closed** 49
 
-### Open (32)
+### Open (31)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -92,7 +92,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-046`](#b-046--paridade-de-qps-com-o-pgvector-a-recall-casado-hoje-o-déficit-medido-é-163----) | Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3% | `triaged` | — |
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `triaged` | — |
 | [`B-050`](#b-050--o-conserto-do-cliente-opensearch-é-do-upstream-e-o-fork-tem-saída-declarada----) | O conserto do cliente OpenSearch é do upstream, e o fork tem saída declarada | `triaged` | — |
-| [`B-052`](#b-052--workspace-não-tem-portão-73-commits-e-13-arquivos-rust-sem-um-gate-olhar----) | `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar | `triaged` | — |
 | [`B-054`](#b-054--toda-iteração-em-rust-custa-8-minutos-e-2m34s-deles-eram-um-cp--r----) | Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r` | `triaged` | — |
 | [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança----) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `triaged` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `triaged` | — |
@@ -107,12 +106,13 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-086`](#b-086--o-teste-que-prova-o-alias-do-ef_search-passa-quando-o-guc-está-inerte----) | O teste que prova o alias do `ef_search` passa quando o GUC está inerte | `triaged` | — |
 | [`B-087`](#b-087--o-pacote-do-arnês-diz-010dev0-enquanto-as-releases-dizem-v010-e-v020----) | O pacote do arnês diz `0.1.0.dev0` enquanto as releases dizem `v0.1.0` e `v0.2.0` | `triaged` | — |
 
-### In flight (6)
+### In flight (7)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-037`](#b-037--o-am-ivfflat-não-existe-metade-do-shim-pgvector-está-ausente----) | O AM `ivfflat` não existe: metade do shim pgvector está ausente | `planned` | — |
 | [`B-051`](#b-051--nada-compara-o-checkbox-com-o-status-e-a-divergência-sobreviveu-meses----) | Nada compara o checkbox com o `status`, e a divergência sobreviveu meses | `planned` | — |
+| [`B-052`](#b-052--workspace-não-tem-portão-73-commits-e-13-arquivos-rust-sem-um-gate-olhar----) | `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
@@ -2177,7 +2177,16 @@ de recall que 109 artefatos de benchmark não pegaram e só apareceu quando a su
 que ali a suíte existia e ninguém a chamava, e aqui ela existe, é chamada, e olha o código tarde demais para
 impedir o merge. **A restrição que criou isto é real e não deve ser desfeita por decreto**: qualquer proposta
 que multiplique execuções do runner contradiz a razão pela qual o gatilho foi removido.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — os três bullets fecharam. (1) O gate passou a rodar em `pull_request`, contra
+  `refs/pull/N/merge` — a árvore mergeada, que é o que o `push` para `develop` testava, um passo antes.
+  Não aumentou execuções porque não é acréscimo e sim TROCA: `push` ficou só em `main`. (2) Custo
+  MEDIDO em 9 dias por `gh run list`: 30 corridas pesadas por push em `develop` (1410 min) para 13 PRs
+  mergeados, contra ~13+5 no desenho novo. (3) `wiki/decisions/0062-portao-antes-do-merge.md`, que
+  registra que a premissa do owner (runner pago, único, serial) caiu quando os doze workflows migraram
+  para `ubuntu-latest` num repo PUBLIC. Aberto e dito: a árvore de merge pode envelhecer, e fechar isso
+  exige *Require branches to be up to date* na branch protection — configuração de repositório, não
+  entregue por este item.
 dod:
   - existe verificação sobre o que está em `workspace` **antes** do merge, sem aumentar o número de execuções
     da esteira pesada no runner — a restrição de capacidade é premissa, não obstáculo

@@ -26,8 +26,27 @@ on:
   # Também não há gatilho de `push` em `workspace`: com um runner serial, cada commit disparava 8 min de
   # suíte à frente de publish/lint/CI. Com a remoção do `pull_request` acima, a suíte roda UMA vez por
   # promoção — no push para `develop`.
-  push:
+  # B-052 / ADR-0062 — o portao passou a olhar ANTES do merge.
+  #
+  # `pull_request` roda contra `refs/pull/N/merge`, ou seja, contra a arvore MERGEADA — a mesma
+  # coisa que o `push` para `develop` testava, um passo antes. E `push: [develop]` saiu junto: sem
+  # isso a mudanca DOBRARIA as corridas pesadas, e a restricao de capacidade que removeu o gatilho
+  # de PR em 2026-08-12 e premissa deste item, nao obstaculo.
+  #
+  # Custo MEDIDO na janela de 9 dias (2026-08-11..20), nao estimado: 30 corridas pesadas por push
+  # em `develop` (1410 min) para 13 PRs `workspace -> develop` mergeados. Com o gate no PR e
+  # `cancel-in-progress` colapsando pushes sucessivos, sao ~13 corridas — MENOS que as 30 de hoje,
+  # e olhando o codigo enquanto ele ainda pode ser recusado.
+  #
+  # `push: [main]` fica: e a verificacao pos-release, e `main` so avanca por PR de release.
+  pull_request:
     branches: [develop, main]
+    paths:
+      - "theodb_rs/**"
+      - "Dockerfile"
+      - ".github/workflows/rust-suite.yml"
+  push:
+    branches: [main]
     paths:
       - "theodb_rs/**"
       - "Dockerfile"
