@@ -14,6 +14,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **O corte de release volta a ser possível.** O portão de lint reprovava por formatação em quatro
+  arquivos do crate, e com ele vermelho nenhuma versão saía: duas já estavam escritas no changelog
+  (0.159.0 e 0.160.0) e nenhuma chegou a `main`, que segue em 0.158.0 desde julho. Sem mudança de
+  comportamento — `rustfmt` não altera semântica (#B-052)
 - **Os portões de confiança deixam de acusar evidência legítima de ser fabricada.** Numa instalação
   como plugin — que é o caso deste repositório — o ecossistema vive sob `.claude/`, e os dois
   resolvedores de pointer procuravam apenas a partir da raiz do projeto. Consequência medida: a

@@ -57,20 +57,20 @@ mod tests {
         // formato não medido é o erro que este ciclo já cometeu com "procedure" vs "function".
         "operator class vector_ops for access method btree",
         // --- [umbrella] absorvidos pela Fase 3 ---
-        "function ai.generate(text,text)",            // T3.1
-        "function ai.summarize(text,text)",           // T3.1
-        "function ai.agg_summarize(text)",            // T3.1 (agregado)
-        "function ai.nl_query(text,text[],text,integer)", // T3.2
-        "function ai.nl_query_cfg(text,text,integer)",   // T3.2
+        "function ai.generate(text,text)",                 // T3.1
+        "function ai.summarize(text,text)",                // T3.1
+        "function ai.agg_summarize(text)",                 // T3.1 (agregado)
+        "function ai.nl_query(text,text[],text,integer)",  // T3.2
+        "function ai.nl_query_cfg(text,text,integer)",     // T3.2
         "function theodb_ml.create_model(text,text,text)", // T3.3
-        "function theodb_ml.apply_model(text)",          // T3.3
+        "function theodb_ml.apply_model(text)",            // T3.3
         // MEDIDO 2026-08-12: `pg_describe_object` imprime "function" mesmo para `prokind='p'`, então
         // esperar "procedure" aqui testava a REDAÇÃO do PostgreSQL, não a propriedade que importa.
         // A propriedade — ser procedimento, que é o que permite `COMMIT` por lote — é asserida em
         // `import_vectors_chunked_is_a_procedure`, onde ela pertence.
         "function theodb.import_vectors_chunked(regclass,jsonb,integer,text,text,text)",
-        "function theodb.htap_refresh(regclass)",        // T3.5
-        "function theodb.olap(regclass)",                // T3.5
+        "function theodb.htap_refresh(regclass)", // T3.5
+        "function theodb.olap(regclass)",         // T3.5
     ];
 
     /// Funções que fazem **egress HTTP server-side** e, por isso, NUNCA podem ter `EXECUTE` para PUBLIC.

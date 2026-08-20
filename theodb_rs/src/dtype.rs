@@ -789,30 +789,28 @@ mod tests {
             .unwrap();
         assert_eq!(eq, 2, "WHERE e = ...");
 
-        let distinct =
-            Spi::get_one::<i64>("SELECT count(*) FROM (SELECT DISTINCT e FROM b033) x")
-                .unwrap()
-                .unwrap();
-        assert_eq!(distinct, 2, "SELECT DISTINCT e");
-
-        let grouped =
-            Spi::get_one::<i64>("SELECT count(*) FROM (SELECT e FROM b033 GROUP BY e) x")
-                .unwrap()
-                .unwrap();
-        assert_eq!(grouped, 2, "GROUP BY e");
-
-        let first = Spi::get_one::<String>("SELECT e::text FROM b033 ORDER BY e LIMIT 1")
+        let distinct = Spi::get_one::<i64>("SELECT count(*) FROM (SELECT DISTINCT e FROM b033) x")
             .unwrap()
             .unwrap();
+        assert_eq!(distinct, 2, "SELECT DISTINCT e");
+
+        let grouped = Spi::get_one::<i64>("SELECT count(*) FROM (SELECT e FROM b033 GROUP BY e) x")
+            .unwrap()
+            .unwrap();
+        assert_eq!(grouped, 2, "GROUP BY e");
+
+        let first =
+            Spi::get_one::<String>("SELECT e::text FROM b033 ORDER BY e LIMIT 1").unwrap().unwrap();
         assert_eq!(first, "[1,2,3]", "ORDER BY e");
 
         // O quinto: a opclass DEFAULT existe, então o índice é criável sem nomeá-la. Sobre uma
         // tabela SEM duplicata, para provar que CONSTRÓI (a rejeição de duplicata é o teste seguinte).
-        Spi::run("CREATE TABLE b033u (e vector(3)); INSERT INTO b033u VALUES ('[1,2,3]'),('[9,9,9]');")
-            .unwrap();
+        Spi::run(
+            "CREATE TABLE b033u (e vector(3)); INSERT INTO b033u VALUES ('[1,2,3]'),('[9,9,9]');",
+        )
+        .unwrap();
         Spi::run("CREATE UNIQUE INDEX b033u_ix ON b033u (e)").unwrap();
     }
-
 
     /// T1.4 — a opclass btree NÃO rouba o caminho ANN.
     ///
