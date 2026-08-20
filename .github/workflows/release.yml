@@ -41,10 +41,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # A árvore vem da BRANCH, não da tag — e a distinção custou uma corrida vermelha.
+      # A primeira versão fazia `ref: <tag>`, o que confunde o ALVO do release com a FONTE da
+      # ferramenta. Medido em 2026-08-20: as releases retroativas `v0.159.0` e `v0.160.0` morreram
+      # em `exit 127` porque `scripts/changelog-section.sh` foi escrito HOJE e não existe naquelas
+      # árvores. O CHANGELOG tem o mesmo problema e é pior: a seção de uma versão antiga descreve o
+      # que era conhecido ANTES dela, e pode ter sido corrigida depois.
+      #
+      # A tag continua sendo verificada (o passo seguinte exige que seja ancestral de `main`) e é o
+      # que a release aponta. Ela só deixa de ser de onde lemos o texto.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref_name }}
-          fetch-depth: 0   # a tag precisa existir localmente para `gh release create` referenciá-la
+          fetch-depth: 0   # histórico + tags, para a checagem de ancestralidade e o `--verify-tag`
 
       - name: A tag aponta para um commit alcançável por `main`?
         env:
