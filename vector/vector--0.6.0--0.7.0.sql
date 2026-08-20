@@ -43,3 +43,17 @@ CREATE OPERATOR CLASS vector_cosine_ops FOR TYPE vector USING ivfflat AS
 CREATE OPERATOR CLASS vector_ip_ops FOR TYPE vector USING ivfflat AS
     OPERATOR 1 <#> (vector, vector) FOR ORDER BY float_ops,
     FUNCTION 1 theodb_metric_ip();
+
+-- =====================================================================================
+-- O QUE ESTE UPGRADE **NÃO** FAZ, e a razão.
+--
+-- A 0.7.0 também corrige a `vector_l2_ops` sob `hnsw`, que a 0.6.0 marcava DEFAULT indevidamente
+-- (o pgvector 0.8.3 não tem opclass default para `hnsw` — medido). Um upgrade não consegue desfazer
+-- isso: o PostgreSQL não tem `ALTER OPERATOR CLASS ... NOT DEFAULT`, e a única via seria
+-- `DROP OPERATOR CLASS`, que derruba **todo índice dependente**. Trocar uma divergência cosmética
+-- de `pg_get_indexdef` por perda de índice de usuário seria um péssimo negócio.
+--
+-- Consequência declarada: uma instalação que veio da 0.6.0 mantém `vector_l2_ops` como default sob
+-- `hnsw`; uma instalação nova, não. A diferença aparece só na forma como `\d` e `pg_get_indexdef`
+-- imprimem a definição — nenhum índice muda de comportamento. Registrado no [[B-037]].
+-- =====================================================================================
