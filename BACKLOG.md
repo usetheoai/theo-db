@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-87 items — **Open** 28 · **In flight** 9 · **Closed** 50
+88 items — **Open** 28 · **In flight** 10 · **Closed** 50
 
 ### Open (28)
 
@@ -103,7 +103,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 | [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar----) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `triaged` | — |
 
-### In flight (9)
+### In flight (10)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -116,6 +116,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-083`](#b-083--42-actions-de-terceiros-fixadas-por-tag-e-nenhuma-por-sha----) | 42 actions de terceiros fixadas por TAG, e nenhuma por SHA | `planned` | — |
 | [`B-086`](#b-086--o-teste-que-prova-o-alias-do-ef_search-passa-quando-o-guc-está-inerte----) | O teste que prova o alias do `ef_search` passa quando o GUC está inerte | `planned` | — |
+| [`B-088`](#b-088--o-gate-de-changelog-checa-presença-de-arquivo-não-de-entrada----) | O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA | `planned` | — |
 
 ### Closed (50)
 
@@ -3724,3 +3725,40 @@ dod:
 
 > Registrado 2026-08-20 durante o corte da `v0.2.0`. **Não retrata nenhum número**: nenhum bundle
 > publicado foi verificado ainda quanto a esse campo, e é isso que o terceiro bullet pede.
+## B-088 — O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA   [ ]
+
+domain: governanca
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: medido em 2026-08-20 sobre o meu próprio trabalho, ao cortar a `0.161.0`. As duas entradas do
+[[B-081]] **nunca chegaram ao CHANGELOG**: o comando que as escrevia foi bloqueado inteiro pelo hook de
+proveniência (a mensagem de commit citava um caminho da zona de estudo), e no retry eu refiz só o commit, sem
+a edição. O commit `c52dfda` foi aceito com o `[Unreleased]` sem nenhuma menção ao item que ele entregava.
+O gate em `hooks/stop-validation.sh:143` é `echo "$ALL_FILES" | grep -qE '^CHANGELOG\.md$'` — ele pergunta
+se o arquivo está no diff, e o arquivo estava, por causa de outras edições da mesma sessão. Confirmado por
+`git show c52dfda:CHANGELOG.md | awk '/Unreleased/,/^## \[0\./' | grep -o '(#B-[0-9]*)'`: quatro itens
+citados, nenhum deles o B-081.
+why_now: a omissão só apareceu porque o corte de release me fez comparar a lista de itens entregues com a
+lista de itens citados — ou seja, **uma sessão depois**, e por acaso. Um gate que passa quando o arquivo foi
+tocado por outra razão é a mesma classe do `assert_index_used` ([[B-063]]) e do `recall_at_10` ([[B-086]]):
+existe, roda, e não afirma o que diz afirmar.
+status: planned
+status_nota: 2026-08-20 — os três bullets fecharam. (1) `scripts/check_changelog_entry.py` conta bullets
+  **acrescentados dentro do `[Unreleased]`**, ignorando edição em versão já lançada, e uma reescrita
+  conta como uma entrada e não duas. (2) Provado contra o commit REAL: `check_changelog_entry.py
+  --rev c52dfda` sai 1, e `--rev cf7633a` sai 0 — um gate provado só em diff sintético é um gate
+  cujo autor escolheu o próprio exame. (3) O caso legítimo passa: markdown, workflow e teste não
+  estão em `FONTES`, então não contam. **Correção de rota registrada:** meu primeiro rascunho
+  inventou uma definição própria de "código de produção" excluindo `.claude/`, e ela absolvia
+  justamente o `c52dfda`. O checador agora espelha a definição que o hook já tinha.
+dod:
+  - o gate compara o `[Unreleased]` ANTES e DEPOIS da sessão e reprova quando código de produção mudou e
+    nenhuma entrada foi acrescentada — presença de linha nova, não presença de arquivo
+  - existe teste que reprova contra o `c52dfda`, o commit real em que a omissão passou
+  - o caso legítimo continua passando: uma sessão que só edita CHANGELOG, ou que só mexe em documentação,
+    não pode ser reprovada por não acrescentar entrada
+
+> Registrado 2026-08-20 pelo corte da `0.161.0`. **É sobre o meu próprio erro**, e é por isso que vale: eu
+> segui o procedimento, o gate disse OK, e a entrada não existia. Nenhum humano teria notado antes do
+> release, e o release é tarde demais — o CHANGELOG é o contrato com quem consome.
