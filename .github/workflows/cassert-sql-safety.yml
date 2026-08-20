@@ -13,6 +13,20 @@
 name: cassert-sql-safety
 
 on:
+  # 2026-08-12 — gatilho de `pull_request` REMOVIDO por decisão do owner: o runner é único e serial, e
+  # cada PR disparava a esteira inteira a cada push, com custo elevado. A esteira passa a rodar SÓ no
+  # `push` para `develop`/`main` — ou seja, DEPOIS do merge.
+  #
+  # A TROCA É REAL e fica dita: sem gate no PR, um defeito só aparece quando já está em `develop`, e
+  # quem descobre é o próximo a integrar. A proteção não some, muda de lugar — passa a depender de
+  # rodar os gates LOCALMENTE antes de promover, no contêiner com o toolchain pinado:
+  #   docker run --rm -v $PWD/theodb_rs:/src theodb-builder:latest bash -c '
+  #     rustup component add clippy rustfmt --toolchain 1.97.0-x86_64-unknown-linux-gnu
+  #     mkdir -p /tmp/b && cp -r /src/. /tmp/b/ && cd /tmp/b
+  #     cargo fmt -- --check && cargo clippy --features pg18 --no-deps -- $(grep -v "^#" .clippy_args | tr "\n" " ")
+  #     cargo pgrx test pg18'
+  # `workflow_dispatch` continua disponível para rodar sob demanda num PR específico quando valer a pena.
+  workflow_dispatch:
   push:
     branches: [develop, main]
     # #211 — NÃO adicione `paths-ignore:` aqui. O GitHub proíbe `paths` e `paths-ignore` no MESMO
@@ -21,15 +35,6 @@ on:
     # `paths:`, via padrão negado — um filtro só, sem conflito. `.claude/**` e `wiki/**` já estão
     # fora por construção; o `!**/*.md` é guarda de futuro (hoje não há `.md` sob `theodb_rs/src/`),
     # e este gate custa um `cargo pgrx install` completo — caro demais para um README.
-    paths:
-      - 'theodb_rs/src/**'
-      - 'theodb_rs/Cargo.*'
-      - 'scripts/cassert-smoke.sh'
-      - '.github/workflows/cassert-sql-safety.yml'
-      - '!**/*.md'
-  pull_request:
-    branches: [develop, main]
-    # Mesmo filtro do `push` acima (o `!**/*.md` cobre o PR só-de-CHANGELOG observado no #189).
     paths:
       - 'theodb_rs/src/**'
       - 'theodb_rs/Cargo.*'
@@ -52,16 +57,66 @@ concurrency:
 
 jobs:
   cassert-and-pgspot:
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — runner GitHub-hosted, como o resto da frota. Este é o job com a migração mais
+    # cara: exige um PostgreSQL compilado com `--enable-cassert`, que os pacotes do PGDG NÃO
+    # trazem. Na máquina paga esse PG foi montado à mão e o repositório nunca registrou como —
+    # então a receita abaixo é reconstruída, não copiada.
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+
+      # O `~/.pgrx` cassert é caro (compila PostgreSQL do fonte) e imutável para uma dada versão:
+      # é exatamente o perfil que cache resolve. Primeira corrida paga; as seguintes, não.
+      - name: Cache do PG cassert do pgrx
+        id: pgrx-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.pgrx
+          key: pgrx-cassert-${{ runner.os }}-0.19.0-pg18
+
+      - name: Compilar o PG cassert (só quando o cache erra)
+        if: steps.pgrx-cache.outputs.cache-hit != 'true'
+        env:
+          # VERIFICADO em 2026-08-20, e por isso a marca de incerteza saiu. Esta é a via do pgrx para
+          # repassar flags ao `configure`; ela foi escrita sem confirmação contra a 0.19.0 (o
+          # repositório não guardava a receita usada na máquina antiga), e a corrida decidiu: o guard
+          # do passo seguinte — `pg_config --configure | grep --enable-cassert` — PASSOU, logo a flag
+          # chegou. O guard fica: ele é quem prova, a cada corrida, que o smoke sob Assert() não é
+          # vacuoso.
+          CONFIGURE_FLAGS: --enable-cassert
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bison flex libreadline-dev zlib1g-dev libssl-dev pkg-config
+          command -v cargo-pgrx >/dev/null || cargo install --locked cargo-pgrx --version 0.19.0
+          cargo pgrx init --pg18 download
+
+
+      # DERIVADO, nunca hard-coded. O `18.4` que estava aqui era a versão que a máquina paga por
+      # acaso tinha; o `cargo pgrx init --pg18` baixa a ÚLTIMA da série e instalou **18.6**, então o
+      # caminho fixo apontou para um diretório inexistente e o guard reprovou — corretamente, mas
+      # pela causa errada. Uma versão de patch do PostgreSQL não é decisão nossa e não deve virar
+      # constante num workflow.
+      - name: Resolver onde o pgrx instalou o PostgreSQL
+        run: |
+          set -euo pipefail
+          PGRX_INSTALL=$(find "$HOME/.pgrx" -maxdepth 2 -type d -name pgrx-install | sort -V | tail -1)
+          [ -x "$PGRX_INSTALL/bin/pg_config" ] || {
+            echo "::error::nenhum pgrx-install com pg_config sob ~/.pgrx — o init não produziu o que promete" >&2
+            ls -la "$HOME/.pgrx" 2>/dev/null || true
+            exit 1
+          }
+          echo "PGRX_INSTALL=$PGRX_INSTALL" >> "$GITHUB_ENV"
+          echo "resolvido: $PGRX_INSTALL  ($("$PGRX_INSTALL/bin/pg_config" --version))"
 
       - name: Instalar a extensão no PG cassert do pgrx
         run: |
           set -euo pipefail
           export PATH="$HOME/.cargo/bin:$PATH"
-          PGINST="$HOME/.pgrx/18.4/pgrx-install"
+          PGINST="$PGRX_INSTALL"
           "$PGINST/bin/pg_config" --configure | grep -q -- '--enable-cassert' \
             || { echo "::error::PG do pgrx não é cassert — o smoke seria vacuoso"; exit 1; }
           cd theodb_rs
@@ -70,7 +125,7 @@ jobs:
       - name: pgspot — DDL inseguro na SQL de instalação (baseline dos 6 códigos atuais)
         run: |
           set -euo pipefail
-          PGINST="$HOME/.pgrx/18.4/pgrx-install"
+          PGINST="$PGRX_INSTALL"
           # `find` em vez de `ls`: o glob do `ls` quebra em nome com espaço/newline (SC2012), e este
           # caminho vem do layout do pgrx, que não controlamos.
           SQL=$(find "$PGINST/share/postgresql/extension" -maxdepth 1 -name 'theodb_rs--*[0-9].sql' | sort -V | tail -1)
@@ -86,4 +141,4 @@ jobs:
           set -euo pipefail
           # O job roda como ghrunner (não-root), então `initdb` roda direto — sem o dança runuser/pgtest que só
           # o teste-como-root exigia. PGINST é o pgrx do próprio ghrunner (compilado com --enable-cassert).
-          PGINST="$HOME/.pgrx/18.4/pgrx-install" PGPORT=28941 bash scripts/cassert-smoke.sh
+          PGINST="$PGRX_INSTALL" PGPORT=28941 bash scripts/cassert-smoke.sh

@@ -6,7 +6,7 @@
 //! - `public.olap(path)` → `(category, c, a)` tipado — agregado M62 (paridade byte-a-byte vs pg_duckdb).
 //! - `public.read_parquet(path)` → `SETOF jsonb` — leitor geral (schema arbitrário via arrow-json, todos os tipos).
 //! - `public.write_parquet(rel, path)` → bigint — materializa uma tabela em Parquet (SPI → Arrow → ArrowWriter).
-//! A superfície de usuário é `theodb.htap_refresh(rel)`/`theodb.olap(rel)` (sql/85), que chamam estas.
+//! A superfície de usuário é `theodb.htap_refresh(rel)`/`theodb.olap(rel)` (theodb_rs/sql/surface/85-htap.sql), que chamam estas.
 //!
 //! Segurança/robustez (M143 review): (1) block_on sob `HeldInterrupts` (mesma invariante do `df_executor` — um
 //! longjmp do PG não pode saltar o runtime tokio sem Drop); (2) `GreedyMemoryPool(work_mem)` limita a memória do
@@ -442,7 +442,7 @@ fn extract_strings(arr: &dyn Array) -> Result<Vec<String>, String> {
 
 // Least-privilege (M143 review HIGH-1): escrita/leitura de arquivo server-side é privilégio superuser (como o
 // `COPY … TO file`, que exige superuser / pg_write_server_files). O default do pgrx é GRANT EXECUTE TO PUBLIC —
-// REVOKE explícito para que a superfície `theodb.htap_refresh`/`olap` (também REVOKEd no sql/85) não seja
+// REVOKE explícito para que a superfície `theodb.htap_refresh`/`olap` (também REVOKEd no theodb_rs/sql/surface/85-htap.sql) não seja
 // contornável chamando as primitivas `public.*` direto. `requires` garante que o REVOKE roda após o CREATE.
 extension_sql!(
     r#"
@@ -515,9 +515,7 @@ mod tests {
     #[pgrx::pg_test]
     fn primitivas_de_arquivo_sao_revogadas_de_public() {
         for f in ["write_parquet(text, text)", "read_parquet(text)", "olap(text)"] {
-            let sql = format!(
-                "SELECT has_function_privilege('public', 'public.{f}', 'EXECUTE')"
-            );
+            let sql = format!("SELECT has_function_privilege('public', 'public.{f}', 'EXECUTE')");
             let granted = Spi::get_one::<bool>(&sql).expect("consulta de privilégio falhou");
             assert_eq!(
                 granted,

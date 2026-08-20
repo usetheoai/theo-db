@@ -74,6 +74,16 @@ criterion = "0.5.1"
 # FU-1 same-graph micro-bench: measures the M46 pre-size vs `::new()` allocation cost over a fixed synthetic
 # graph. `harness = false` → criterion owns `main()`. The bench `#[path]`-includes the PURE `ann/scan_core.rs`
 # (zero `crate::`/`pg_sys` refs) so it links standalone WITHOUT a PostgreSQL runtime (blueprint Q5).
+# B-023/B-053 — o micro-bench de cosseno SIMD, que morava como `#[pg_test]` em `vec.rs`. Ele media tempo de
+# parede dentro da suíte funcional, onde `rules/testing.md § 6` não admite teste dependente de tempo sem
+# isolamento: medido, o mesmo binário dava 0,78× após os outros 439 testes e 0,66× com 3 contêineres ao lado —
+# ele reportava a térmica do laptop como qualidade do kernel. `#[path]`-inclui o PURO `src/vec/kernels.rs`,
+# extraído justamente para isto. Mesmas duas linhas de contrato do bench abaixo, pela mesma razão.
+[[bench]]
+name = "simd_cosine"
+harness = false
+test = false
+
 [[bench]]
 name = "scan_hot_path"
 harness = false

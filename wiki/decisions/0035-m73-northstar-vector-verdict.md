@@ -38,6 +38,109 @@ pgvector platôa antes (~0,914) **neste regime clusterizado de 128d**, que é ju
 do extendCandidates. O build também é ~3× mais rápido. **Honesto:** é o regime favorável ao TheoDB; a
 fronteira de alta dimensão e alto recall permanece do pgvector.
 
+> **ACRÉSCIMO 2026-08-16 — o que este veredito mediu, dito com precisão.** O gap de ~25× foi medido contra a
+> **biblioteca ScaNN OSS** ([m33](/benchmarks/m33-scann-headtohead.md) a declara "proxy sancionado"). O produto
+> concorrente não expõe a biblioteca: expõe `CREATE INDEX ... USING scann`, **um access method do PostgreSQL**,
+> que paga o mesmo imposto de MVCC, WAL e página que o `theodb_hnsw`. Como este ADR atribui o gap a
+> "AH-LUT anisotrópico **+ não pagar o imposto MVCC/WAL**", **a segunda metade da causa não se aplica ao AM** —
+> só à biblioteca.
+>
+> Isto **não** invalida o veredito: a vantagem algorítmica do AH-LUT é real e medida, e nenhuma medição nova a
+> contradiz. O que muda é o que se pode afirmar sobre o **produto**: contra o `scann` AM, o gap não foi medido.
+>
+> O AlloyDB Omni traz o ScaNN e o colunar sem GCP (`docker pull google/alloydbomni:18`), então a comparação que
+> o `ADR-0061` exige — concorrente na mesma corrida, na mesma máquina — passou a ser possível. Registrado como
+> [[B-057]]. Gatilho: avaliação independente de AlloyDB publicada em 2026-08-15 (boringSQL / Radim Marek), que
+> mediu o `scann` AM com índice 30× menor que o ivfflat e build 7–9× mais rápido, e **não conseguiu estabelecer
+> a recall** — obteve 0,15 e identificou a causa: `scann.num_leaves_to_search` não tem efeito sem
+> `LOAD 'alloydb_scann'`, sem aviso. O avaliador declara não confiar no número e não o publica; registramos a
+> não-reprodução, não uma refutação.
+
+> **ACRÉSCIMO 2026-08-17 — o gap FOI medido contra o access method, e ele colapsa.** O [[B-057]] rodou a
+> comparação que o acréscimo acima dizia ser possível: `theodb_hnsw` e `scann` no **mesmo arnês**
+> (`theodb-bench`), na **mesma máquina** (droplet efêmero `138.197.22.192`, 8 vCPU / 16 GB), com o **mesmo
+> SIFT-128** verificado por checksum (`dd6f0a6e…ca5984`), comparados a **recall casado**.
+>
+> A **100 000 vetores**, k=10, 500 queries:
+>
+> | recall casado | `theodb_hnsw` | `scann` AH + rescore | razão |
+> |---|---|---|---|
+> | ≈ 0,96 | 365,6 QPS @ 0,9616 | 438,8 QPS @ 0,9590 | scann **1,20×** |
+> | ≈ 0,996 | 148,9 QPS @ 0,9956 | 244,7 QPS @ 0,9958 | scann **1,64×** |
+>
+> **1,2–1,6×, não 25×.** A hipótese do B-057 estava certa: a segunda metade da causa que este ADR atribui ao gap
+> — "não pagar o imposto MVCC/WAL" — é o que respondia pela maior parte dele. O AM paga o mesmo imposto que nós,
+> e sobra a vantagem algorítmica do AH-LUT, que nesta medição vale **menos de 2×**.
+>
+> **A configuração importou mais que o resultado, e três tentativas erradas vieram antes da certa** — cada uma
+> produzindo um número que parecia publicável:
+>
+> 1. Sem `LOAD 'alloydb_scann'`: `SET scann.num_leaves_to_search` sucede, `pg_settings` não lista o GUC, a busca
+>    corre no default `0`. É a armadilha que o avaliador independente documentou; o portão de knob do [[B-060]]
+>    recusou a corrida.
+> 2. Com `quantizer='SQ8'`: `VALID`, fronteira completa — e **quantização escalar**, não o AH que este ADR
+>    credita. `quantizer='AH'` **falha** com `AH quantization is not enabled for the index` a menos que
+>    `scann.enable_ah_quantizer` esteja ligado **no build**; o flag vem `off`.
+> 3. Com AH e sem rescore: teto de recall em **0,658**, e 4× mais leaves comprando 1,4 ponto — assinatura de erro
+>    de quantização. `scann.pre_reordering_num_neighbors` vem `-1`; medido no mesmo índice e nos mesmos 80 leaves,
+>    `-1` → **0,6568**, `100` → **0,9964**, `500` → **0,9998**.
+>
+> A terceira é a que importa registrar: publicar *"o scann do AlloyDB teto em 0,66 enquanto o nosso chega a
+> 0,9956"* seria **alegação falsa contra outro produto**, e a mais perigosa das que este projeto rastreia, porque
+> nos favorecia. A classe [[B-034]]/[[B-041]] apontada para fora.
+>
+> **Ressalvas, e nenhuma é opcional.** A escala medida é **100 000**, e este ADR mediu a **1M** — índice
+> IVF-com-quantização e índice de grafo não escalam igual, e comparar as duas escalas seria comparar dois
+> experimentos. Quase todas as linhas vêm `(unstable)` do próprio arnês (perfil `smoke`, 3 repetições, sem teste
+> pareado de significância). TheoDB em PostgreSQL **18.6**, Omni em **17.9** — a corrida cruza uma major. E
+> **nenhum dos lados foi tunado**: `num_leaves=316` (≈√100 000), `pre_reordering=100` e `m=16` são escolhas.
+>
+> **O que este acréscimo autoriza e o que não autoriza.** Autoriza: dizer que *contra o access method do produto
+> concorrente, a 100k, a recall casado, o gap é de ordem 1,2–1,6× e não de 25×*. **Não** autoriza reescrever o
+> item 2 do veredito abaixo — o "NÃO-ALCANÇÁVEL" foi medido contra a biblioteca e continua verdadeiro sobre ela.
+> O que ele torna insustentável é usar aquele item como se falasse do **produto**: para o produto, a evidência
+> agora aponta na direção oposta, e fechar 1,6× é uma pergunta de engenharia, não de paradigma.
+>
+> Reabrir o veredito é decisão do owner, e depende do número a 1M. Evidência completa em
+> `.claude/knowledge-base/discoveries/opportunities/b057-scann-am-headtohead-opportunity.md`.
+
+> **CORREÇÃO DO ACRÉSCIMO ACIMA — 2026-08-17, mesmo dia, algumas horas depois.** O acréscimo anterior compara
+> **o índice errado do nosso lado**, e é preservado em vez de reescrito porque a alegação já estava no disco.
+>
+> Ele mediu `theodb_hnsw m=16` — **grafo puro, sem quantizador, sem AH, sem rescore** — contra o `scann` do
+> AlloyDB **com AH e rescore**. Isso compara o nosso índice de grafo com o IVF-quantizado deles: uma comparação
+> real, e **não** a que este ADR pede. O TheoDB **tem** a receita do ScaNN, e o arco no código chama-se
+> literalmente `pg_scann` (M75 construiu o algoritmo em `ann/ivf_aqah.rs`, M77 o access method com páginas v4
+> persistidas em `am/scan.rs::scan_ivf_aq`):
+>
+> | peça do ScaNN | onde está no TheoDB |
+> |---|---|
+> | partição IVF | `theodb_ivfflat` `WITH (lists = N)` |
+> | quantizador anisotrópico | `WITH (pq_subspaces = M)` → `AqQuantizer` |
+> | AH-LUT batched | `pq_bits = 4` (LUT16 `pshufb`), `ah_score_block` layout block32 |
+> | o T anisotrópico | `WITH (aq_threshold = …)` |
+> | SOAR | `WITH (soar_lambda = …)` |
+> | rescore exato (stage 2) | `WITH (separate_storage=1, refine=1)`, pool = `64 × theodb_hnsw.over_fetch` |
+>
+> Verificado por execução: `CREATE INDEX … USING theodb_ivfflat (emb theodb_ivfflat_l2_ops) WITH (lists=20,
+> pq_subspaces=16, pq_bits=4, separate_storage=1, refine=1)` constrói, e o plano usa `Index Scan using aq_i`.
+>
+> **O que o número anterior autoriza, com precisão:** *"o `scann` AM do AlloyDB é 1,2–1,6× mais rápido que o
+> `theodb_hnsw` a recall casado, a 100k SIFT-128"*. **Não** autoriza nada sobre o `pg_scann`, que é o índice
+> que este ADR de fato compara.
+>
+> Isto é a mesma classe de erro que o acréscimo anterior registra ter pego três vezes no lado do concorrente —
+> medir a configuração errada e chamar de comparação — desta vez do nosso lado. A medição pareada
+> (`vector/sift/pg-scann` × `vector/sift/scann-ah`, ambos com os dois estágios e ambos pelo arnês) está em
+> curso; o resultado entra aqui como novo acréscimo.
+>
+> **Achado intermediário, já medido e já útil:** a primeira fronteira do `pg_scann` teto em **recall 0,8212**
+> com o pool de rescore verificado em 128 candidatos para k=10. Cento e vinte e oito rescores exatos não podem
+> limitar recall a 0,82 a menos que os vizinhos verdadeiros **não estejam** no conjunto de candidatos — logo o
+> teto é erro de quantização do estágio 1, não profundidade de probe. `pq_subspaces=16` sobre 128 dimensões são
+> **8 dimensões por subespaço**; o ScaNN e o FAISS usam 2. Está sendo varrido (16/32/64) como suíte registrada,
+> porque é parâmetro de build e não de busca.
+
 ## Eixo 2 — o gap de paradigma até o ScaNN
 
 O head-to-head [m33](/benchmarks/m33-scann-headtohead.md) mediu o [ScaNN](/technologies/scann.md)

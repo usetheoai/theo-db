@@ -1,6 +1,7 @@
 //! TheoDB's own PostgreSQL extension in Rust (pgrx) — M17 (ROADMAP-v2 / ADR 0006).
 //!
-//! `theodb.embed` (formerly plpython3u + urllib, `sql/30-theodb-embed.sql`) rewritten in Rust at
+//! `theodb.embed` (formerly plpython3u + urllib, em `sql/30-theodb-embed.sql` — REMOVIDO em `d0771b3`,
+//! recuperável com `git show d0771b3^:sql/30-theodb-embed.sql`) rewritten in Rust at
 //! **proven parity**: same signature, same vector output, same typed SQLSTATEs as the baseline.
 //! Mirrors AlloyDB's embedding() pattern — the DB calls a configurable model endpoint (it does NOT
 //! ship a model). Configuration via the same session GUCs:
@@ -66,6 +67,8 @@ mod pq;
 mod rerank;
 mod sbq;
 mod sq8;
+mod surface; // B-030 — manifesto da superfície SQL absorvida do umbrella (extension_sql_file!)
+mod surface_contract; // B-030/B-031 — o contrato da superfície instalada (presença, ACL de egress, linguagem dos wrappers)
 mod vec;
 mod vectorizer;
 mod vindex;
@@ -101,11 +104,24 @@ mod tests {
         let _ = Spi::get_one::<String>("SELECT theodb_rs._embed_text('x', NULL)");
     }
 
-    #[pg_test(error = "theodb.embed: endpoint call failed: Connection refused (os error 111)")]
+    // B-016: o alvo deixou de ser `127.0.0.1:1`. A guarda de egress (mais nova que este teste) recusa
+    // loopback ANTES de tentar conectar, então o `Connection refused` que a asserção esperava nunca chegava
+    // a acontecer — o teste reprovava porque o produto estava CERTO. A guarda NÃO foi afrouxada: relaxá-la
+    // para fazer teste passar seria abrir um SSRF, que é o que ela existe para impedir.
+    //
+    // `invalid.invalid` é TLD reservado (RFC 2606), então não resolve em lugar nenhum e o erro é local,
+    // determinístico e imediato. O que o teste prova continua sendo o mesmo: endpoint inalcançável produz
+    // erro TIPADO, não panic nem silêncio. Muda a FORMA de inalcançabilidade (nome não resolve, em vez de
+    // porta recusada) — e o nome do teste segue honesto, porque um host que não resolve é inalcançável.
+    //
+    // Medido antes de escolher: um IP TEST-NET (`192.0.2.1`) passa a guarda e produz
+    // `endpoint call failed: the timeout of the request was reached`, mas leva **90,6 s** com os 2 retries —
+    // inaceitável numa suíte. O DNS falha em milissegundos.
+    #[pg_test(
+        error = "theodb.embed: could not resolve endpoint host invalid.invalid: failed to lookup address information: Name or service not known (blocked internal address check cannot run)"
+    )]
     fn embed_unreachable_endpoint_fails_typed() {
-        // Port 1 is unreachable -> connect error -> "call failed" (38000). The OS error (111 = ECONNREFUSED
-        // on Linux) is part of the exact match pgrx-tests 0.16.1 requires; the suite runs in the Linux builder.
-        Spi::run("SET theodb.embedding_endpoint = 'http://127.0.0.1:1/v1/embeddings'").unwrap();
+        Spi::run("SET theodb.embedding_endpoint = 'http://invalid.invalid/v1/embeddings'").unwrap();
         let _ = Spi::get_one::<String>("SELECT theodb_rs._embed_text('x', NULL)");
     }
 
@@ -178,11 +194,14 @@ mod tests {
             .unwrap();
     }
 
-    #[pg_test(error = "ai.rerank: endpoint call failed: Connection refused (os error 111)")]
+    // B-016: mesma correção do par em `embed` — ver o comentário longo lá. Loopback é recusado pela guarda
+    // de egress antes de conectar; `invalid.invalid` (RFC 2606) não resolve, falha em milissegundos e mantém
+    // o que o teste prova: endpoint inalcançável produz erro TIPADO.
+    #[pg_test(
+        error = "ai.rerank: could not resolve endpoint host invalid.invalid: failed to lookup address information: Name or service not known (blocked internal address check cannot run)"
+    )]
     fn rerank_unreachable_endpoint_fails_typed() {
-        // Port 1 unreachable -> connect error -> "call failed" (38000). The OS error string is part of the
-        // exact match pgrx-tests 0.16.1 requires (the suite runs in the Linux builder).
-        Spi::run("SET theodb.rerank_endpoint = 'http://127.0.0.1:1/rerank'").unwrap();
+        Spi::run("SET theodb.rerank_endpoint = 'http://invalid.invalid/rerank'").unwrap();
         Spi::run("SELECT * FROM theodb_rs._ai_rerank('q', ARRAY['d']::text[], NULL, NULL)")
             .unwrap();
     }

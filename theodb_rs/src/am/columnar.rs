@@ -1240,13 +1240,7 @@ impl ColumnarChunkStream {
         // (achado de review).
         let affinity = ThreadAffinity::capture();
         STREAM_CG_COUNT.with(|c| c.set(0));
-        Self {
-            plan,
-            rel,
-            affinity,
-            pl_idx: 0,
-            cg_idx: 0,
-        }
+        Self { plan, rel, affinity, pl_idx: 0, cg_idx: 0 }
     }
 
     /// Decode the next non-skipped chunk-group. `Ok(None)` = the scan is exhausted.

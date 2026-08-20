@@ -1,21 +1,50 @@
 # Languages enabled for /code-quality and post-edit-check.sh.
 #
-# Format: one language identifier per line. Lines starting with '#' are comments.
-# Identifiers match the file extensions handled by hooks/post-edit-check.sh.
+# Format:  LANGUAGE | MANIFEST-MARKER | STATUS | NOTES
 #
-# Default policy: empty file = no language-specific quality checks run. Each
-# project enables the languages it actually uses. Adding a language here is a
-# signal to /code-quality and the post-edit hook that the toolchain should be
-# present and consulted.
+#   LANGUAGE         one of the identifiers listed below
+#   MANIFEST-MARKER  path to the manifest, RELATIVE TO THE REPO ROOT. Not cosmetic: it is
+#                    what sends each detector to the right directory. The dead-code CLIs
+#                    resolve their project from the cwd, so a crate at `theodb_rs/Cargo.toml`
+#                    or a package under `web/` must declare it here or the auditor reports
+#                    itself unavailable and the cycle stalls on a path assumption.
+#   STATUS           ENABLED | DISABLED | DEFER
+#   NOTES            free text; optional, but say WHY when a language is DISABLED or DEFER
 #
-# Supported identifiers (uncomment the ones your project uses):
+# Lines starting with '#' are comments. Anything with fewer than three '|' fields is a
+# hard error, not a warning — a malformed line means a language you believe is audited is
+# not, and that is worse than a crash.
 #
-# go
-# python
-# typescript
-# javascript
-# rust
-# java
-# kotlin
-# ruby
-# csharp
+# Default policy: empty file = no language-specific quality checks run. Each project
+# enables the languages it actually uses.
+#
+# Examples, one per supported language — uncomment and fix the manifest path to match your
+# layout. The path shown is the common case, NOT a guess this file makes for you.
+#
+# go         | go.mod              | ENABLED  | Where the module lives.
+# python     | pyproject.toml      | ENABLED  |
+# typescript | package.json        | ENABLED  | A monorepo declares the workspace it audits.
+# javascript | package.json        | ENABLED  |
+# rust       | Cargo.toml          | ENABLED  | Point at the crate, not the workspace root.
+# java       | pom.xml             | ENABLED  |
+# kotlin     | build.gradle.kts    | ENABLED  |
+# ruby       | Gemfile             | ENABLED  |
+# csharp     | *.csproj            | ENABLED  |
+
+# ---------------------------------------------------------------------------------------------
+# ENABLED FOR THIS REPOSITORY (B-060)
+#
+# The kit is 227 tracked `.py` files and a `pyproject.toml` at the root, and until this line the
+# file below the examples was EMPTY — so `/code-quality` audited nothing at all here. Measured
+# 2026-08-20, before the change:
+#
+#     verdict: INVALID   languages_audited: []   hard_caps: ['no_languages_audited']
+#
+# That verdict is itself new: before B-092's guard the same run reported PASS, which is how a gate
+# that inspected nothing became indistinguishable from one that inspected everything and found it
+# clean. The INVALID above is the guard working, not a regression.
+#
+# Only python is enabled. There is no `package.json`, `Cargo.toml` or `go.mod` at the root of this
+# repository, and declaring a language whose manifest does not exist makes the detector report
+# itself unavailable — a soft cap that would turn every run amber for a language nobody uses here.
+rust       | theodb_rs/Cargo.toml | ENABLED | pgrx extension — o único manifesto de código do repo.

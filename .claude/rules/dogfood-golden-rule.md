@@ -36,7 +36,7 @@ The `Status` field in `knowledge-base/dogfood/manifest.md` MUST take one of thes
 |---|---|
 | `planned` | Anchor is identified but no implementation work has started. |
 | `wired` | Implementation lands; the anchor is invoked at least once in CI or a manual smoke. |
-| `running` | The anchor is **actively used by the team on real infrastructure**. This is the bar for v1.0. |
+| `running` | The anchor is **actively used by the team on the deployed dev environment** (`app-dev.usetheo.dev`). This is the bar for v1.0. |
 | `paused` | Was `running`; explicitly stopped for a documented reason. NOT a degradation of `running`. |
 | `abandoned` | Anchor is no longer pursued. Requires ADR to set. |
 
@@ -52,6 +52,31 @@ In order; first failure short-circuits to `EVIDENCE_INSUFFICIENT`.
 | 2 | `Status` matches the running value declared in § 2 | `anchor_not_running` |
 | 3 | At least one evidence file under `knowledge-base/dogfood/evidence/` has frontmatter `scenario:` matching the anchor slug | `no_anchor_evidence` |
 | 4 | The most recent matching evidence file (by frontmatter `date:`) is within the freshness threshold below | `anchor_evidence_stale` |
+
+**Ambiente do âncora (PER-PROJECT — decisão do owner, 2026-08-10):** o alvo é **`app-dev.usetheo.dev`**, o
+ambiente de desenvolvimento implantado que o time opera — não produção.
+
+A troca é do owner e está registrada aqui em vez de aplicada em silêncio. O que ela muda: `running` deixa de
+exigir produção e passa a exigir o `theo-rag` **rodando no `app-dev` sobre o TheoDB, servindo consultas**.
+O que ela **não** muda: continua exigindo **uso**, não instalação — um serviço implantado que ninguém
+exercita não é dogfood, é um contêiner ligado.
+
+**Medido em 2026-08-10, e o resultado muda o que o gate significa.** Duas medições:
+
+1. **Pelo HTTP:** `app-dev.usetheo.dev` responde 200 em 0,5 s, mas **devolve a SPA para qualquer rota** —
+   `/api/rag/health` retornou HTML, e `/rota-que-nao-existe-xyz` também deu 200. Os três 200 iniciais eram
+   falso positivo; o controle com rota inventada foi o que pegou.
+
+2. **Pela composição da pilha:** o `theo-cloud/docker-compose.dev.yaml` — que é o que sustenta o `app-dev` —
+   declara `pg-cloud`, `pg-themory`, `themory`, `kratos`, `theo-cloud`, `dashboard` e `traefik`. **O
+   `theo-rag` não está lá.** E o banco vetorial que está (`pg-themory`) é `ankane/pgvector:v0.5.1`.
+
+**Consequência para o âncora:** o alvo do gate não é apenas "não verificado" — o serviço do âncora **não está
+implantado no ambiente escolhido**. Antes de `running` ser sequer discutível, o `theo-rag` precisa entrar
+nessa pilha, e o `pg-themory` continua sendo uma segunda frente (o `theo-memory` também usa pgvector).
+
+Isto **não** invalida a troca de ambiente — `app-dev` continua sendo um alvo mais alcançável que produção.
+Só torna explícito que o passo seguinte é de implantação, não de medição.
 
 **Freshness threshold (PER-PROJECT — EDIT THIS):** `30 days` by default. Reduce for fast-moving products; never raise without ADR.
 

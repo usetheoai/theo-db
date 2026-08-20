@@ -1,0 +1,7 @@
+== elastic-english ==
+   recall=0.8449 ndcg=0.7343 mrr=0.7029 qps=7638.5 p99=0.0019 load=59.34
+   ok
+== opensearch-english ==
+   recall=0.7973 ndcg=0.6909 mrr=0.6616 qps=6064.5 p99=0.0029 load=59.37
+   ok
+== rodada justa completa ==

@@ -19,14 +19,22 @@
 name: schema-drift-gate
 
 on:
-  pull_request:
-    paths:
-      - 'theodb_rs/src/**'
-      - 'theodb_rs/theodb_rs.control'
-      - 'theodb_rs/sql/**'
-      - '!**/*.md'
+  # 2026-08-12 — gatilho de `pull_request` REMOVIDO por decisão do owner: o runner é único e serial, e
+  # cada PR disparava a esteira inteira a cada push, com custo elevado. A esteira passa a rodar SÓ no
+  # `push` para `develop`/`main` — ou seja, DEPOIS do merge.
+  #
+  # A TROCA É REAL e fica dita: sem gate no PR, um defeito só aparece quando já está em `develop`, e
+  # quem descobre é o próximo a integrar. A proteção não some, muda de lugar — passa a depender de
+  # rodar os gates LOCALMENTE antes de promover, no contêiner com o toolchain pinado:
+  #   docker run --rm -v $PWD/theodb_rs:/src theodb-builder:latest bash -c '
+  #     rustup component add clippy rustfmt --toolchain 1.97.0-x86_64-unknown-linux-gnu
+  #     mkdir -p /tmp/b && cp -r /src/. /tmp/b/ && cd /tmp/b
+  #     cargo fmt -- --check && cargo clippy --features pg18 --no-deps -- $(grep -v "^#" .clippy_args | tr "\n" " ")
+  #     cargo pgrx test pg18'
+  # `workflow_dispatch` continua disponível para rodar sob demanda num PR específico quando valer a pena.
+  workflow_dispatch:
   push:
-    branches: [develop]
+    branches: [develop, main]
     # #211 — NÃO adicione `paths-ignore:` aqui. O GitHub proíbe `paths` e `paths-ignore` no MESMO
     # evento e rejeita o arquivo no parse (`startup_failure`, zero jobs): este gate marcou 100 de
     # 100 runs falhos até 27/07. A economia de fila que #187 buscava se expressa DENTRO do `paths:`,
@@ -44,13 +52,27 @@ on:
 # de uma branch importa. `head_ref || ref_name` faz o evento `push` e o `pull_request` do MESMO commit
 # caírem no MESMO grupo — sem isso cada commit disparava DOIS runs por workflow enquanto houvesse PR
 # aberto da branch, dobrando a fila. Em `main` NUNCA cancela (um release em andamento não é abortado).
+# Sem `permissions:` o job herdava o default do repositório, que pode ser write-all.
+# Este gate só lê a árvore (2026-08-20).
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.ref_name != 'main' }}
 
 jobs:
   drift:
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — runner GITHUB-HOSTED, não o self-hosted da frota. Medido antes de trocar:
+    # este repositório é PÚBLICO, e runner padrão do GitHub é grátis e ilimitado em repo público —
+    # enquanto o `theodb-do` é uma máquina paga. Pior: ela é ÚNICA e SERIAL, então os dez workflows
+    # disparados pelo mesmo push enfileiram. Medição do custo real disso: `lint-rust` levou de 66 a
+    # 120 minutos para rodar um `cargo fmt --check`, quase tudo fila.
+    #
+    # Este job cabe aqui porque NÃO precisa da máquina grande: nada de Rust, nada de pgrx, nada de
+    # `pg_config`. Os jobs que compilam continuam em `vars.CI_RUNNER` — a troca é por job e por
+    # necessidade medida, não por decreto.
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

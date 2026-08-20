@@ -146,14 +146,51 @@ def test_slug_resolution_not_found(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------
 
 
-def test_cli_standalone_mode_pass_when_no_manifests(tmp_path: Path, capsys) -> None:
+def test_cli_standalone_mode_is_invalid_when_nothing_was_audited(
+    tmp_path: Path, capsys
+) -> None:
+    """B-084 / B-092 — an audit that ran zero detectors is not a clean audit.
+
+    This test was named `..._pass_when_no_manifests` and asserted `verdict == "PASS"`. That is the
+    fourth form of a false oracle: its NAME described the defect as if it were the feature, and it
+    would have argued against the fix — anyone applying the guard sees this go red and reads it as
+    "the fix is wrong".
+
+    `_write_rules` enables four languages in a `tmp_path` that contains none of their manifests, so
+    every one is skipped and `languages_audited` is empty. The old assertion made "looked at
+    nothing" indistinguishable from "looked and found nothing", which is precisely what the gate
+    consumers cannot tell apart: `cycle-review.md` admits on PASS, and `run_validation.py` fails
+    only on FAIL_HARD / INVALID.
+    """
     _write_rules(tmp_path)
     exit_code = main(["--repo-root", str(tmp_path), "--no-network"])
     captured = capsys.readouterr()
-    assert exit_code == 0
+    assert exit_code != 0
     data = json.loads(captured.out)
-    assert data["verdict"] == "PASS"
+    assert data["verdict"] == "INVALID"
+    assert "no_languages_audited" in data["hard_caps_triggered"]
+    assert data["languages_audited"] == []
     assert data["mode"] == "standalone"
+
+
+def test_cli_a_real_audit_still_passes(tmp_path: Path, capsys) -> None:
+    """The other half of the guard's contract: it must not turn a real clean audit INVALID.
+
+    Without this, the guard could be tightened into "always INVALID" and nothing would notice —
+    the same negative-space omission `does_not_refuse_ordinary_text` covers for B-086's predicate.
+    """
+    _write_rules(tmp_path)
+    (tmp_path / "package.json").write_text('{"name": "demo", "version": "0.0.0"}')
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "index.ts").write_text("export const x = 1;\n")
+
+    exit_code = main(["--repo-root", str(tmp_path), "--no-network"])
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+
+    assert data["languages_audited"] != []
+    assert "no_languages_audited" not in data["hard_caps_triggered"]
+    assert exit_code == 0
 
 
 def test_cli_no_network_emits_info_finding(tmp_path: Path, capsys) -> None:
@@ -183,7 +220,10 @@ def test_cli_plan_bound_mode_writes_markdown_report(tmp_path: Path, capsys) -> N
     plan = tmp_path / ".claude" / "knowledge-base" / "plans" / "demo-plan.md"
     plan.write_text("# demo\n")
     exit_code = main(["demo", "--repo-root", str(tmp_path), "--no-network"])
-    assert exit_code == 0
+    # B-092 — these fixtures enable four languages and provide no manifests, so the audit
+    # runs zero detectors and the verdict is now INVALID. This test is about the MARKDOWN
+    # report, not the verdict, so it asserts the report rather than the exit code.
+    assert exit_code != 0
     audit_dir = tmp_path / ".claude" / "knowledge-base" / "audits"
     audit_files = list(audit_dir.glob("demo-code-quality-*.md"))
     assert len(audit_files) == 1, f"Expected audit Markdown file; got {audit_files}"
@@ -197,6 +237,168 @@ def test_cli_no_audit_write_skips_markdown(tmp_path: Path, capsys) -> None:
     exit_code = main(
         ["demo", "--repo-root", str(tmp_path), "--no-network", "--no-audit-write"]
     )
-    assert exit_code == 0
+    # B-092 — these fixtures enable four languages and provide no manifests, so the audit
+    # runs zero detectors and the verdict is now INVALID. This test is about the MARKDOWN
+    # report, not the verdict, so it asserts the report rather than the exit code.
+    assert exit_code != 0
     audit_dir = tmp_path / ".claude" / "knowledge-base" / "audits"
     assert not audit_dir.exists() or not list(audit_dir.glob("*.md"))
+
+
+# --------------------------------------------------------------------------
+# Nested manifest — the detector must be pointed at the manifest's directory
+# --------------------------------------------------------------------------
+
+
+def test_detector_receives_manifest_dir_not_repo_root(tmp_path: Path, monkeypatch) -> None:
+    """A manifest declared under a subdirectory must not send the detector to the root.
+
+    `code-quality-languages.txt` takes a MANIFEST-MARKER that is a repo-relative
+    path, so a crate at `crate/Cargo.toml` is a legal, configured layout. Passing
+    the repo root to the detector makes cargo-udeps exit with "could not find
+    `Cargo.toml`", which the detector honestly reports as
+    `auditor_unavailable_cargo-udeps` — a soft cap that blocks the cycle because
+    of a path assumption rather than because of the code.
+
+    Measured on theo-db (usetheoai/theo-db#175): `theodb_rs/Cargo.toml`.
+    """
+    rules = tmp_path / ".claude" / "rules"
+    rules.mkdir(parents=True)
+    (rules / "code-quality-languages.txt").write_text(
+        "rust | crate/Cargo.toml | ENABLED |\n"
+    )
+    (rules / "code-quality-thresholds.txt").write_text("vulture.min_confidence = 80\n")
+    (rules / "code-quality-allowlist.txt").write_text("")
+    (tmp_path / ".claude" / "knowledge-base" / "plans").mkdir(parents=True)
+    (tmp_path / ".git").mkdir()
+
+    manifest = tmp_path / "crate" / "Cargo.toml"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("[package]\nname = 'x'\n")
+
+    seen: list[Path] = []
+
+    class _SpyDetector:
+        def detect_dead_code(self, target: Path) -> list:
+            seen.append(target)
+            return []
+
+        def detect_orphan_exports(self, target: Path) -> list:
+            return []
+
+        def detect_architecture_violations(self, target: Path) -> list:
+            # Present because the orchestrator resolves the attribute BEFORE `_safe_call` can
+            # guard it: a double that skips a contract method takes the whole run down with an
+            # AttributeError instead of the detector being skipped.
+            return []
+
+    monkeypatch.setattr(
+        "scripts.run_code_quality._build_detector", lambda _lang: _SpyDetector()
+    )
+
+    main(["--repo-root", str(tmp_path), "--no-network"])
+
+    assert seen, "detect_dead_code was never called for the enabled language"
+    assert seen[0] == manifest.parent, (
+        f"detector was pointed at {seen[0]}, not at the manifest's directory "
+        f"{manifest.parent} — cargo-udeps would fail to find Cargo.toml"
+    )
+
+
+def _write_python_only_rules(tmp_path: Path) -> Path:
+    """Rules enabling ONLY python — the shape B-060 is about."""
+    rules = tmp_path / ".claude" / "rules"
+    rules.mkdir(parents=True)
+    (rules / "code-quality-languages.txt").write_text("python | pyproject.toml | ENABLED |\n")
+    (rules / "code-quality-thresholds.txt").write_text("vulture.min_confidence = 80\n")
+    (rules / "code-quality-allowlist.txt").write_text("")
+    (tmp_path / ".claude" / "knowledge-base" / "plans").mkdir(parents=True)
+    (tmp_path / ".git").mkdir()
+    return tmp_path
+
+
+def test_a_python_defect_is_not_reported_as_PASS(tmp_path: Path, capsys) -> None:
+    """B-060 bullet 3 — a Python-only change carrying a deliberate defect must not come back PASS.
+
+    The item is that this repository is 227 tracked `.py` files and
+    `rules/code-quality-languages.txt` enabled NOTHING, so `/code-quality` audited nothing here.
+    Measured 2026-08-20 before enabling python:
+
+        verdict: INVALID   languages_audited: []   hard_caps: ['no_languages_audited']
+
+    (INVALID rather than PASS only because B-092's guard exists. Before it, the same run said PASS.)
+
+    Enabling python is the fix; this test is what stops it being silently un-fixed. It plants a
+    symbol that does not exist and asserts the audit does NOT grade it clean.
+    """
+    _write_python_only_rules(tmp_path)
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0.0.0"\n')
+    pkg = tmp_path / "demo"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    # THE DEFECT IS AN UNUSED IMPORT, and arriving at that took two wrong fixtures, both of which
+    # are worth recording because each names a real limit of the python arm.
+    #
+    #   1. `from demo.does_not_exist import x` — SKIPPED. D2 validates the TOP-LEVEL module against
+    #      PyPI (`detectors/python.py:86`), so it asks "is there a distribution called `demo`",
+    #      not "does that symbol exist in this tree". A local package is invisible to it.
+    #
+    #   2. an exported function nobody calls — ALSO SKIPPED, and this one is a finding rather than
+    #      a fixture mistake. `vulture` scores an unused function at 60% confidence and the
+    #      configured floor is `vulture.min_confidence = 80`. Measured across a probe file:
+    #
+    #          min-confidence 0/60  ->  7 findings
+    #          min-confidence 80    ->  1 finding   (unused import 'os', 90%)
+    #          min-confidence 100   ->  0
+    #
+    #      At 80, dead FUNCTIONS, CLASSES, ATTRIBUTES and VARIABLES are all invisible. Only unused
+    #      imports survive. That is recorded on B-060 as its own finding: the threshold makes D1
+    #      nearly blind to the category it exists to catch.
+    #
+    # So the planted defect is what the configuration can actually see. A test that planted
+    # something the gate cannot detect would fail for a reason that has nothing to do with whether
+    # python is audited — which is the only thing this test is about.
+    (pkg / "orphan.py").write_text("import os\n\n\ndef used() -> int:\n    return 1\n")
+
+    exit_code = main(["--repo-root", str(tmp_path), "--no-network"])
+    data = json.loads(capsys.readouterr().out)
+
+    # The load-bearing assertion: python was actually audited. Without it the rest passes vacuously
+    # on a run that inspected nothing — which is the exact failure this item describes.
+    assert data["languages_audited"] == ["python"]
+    assert data["verdict"] != "PASS"
+    assert exit_code != 0
+
+
+def test_python_disabled_makes_the_same_tree_report_nothing_audited(
+    tmp_path: Path, capsys
+) -> None:
+    """The negative-space half, and the one that gives the test above its meaning.
+
+    Same tree, same defect, python NOT enabled. If this also came back with
+    `languages_audited == ["python"]` the assertion above would be testing the fixture rather than
+    the configuration.
+
+    It reports INVALID / `no_languages_audited` — which is B-092's guard, and is what a
+    not-audited run looked like BEFORE that guard turned it from PASS into a refusal.
+    """
+    rules = tmp_path / ".claude" / "rules"
+    rules.mkdir(parents=True)
+    (rules / "code-quality-languages.txt").write_text("# nothing enabled\n")
+    (rules / "code-quality-thresholds.txt").write_text("vulture.min_confidence = 80\n")
+    (rules / "code-quality-allowlist.txt").write_text("")
+    (tmp_path / ".claude" / "knowledge-base" / "plans").mkdir(parents=True)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0.0.0"\n')
+    pkg = tmp_path / "demo"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "broken.py").write_text("from demo.does_not_exist import missing_symbol\n")
+
+    exit_code = main(["--repo-root", str(tmp_path), "--no-network"])
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["languages_audited"] == []
+    assert data["verdict"] == "INVALID"
+    assert "no_languages_audited" in data["hard_caps_triggered"]
+    assert exit_code != 0

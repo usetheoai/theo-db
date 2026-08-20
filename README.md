@@ -46,7 +46,7 @@ nunca afirmações sem evidência. Estratégia completa: [`wiki/decisions/0002-n
 - **Open-source de verdade.** Sem licença por vCPU, sem open-core escondendo os recursos centrais. Auditável, customizável, contribuível.
 - **Bateria inclusa, código próprio.** PostgreSQL 18 + a extensão `theodb_rs` (tipo `vector` own-code, índices ANN, busca híbrida, grafo, colunar) pré-instalada e tunada — você não monta as peças nem aluga o vetor.
 - **Roda em qualquer lugar.** A mesma imagem vai do laptop ao bare metal regulado.
-- **100% compatível com PostgreSQL.** Seus drivers, ferramentas e aplicações funcionam sem mudança.
+- **100% compatível com PostgreSQL no protocolo.** Seus drivers e aplicações falam com o TheoDB como falam com um PostgreSQL 18 — é o que ele é. Uma ressalva honesta sobre **poolers**: o ajuste de busca é feito por GUC de sessão (`SET theodb_hnsw.ef_search = …`), então sob *transaction pooling* ele precisa de `SET LOCAL` dentro da transação, como qualquer GUC de sessão do PostgreSQL. Compatibilidade com PgBouncer nos três modos ainda **não foi medida** ([B-055](BACKLOG.md)) — o que está escrito aqui é análise do código, não resultado de execução.
 - **IA no banco onde seus dados já estão.** Embeddings, busca vetorial + híbrida (BM25+vetor+RRF), rerank, NL→SQL e GraphRAG via SQL — sem ETL para um sistema separado.
 
 ---
@@ -90,15 +90,22 @@ TheoDB roda como uma imagem container com **uma extensão instalável** que prov
 de IA + vetorial:
 
 ```bash
-docker pull ghcr.io/usetheodev/theo-db:latest
-docker run -d --name theodb -e POSTGRES_PASSWORD=postgres -p 5432:5432 ghcr.io/usetheodev/theo-db:latest
+docker pull ghcr.io/usetheoai/theo-db:latest
+docker run -d --name theodb -e POSTGRES_PASSWORD=postgres -p 5432:5432 ghcr.io/usetheoai/theo-db:latest
 ```
+
+> **A imagem ainda não está publicada, e isto é medição, não ressalva de estilo.** As oito execuções
+> do workflow `publish` desde 2026-07-29 falharam — inclusive a do tag `v0.158.0` —, e um `GET` de
+> manifesto responde `403` tanto em `usetheoai` quanto na grafia antiga. O comando acima é o destino
+> correto e **ainda não funciona**; até funcionar, construa a partir do fonte (`docker build .`). O
+> caminho está aberto como B-082. A org também estava errada até 2026-08-20: o README dizia
+> `usetheodev`, que existe como **usuário** e não como a organização que hospeda os repositórios.
 
 A imagem cria a extensão automaticamente no primeiro init. Roda em **PostgreSQL 18** (a distribuição migrou
 do 17 para o 18 no M135; o tipo `vector` e os índices ANN são **own-code**, sem depender de pgvector/pgvectorscale):
 
 ```sql
-CREATE EXTENSION theodb CASCADE;   -- CASCADE puxa theodb_rs (o tipo `vector` own-code + a superfície ai.*)
+CREATE EXTENSION theodb_rs CASCADE;   -- CASCADE puxa theodb_rs (o tipo `vector` own-code + a superfície ai.*)
 ALTER EXTENSION theodb_rs UPDATE;  -- upgrade in-place da extensão (cadeia de upgrade própria, M137)
 ```
 

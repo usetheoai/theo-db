@@ -37,6 +37,77 @@ def _resolve_plan(filename: str) -> Path | None:
 # Pinned snapshots — band + expected hard caps. Scores may shift ±5; bands MUST NOT.
 # Covers diverse plan styles: active, completed, with/without out-of-scope items.
 SNAPSHOTS: dict[str, dict[str, object]] = {
+    # --- theo-db, medidos em 2026-08-20 -------------------------------------
+    # Doze planos deste projeto, nunca exercitados contra o scorer até aqui: 98,0 a
+    # 100,0, nenhum hard cap. A banda é pinada, não o score, porque refino de detector
+    # move o número em ±5 e não deve mover a banda.
+    "b031-b030-uma-extensao-plan.md": {
+        "verdict_in": {"SHIPPABLE", "SHIPPABLE_WITH_CAVEATS"},
+        "score_min": 90,
+        "expected_hard_caps_subset": set(),
+    },
+    "b033-vector-btree-plan.md": {
+        "verdict_in": {"SHIPPABLE", "SHIPPABLE_WITH_CAVEATS"},
+        "score_min": 90,
+        "expected_hard_caps_subset": set(),
+    },
+    "b034-guc-alias-plan.md": {
+        "verdict_in": {"SHIPPABLE", "SHIPPABLE_WITH_CAVEATS"},
+        "score_min": 90,
+        "expected_hard_caps_subset": set(),
+    },
+    "b035-vectordbbench-client-plan.md": {
+        "verdict_in": {"SHIPPABLE", "SHIPPABLE_WITH_CAVEATS"},
+        "score_min": 90,
+        "expected_hard_caps_subset": set(),
+    },
+    "b040-fts-client-plan.md": {
+        "verdict_in": {"SHIPPABLE", "SHIPPABLE_WITH_CAVEATS"},
+        "score_min": 90,
+        "expected_hard_caps_subset": set(),
+    },
+    "b041-b048-silencio-plan.md": {
+        "verdict_in": {"SHIPPABLE", "SHIPPABLE_WITH_CAVEATS"},
+        "score_min": 90,
+        "expected_hard_caps_subset": set(),
+    },
+    "b044-stemming-plan.md": {
+        "verdict_in": {"SHIPPABLE", "SHIPPABLE_WITH_CAVEATS"},
+        "score_min": 90,
+        "expected_hard_caps_subset": set(),
+    },
+    "b045-significance-plan.md": {
+        "verdict_in": {"SHIPPABLE", "SHIPPABLE_WITH_CAVEATS"},
+        "score_min": 90,
+        "expected_hard_caps_subset": set(),
+    },
+    "b046-qps-parity-plan.md": {
+        "verdict_in": {"SHIPPABLE", "SHIPPABLE_WITH_CAVEATS"},
+        "score_min": 90,
+        "expected_hard_caps_subset": set(),
+    },
+    "b059-omni-adapter-plan.md": {
+        "verdict_in": {"SHIPPABLE", "SHIPPABLE_WITH_CAVEATS"},
+        "score_min": 90,
+        "expected_hard_caps_subset": set(),
+    },
+    "b060-knob-gate-plan.md": {
+        "verdict_in": {"SHIPPABLE", "SHIPPABLE_WITH_CAVEATS"},
+        "score_min": 90,
+        "expected_hard_caps_subset": set(),
+    },
+    "tier1-portao-plan.md": {
+        "verdict_in": {"SHIPPABLE", "SHIPPABLE_WITH_CAVEATS"},
+        "score_min": 90,
+        "expected_hard_caps_subset": set(),
+    },
+    # 89,0 — `soft_floor_concurrency_tests_missing`. Soft cap, não hard: o plano toca
+    # o caminho de build do índice e não declarou teste de concorrência.
+    "b036-build-reloptions-plan.md": {
+        "verdict_in": {"SHIPPABLE_WITH_CAVEATS"},
+        "score_min": 80,
+        "expected_hard_caps_subset": set(),
+    },
     # Active plan, no caps, structurally clean
     "observability-cache-maturity-plan.md": {
         "verdict_in": {"SHIPPABLE", "SHIPPABLE_WITH_CAVEATS"},
@@ -145,6 +216,13 @@ def test_snapshots_cover_active_plans_with_matrix() -> None:
         # Working plan for the patterns-consumption-gate feature itself (gitignored
         # under knowledge-base/plans/); not a regression-snapshot fixture.
         "patterns-consumption-gate-plan.md",
+        # theo-db: `run_structural` LEVANTA `ValueError: No '## Coverage Matrix' section
+        # found in plan` em vez de emitir INVALID com `coverage_lt_100`. Não dá para pinar
+        # banda de um portão que quebra, e pinar a exceção fixaria o defeito como contrato.
+        # Duas coisas erradas de uma vez, ambas registradas: o plano não tem Coverage Matrix
+        # (condição de hard cap), e o scorer não sabe reprovar sem quebrar — um chamador não
+        # distingue "plano inválido" de "ferramenta quebrada" (`rules/error-handling.md § 2`).
+        "b015-b018-b019-plan.md",
     }
     snapshot_plans = set(SNAPSHOTS.keys())
     active_plans = {p.name for p in PLANS_DIR.glob("*.md") if p.is_file()}

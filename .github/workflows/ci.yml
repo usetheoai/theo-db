@@ -11,10 +11,15 @@ name: CI
 # disparou CI + publish + ci-canary + lint-rust + cassert, cinco runs numa fila serial.
 #
 # A lista abaixo é derivada do que a esteira de fato lê, não de memória:
-#   - `Dockerfile` / `.dockerignore` / `*.control` / `sql/` / `theodb_rs/` — entram na imagem
-#     (conferido nos `COPY` do Dockerfile)
+#   - `Dockerfile` / `.dockerignore` / `vector/` / `theodb_rs/` — entram na imagem
+#     (conferido nos `COPY` do Dockerfile). B-030: o `sql/` de topo e os `*.control` de raiz deixaram
+#     de existir — a superfície do produto vive em `theodb_rs/`, e o shim é a unidade `vector/`.
 #   - `scripts/`   — smoke.sh, migrate-*.sh
-#   - `benchmarks/`— o harness pytest + requirements.txt
+#   - MEDIÇÃO NÃO MORA MAIS AQUI. O harness `benchmarks/` foi removido em `7cd157d` (B-029) e hoje é
+#     o repositório irmão `theodb-bench`, projeto INDEPENDENTE que consome o TheoDB como sistema sob
+#     teste. Esta esteira guarda a CORRETUDE que vive com o produto (smokes, presença de superfície,
+#     regressão upstream, migração, licença); recall, QPS, nDCG e comparação com concorrente são
+#     avaliação, e avaliação é do bench. Um `pytest` aqui voltaria a acoplar os dois.
 #   - `packaging/` — Dockerfile.regress / .bm25 / .columnar + license-sweep.sh
 #   - `Makefile`   — hoje a esteira não o invoca; incluído como seguro barato, porque um gate de
 #     correção erra para o lado de rodar demais, nunca de menos
@@ -28,41 +33,35 @@ name: CI
 # tag, e um `chore(release)` que só toca CHANGELOG seria filtrado. Ver `publish-image.yml`, que
 # escuta tags e por isso NÃO recebeu filtro positivo.
 on:
+  # 2026-08-12 — gatilho de `pull_request` REMOVIDO por decisão do owner: o runner é único e serial, e
+  # cada PR disparava a esteira inteira a cada push, com custo elevado. A esteira passa a rodar SÓ no
+  # `push` para `develop`/`main` — ou seja, DEPOIS do merge.
+  #
+  # A TROCA É REAL e fica dita: sem gate no PR, um defeito só aparece quando já está em `develop`, e
+  # quem descobre é o próximo a integrar. A proteção não some, muda de lugar — passa a depender de
+  # rodar os gates LOCALMENTE antes de promover, no contêiner com o toolchain pinado:
+  #   docker run --rm -v $PWD/theodb_rs:/src theodb-builder:latest bash -c '
+  #     rustup component add clippy rustfmt --toolchain 1.97.0-x86_64-unknown-linux-gnu
+  #     mkdir -p /tmp/b && cp -r /src/. /tmp/b/ && cd /tmp/b
+  #     cargo fmt -- --check && cargo clippy --features pg18 --no-deps -- $(grep -v "^#" .clippy_args | tr "\n" " ")
+  #     cargo pgrx test pg18'
+  # `workflow_dispatch` continua disponível para rodar sob demanda num PR específico quando valer a pena.
+  workflow_dispatch:
   push:
     branches: [develop, main]
     paths:
       - 'Dockerfile'
       - '.dockerignore'
-      - 'Makefile'
-      - 'theodb.control'
-      - 'vector.control'
+      # B-030: `Makefile` e `theodb.control` saíram com o umbrella `theodb`, absorvido pelo `theodb_rs`.
+      # A superfície SQL que eles construíam agora vive em `theodb_rs/sql/surface/`, já coberta pelo
+      # `theodb_rs/**` abaixo. O shim `vector` continua separado e virou unidade autocontida em `vector/`
+      # (control + script de instalação juntos), então o `sql/` de topo deixou de existir.
+      - 'vector/**'
       - 'theodb_rs/**'
-      - 'sql/**'
       - 'scripts/**'
-      - 'benchmarks/**'
       - 'packaging/**'
       - '.github/workflows/ci.yml'
       # Um README dentro de qualquer um dos diretórios acima não muda resultado de teste.
-      - '!**/*.md'
-  pull_request:
-    branches: [develop, main]
-    # DUPLICAÇÃO DELIBERADA da lista do `push` acima — MANTENHA AS DUAS EM SINCRONIA.
-    # Âncora YAML (`&x` / `*x`) resolveria, e o GitHub passou a suportá-la em set/2025, mas o
-    # modo de falha de uma âncora mal interpretada é `startup_failure` — o mesmo silêncio que
-    # deixou 4 gates deste repo mortos por 3 dias (#211). Doze linhas duplicadas e adjacentes
-    # custam menos que reintroduzir essa classe de falha.
-    paths:
-      - 'Dockerfile'
-      - '.dockerignore'
-      - 'Makefile'
-      - 'theodb.control'
-      - 'vector.control'
-      - 'theodb_rs/**'
-      - 'sql/**'
-      - 'scripts/**'
-      - 'benchmarks/**'
-      - 'packaging/**'
-      - '.github/workflows/ci.yml'
       - '!**/*.md'
 
 # Fila do runner self-hosted (2026-07-24): sem `concurrency`, cada push empilhava um run novo por
@@ -84,12 +83,65 @@ permissions:
   contents: read
 
 jobs:
-  # #181/#182 — GATE de compatibilidade pgvector. Roda contra a IMAGEM (o artefato que o usuário
-  # realmente baixa), não contra um cluster montado à mão: é o caminho do README, e foi justamente a
-  # ausência desse caminho no CI que deixou passar (a) `CREATE EXTENSION vector` inexistente e (b) o AM
-  # `hnsw` / opclasses `vector_*_ops` ausentes — dois bugs que só apareceram ao apontar uma app real.
+  # CONSTRUÍDA UMA VEZ, CONSUMIDA POR TODOS. Antes de 2026-08-20 cada job fazia o seu próprio
+  # `docker build` — onze invocações em nove jobs — e NENHUM declarava `needs:`. Como todos partiam
+  # ao mesmo tempo, o único produtor de cache (`cache-to`) e os oito consumidores corriam juntos:
+  # numa cache fria, isto é, sempre que o `Dockerfile` muda, os nove compilavam Rust + pgrx do zero
+  # em paralelo. Medido em 2026-08-20: nove jobs iniciados no mesmo segundo, seis ainda construindo
+  # nove minutos depois.
+  #
+  # O ganho maior não é tempo, é CORRETUDE. Oito builds independentes produzem oito imagens que só se
+  # PRESUME idênticas; um único artefato publicado por digest é o mesmo em todos os jobs, e o que um
+  # deles reprovar é o que os outros exercitaram.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build da imagem de CI (uma vez, para todos)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: theo-db:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ARTEFATO, e não registry, por medição. A primeira versão deste job publicava em
+      # `ghcr.io/usetheoai/theo-db:ci-<sha>` e foi recusada com `denied: permission_denied:
+      # read_package`, mesmo com `packages: write` declarado — a recusa é da política do registry,
+      # não do workflow. E o [[B-082]] já registrava que a publicação no GHCR **nunca funcionou**
+      # neste repositório: 8 de 8 execuções do `publish-image.yml` em falha desde 2026-07-29.
+      # Apostar a esteira inteira num mecanismo comprovadamente quebrado aqui seria trocar onze
+      # builds redundantes por zero builds e nenhum teste.
+      #
+      # O artefato entrega a mesma garantia que motivou a mudança: UM artefato, os mesmos bytes em
+      # todo job. `zstd` porque o default `gzip` do upload-artifact recomprime o que já é camada
+      # comprimida, gastando minuto sem ganhar espaço.
+      - name: Salvar a imagem
+        run: docker save theo-db:ci | zstd -T0 -3 -o /tmp/theodb-ci.tar.zst
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: theodb-ci-image
+          path: /tmp/theodb-ci.tar.zst
+          retention-days: 1
+          compression-level: 0
+
   pgvector-compat:
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    needs: build
+    # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: grátis e ilimitado, e sobretudo PARALELO —
+    # a máquina paga era ÚNICA e SERIAL, e os dez workflows do mesmo push enfileiravam.
+    #
+    # DISCO: MEDIDO, não mais suposto. A dúvida era `theodb_rs/target` medir 13 GB contra o disco do
+    # runner padrão. Corrida de 2026-08-20: a `Rust test suite` (que constrói o estágio builder e roda
+    # a suíte dentro do contêiner) passou em **19 minutos**, e NENHUM job falhou por espaço. A receita
+    # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
+    runs-on: ubuntu-latest
     # Sem timeout, o default do GitHub é 360 min — num runner SERIAL compartilhado por 5 repos,
     # um job pendurado sequestra a fila de todos por 6 horas. Os valores aqui são folga sobre a
     # duração observada (build de imagem + asserções), na mesma faixa dos jobs vizinhos que já
@@ -98,20 +150,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build TheoDB image
-        uses: docker/build-push-action@v6
+      - name: Carregar a imagem construída uma vez pelo job `build`
+        uses: actions/download-artifact@v4
         with:
-          context: .
-          tags: theo-db:dev
-          load: true
-          cache-from: type=gha
-          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
-          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
-          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
+          name: theodb-ci-image
+          path: /tmp
 
+      - name: Carregar no daemon
+        run: |
+          zstd -d -c /tmp/theodb-ci.tar.zst | docker load
+          docker tag theo-db:ci theo-db:dev
       - name: Bootstrap de uma app pgvector contra a imagem (o fluxo do README)
         run: |
           set -euo pipefail
@@ -163,53 +211,35 @@ jobs:
         if: always()
         run: docker rm -f theodb_compat 2>/dev/null || true
 
-  harness-unit:
-    # Fast, container-free: the recall math, ground-truth, metrics and HDF5 loader (DoD-1 gate logic).
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
-    # O mais barato da esteira (pip + pytest, sem container). Já teve regressão de tempo: o
-    # comentário do `on:` registra que este job sozinho levava 999s para FALHAR quando a esteira
-    # estava quebrada — exatamente o cenário que um timeout existe para cortar.
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: benchmarks
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install harness deps
-        run: pip install -r requirements.txt ruff vulture
-      - name: Lint (ruff)
-        run: ruff check theodb_bench tests
-      - name: Dead-code (vulture)
-        run: vulture theodb_bench --min-confidence 80
-      - name: Unit tests (no container)
-        run: pytest -m "not integration" -q
-
-  image-and-bench:
+  image-guards:
+    needs: build
     # Builds the TheoDB image, proves M0 (smoke) + M2 vectorscale, then runs the benchmark harness
     # in CI over the real glove-25-angular reference dataset (DoD-1) + the integration suite.
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
-    # O job mais caro por larga margem: o step `pytest -m integration` mede 22,2 min e responde por
+    # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: grátis e ilimitado, e sobretudo PARALELO —
+    # a máquina paga era ÚNICA e SERIAL, e os dez workflows do mesmo push enfileiravam.
+    #
+    # DISCO: MEDIDO, não mais suposto. A dúvida era `theodb_rs/target` medir 13 GB contra o disco do
+    # runner padrão. Corrida de 2026-08-20: a `Rust test suite` (que constrói o estágio builder e roda
+    # a suíte dentro do contêiner) passou em **19 minutos**, e NENHUM job falhou por espaço. A receita
+    # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
+    runs-on: ubuntu-latest
+    # O job mais caro da esteira: constrói a imagem e publica o cache buildx que os outros leem.
     # ~80% do wall-clock da esteira (27,9 min medidos em 2026-07-27, ver comentário no step). 45 min
     # é ~2x o observado — folga para variação de download do dataset sem virar refém de um hang.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build TheoDB image (pgvector + pgvectorscale)
-        uses: docker/build-push-action@v6
+      - name: Carregar a imagem construída uma vez pelo job `build`
+        uses: actions/download-artifact@v4
         with:
-          context: .
-          tags: theo-db:ci
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          name: theodb-ci-image
+          path: /tmp
 
+      - name: Carregar no daemon
+        run: |
+          zstd -d -c /tmp/theodb-ci.tar.zst | docker load
+          docker tag theo-db:ci theo-db:dev
       - name: Start TheoDB
         run: |
           # EPHEMERAL host port (`-p 5432`, NOT `-p 5432:5432`). A fixed host port made every job
@@ -266,97 +296,38 @@ jobs:
           fi
           echo "M143 lakehouse own-code OK (sem pg_duckdb)"
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install harness deps
-        working-directory: benchmarks
-        run: pip install -r requirements.txt
-
-      - name: Cache ANN-Benchmarks dataset
-        id: cache-glove
-        uses: actions/cache@v4
-        with:
-          path: benchmarks/.datasets/glove-25-angular.hdf5
-          key: glove-25-angular-hdf5
-
-      - name: Fetch glove-25-angular (if not cached)
-        if: steps.cache-glove.outputs.cache-hit != 'true'
-        working-directory: benchmarks
-        run: |
-          mkdir -p .datasets
-          curl -sSL -o .datasets/glove-25-angular.hdf5 http://ann-benchmarks.com/glove-25-angular.hdf5
-          echo "51004cb0ae962159f0db507a51fec2b395de14b166f55976c89f16bd2f8b6391  .datasets/glove-25-angular.hdf5" | sha256sum -c -
-
-      - name: Benchmark gate — harness on real reference dataset (HNSW; capped for CI time)
-        working-directory: benchmarks
-        env:
-          PGHOST: localhost
-          PGUSER: postgres
-          PGPASSWORD: postgres
-          PGDATABASE: postgres
-        # HNSW only + small subset keeps CI fast (a full diskann build on 50k takes ~2 min); the
-        # decision-grade diskann sweep is run out-of-CI and committed under wiki/benchmarks/.
-        run: |
-          python -m theodb_bench --hdf5 .datasets/glove-25-angular.hdf5 --index hnsw \
-            --metric cosine --seed 42 --n 10000 --n-queries 200 --k 10 --runs 2 --out /tmp/bench
-          python - <<'PY'
-          import glob, json, sys
-          f = sorted(glob.glob("/tmp/bench/*glove-25-angular*.json"))[-1]
-          d = json.load(open(f))
-          r = max(x["recall_at_k"] for x in d["results"])
-          print(f"CI benchmark recall@10 (HNSW, glove-25, n=10k): {r:.4f}")
-          # HNSW on a real clustered dataset must recall high — guards against a silently broken gate.
-          sys.exit(0 if r >= 0.90 else 1)
-          PY
-
-      - name: Integration tests (vectorscale / diskann against the container)
-        working-directory: benchmarks
-        env:
-          PGHOST: localhost
-          PGUSER: postgres
-          PGPASSWORD: postgres
-          PGDATABASE: postgres
-        # `--durations` é instrumentação, não decoração: este step mede 22,2 min e responde por 80%
-        # do wall-clock da esteira inteira (27,9 min medidos em 2026-07-27) — é O alvo de otimização.
-        # Mas ~305 testes a 4,3s de média não dizem se o custo está espalhado ou concentrado em uma
-        # dezena de testes, e a resposta muda completamente o que fazer:
-        #   concentrado  -> atacar os testes específicos (maior retorno, menor risco)
-        #   espalhado    -> exige paralelismo, que HOJE está bloqueado: não há conftest.py e os testes
-        #                   criam tabelas de nome FIXO repetido (`CREATE TABLE m` em 12 pontos) no MESMO
-        #                   banco, então `pytest -n auto` trocaria 22 min por flakiness.
-        # Reestruturar antes de saber qual dos dois casos é o nosso seria adivinhar (Regra 5).
-        run: pytest -m integration -q --durations=25
-
       - name: Teardown
         if: always()
         run: docker rm -f theo-db-ci || true
 
   migration-smoke:
+    needs: build
     # M3 DoD-1/DoD-2: standard pg_dump/pg_restore migration from a vanilla pgvector source into TheoDB,
     # asserting data + indexes are preserved. Every step here has been run locally first.
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: grátis e ilimitado, e sobretudo PARALELO —
+    # a máquina paga era ÚNICA e SERIAL, e os dez workflows do mesmo push enfileiravam.
+    #
+    # DISCO: MEDIDO, não mais suposto. A dúvida era `theodb_rs/target` medir 13 GB contra o disco do
+    # runner padrão. Corrida de 2026-08-20: a `Rust test suite` (que constrói o estágio builder e roda
+    # a suíte dentro do contêiner) passou em **19 minutos**, e NENHUM job falhou por espaço. A receita
+    # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
+    runs-on: ubuntu-latest
     # Build + dois containers (pgvector origem, TheoDB destino) + pg_dump/pg_restore. Mesma faixa
     # do `pg-regression` (25), que também sobe container e roda suíte externa.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build TheoDB image (cache from image-and-bench)
-        uses: docker/build-push-action@v6
+      - name: Carregar a imagem construída uma vez pelo job `build`
+        uses: actions/download-artifact@v4
         with:
-          context: .
-          tags: theo-db:dev
-          load: true
-          cache-from: type=gha
-          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
-          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
-          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
+          name: theodb-ci-image
+          path: /tmp
 
+      - name: Carregar no daemon
+        run: |
+          zstd -d -c /tmp/theodb-ci.tar.zst | docker load
+          docker tag theo-db:ci theo-db:dev
       - name: Start source (vanilla pgvector, pinned by digest) + target (TheoDB)
         run: |
           # pinned by digest for reproducibility, consistent with the repo's supply-chain policy
@@ -378,58 +349,77 @@ jobs:
         run: docker rm -f m3-src m3-dst || true
 
   pg-regression:
+    needs: build
     timeout-minutes: 25
     # M1 DoD-1: the upstream PostgreSQL 17 regression suite passes 100% on the TheoDB distribution.
     # Throwaway runner (FROM theo-db:dev) builds pg_regress from REL_17_10 and runs `make installcheck`.
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: grátis e ilimitado, e sobretudo PARALELO —
+    # a máquina paga era ÚNICA e SERIAL, e os dez workflows do mesmo push enfileiravam.
+    #
+    # DISCO: MEDIDO, não mais suposto. A dúvida era `theodb_rs/target` medir 13 GB contra o disco do
+    # runner padrão. Corrida de 2026-08-20: a `Rust test suite` (que constrói o estágio builder e roda
+    # a suíte dentro do contêiner) passou em **19 minutos**, e NENHUM job falhou por espaço. A receita
+    # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build TheoDB base image (cache from image-and-bench)
-        uses: docker/build-push-action@v6
+      - name: Carregar a imagem construída uma vez pelo job `build`
+        uses: actions/download-artifact@v4
         with:
-          context: .
-          tags: theo-db:dev
-          load: true
-          cache-from: type=gha
-          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
-          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
-          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
+          name: theodb-ci-image
+          path: /tmp
 
-      - name: Build regression runner (pg_regress + regress.so from REL_17_10)
-        run: docker build -f packaging/Dockerfile.regress -t theo-db-regress .
+      - name: Carregar no daemon
+        run: |
+          zstd -d -c /tmp/theodb-ci.tar.zst | docker load
+          docker tag theo-db:ci theo-db:dev
+      - name: Build regression runner (pg_regress + regress.so, tag DERIVADO do engine)
+        run: |
+          set -euo pipefail
+          # O tag do fonte da suíte segue o engine, nunca uma constante nossa: a imagem base
+          # `postgres:18-bookworm` avança de patch sozinha, e em 2026-08-20 foi de 18.4 para 18.6.
+          VER=$(docker run --rm theo-db:dev postgres --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
+          [ -n "$VER" ] || { echo "::error::não consegui ler a versão do engine em theo-db:dev" >&2; exit 1; }
+          PG_TAG="REL_${VER//./_}"
+          echo "engine $VER -> source tag $PG_TAG"
+          docker build --build-arg "PG_TAG=$PG_TAG" -f packaging/Dockerfile.regress -t theo-db-regress .
 
       - name: Upstream PG17 regression suite (100% must pass)
         run: docker run --rm theo-db-regress
 
   hybrid-search:
+    needs: build
     timeout-minutes: 20
     # M7-S1: hybrid search (FTS + vector + RRF) — contract tests + smoke + capped BEIR-style eval.
     # Every step here has been run locally first (deterministic lexical embedder; no external endpoint).
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: grátis e ilimitado, e sobretudo PARALELO —
+    # a máquina paga era ÚNICA e SERIAL, e os dez workflows do mesmo push enfileiravam.
+    #
+    # DISCO: MEDIDO, não mais suposto. A dúvida era `theodb_rs/target` medir 13 GB contra o disco do
+    # runner padrão. Corrida de 2026-08-20: a `Rust test suite` (que constrói o estágio builder e roda
+    # a suíte dentro do contêiner) passou em **19 minutos**, e NENHUM job falhou por espaço. A receita
+    # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build TheoDB image (cache from image-and-bench)
-        uses: docker/build-push-action@v6
+      - name: Carregar a imagem construída uma vez pelo job `build`
+        uses: actions/download-artifact@v4
         with:
-          context: .
-          tags: theo-db:dev
-          load: true
-          cache-from: type=gha
-          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
-          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
-          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
+          name: theodb-ci-image
+          path: /tmp
 
+      - name: Carregar no daemon
+        run: |
+          zstd -d -c /tmp/theodb-ci.tar.zst | docker load
+          docker tag theo-db:ci theo-db:dev
       - name: Start TheoDB
         run: |
-          # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
+          # Ephemeral host port — rationale in the image-guards "Start TheoDB" step.
           docker rm -f theo-db-hyb 2>/dev/null || true
           docker run -d --name theo-db-hyb -e POSTGRES_PASSWORD=postgres -p 5432 theo-db:dev
           for _ in $(seq 1 30); do
@@ -447,56 +437,39 @@ jobs:
       - name: Hybrid smoke (ai.hybrid_search_rrf golden top-k assertion)
         run: bash scripts/smoke.sh
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install harness deps
-        working-directory: benchmarks
-        run: pip install -r requirements.txt
-
-      - name: Hybrid unit tests (RRF fusion + nDCG/Recall math + BEIR loader)
-        working-directory: benchmarks
-        run: pytest -m "not integration" tests/test_hybrid.py -q
-
-      - name: Hybrid contract + 3-retriever eval (against the container)
-        working-directory: benchmarks
-        env:
-          PGHOST: localhost
-          PGUSER: postgres
-          PGPASSWORD: postgres
-          PGDATABASE: postgres
-        run: pytest -m integration tests/test_integration.py -k 'hybrid or retrievers' -q
-
       - name: Teardown
         if: always()
         run: docker rm -f theo-db-hyb || true
 
   ai-sql:
+    needs: build
     timeout-minutes: 20
     # M7-S3: generative ai.* functions — offline deterministic contract suite (stub server; NO external API).
     # The real-OpenAI test is opt-in and runs out-of-CI (key from gitignored .env). Run locally first.
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: grátis e ilimitado, e sobretudo PARALELO —
+    # a máquina paga era ÚNICA e SERIAL, e os dez workflows do mesmo push enfileiravam.
+    #
+    # DISCO: MEDIDO, não mais suposto. A dúvida era `theodb_rs/target` medir 13 GB contra o disco do
+    # runner padrão. Corrida de 2026-08-20: a `Rust test suite` (que constrói o estágio builder e roda
+    # a suíte dentro do contêiner) passou em **19 minutos**, e NENHUM job falhou por espaço. A receita
+    # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build TheoDB image (cache from image-and-bench)
-        uses: docker/build-push-action@v6
+      - name: Carregar a imagem construída uma vez pelo job `build`
+        uses: actions/download-artifact@v4
         with:
-          context: .
-          tags: theo-db:dev
-          load: true
-          cache-from: type=gha
-          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
-          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
-          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
+          name: theodb-ci-image
+          path: /tmp
 
+      - name: Carregar no daemon
+        run: |
+          zstd -d -c /tmp/theodb-ci.tar.zst | docker load
+          docker tag theo-db:ci theo-db:dev
       - name: Start TheoDB (host-gateway so the in-DB function reaches the host stub)
         run: |
-          # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
+          # Ephemeral host port — rationale in the image-guards "Start TheoDB" step.
           docker rm -f theo-db-ai 2>/dev/null || true
           # M134/#117 fecharam a classe de SSRF em ai._chat: o guard recusa endpoints que resolvem
           # para loopback/privado/link-local. Estas suites usam um STUB OFFLINE no host
@@ -523,50 +496,40 @@ jobs:
       - name: AI presence smoke (functions present + non-PUBLIC, no network)
         run: bash scripts/smoke.sh
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install harness deps
-        working-directory: benchmarks
-        run: pip install -r requirements.txt
-
-      - name: AI generative contract suite (offline stub — deterministic, no external API)
-        working-directory: benchmarks
-        env:
-          PGHOST: localhost
-          PGUSER: postgres
-          PGPASSWORD: postgres
-          PGDATABASE: postgres
-        run: pytest -m integration tests/test_ai_sql.py -k 'not real' -q
-
       - name: Teardown
         if: always()
         run: docker rm -f theo-db-ai || true
 
   bm25-measure:
+    needs: build
     timeout-minutes: 25
     # M7-S2: permissive BM25 (pg_textsearch) — build the throwaway image + MEASURE recall vs ts_rank_cd.
     # measurement-first (ADR 0002/0003): pg_textsearch is NOT in the shipped image; this job builds it only to
     # functionally prove + measure BM25. Deterministic synthetic fixture; no external API. Run locally first.
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: grátis e ilimitado, e sobretudo PARALELO —
+    # a máquina paga era ÚNICA e SERIAL, e os dez workflows do mesmo push enfileiravam.
+    #
+    # DISCO: MEDIDO, não mais suposto. A dúvida era `theodb_rs/target` medir 13 GB contra o disco do
+    # runner padrão. Corrida de 2026-08-20: a `Rust test suite` (que constrói o estágio builder e roda
+    # a suíte dentro do contêiner) passou em **19 minutos**, e NENHUM job falhou por espaço. A receita
+    # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build TheoDB base image (cache from image-and-bench)
-        uses: docker/build-push-action@v6
+      - name: Carregar a imagem construída uma vez pelo job `build`
+        uses: actions/download-artifact@v4
         with:
-          context: .
-          tags: theo-db:dev
-          load: true
-          cache-from: type=gha
-          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
-          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
-          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
+          name: theodb-ci-image
+          path: /tmp
 
+      - name: Carregar no daemon
+        run: |
+          zstd -d -c /tmp/theodb-ci.tar.zst | docker load
+          docker tag theo-db:ci theo-db:dev
       - name: License sweep — BM25 candidates permissive/barred verdict (reproducible, ADR 0003)
         run: bash packaging/license-sweep.sh
 
@@ -575,7 +538,7 @@ jobs:
 
       - name: Start BM25 image (shared_preload_libraries=pg_textsearch)
         run: |
-          # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
+          # Ephemeral host port — rationale in the image-guards "Start TheoDB" step.
           docker rm -f theo-db-bm25c 2>/dev/null || true
           docker run -d --name theo-db-bm25c -e POSTGRES_PASSWORD=postgres -p 5432 \
             theo-db-bm25 -c shared_preload_libraries=pg_textsearch
@@ -591,50 +554,39 @@ jobs:
           case "$port" in ''|*[!0-9]*) echo "::error::PGPORT resolution failed for theo-db-bm25c (got: '$port')"; exit 1;; esac
           echo "PGPORT=$port" >> "$GITHUB_ENV"
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install harness deps
-        working-directory: benchmarks
-        run: pip install -r requirements.txt
-
-      - name: BM25 recall measurement (pg_textsearch vs ts_rank_cd, against the real build)
-        working-directory: benchmarks
-        env:
-          PGHOST: localhost
-          PGUSER: postgres
-          PGPASSWORD: postgres
-          PGDATABASE: postgres
-        run: pytest -m integration tests/test_bm25.py -q
-
       - name: Teardown
         if: always()
         run: docker rm -f theo-db-bm25c || true
 
   nl-sql:
+    needs: build
     timeout-minutes: 20
     # M7-S4: safe NL→SQL (anti-prompt-injection) — offline deterministic injection suite (stub; NO external API).
     # The stub "complies" with each injection so the test proves the GUARDS (L2 validation / L3 read-only
     # sandbox 25006) catch it. Run locally first.
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: grátis e ilimitado, e sobretudo PARALELO —
+    # a máquina paga era ÚNICA e SERIAL, e os dez workflows do mesmo push enfileiravam.
+    #
+    # DISCO: MEDIDO, não mais suposto. A dúvida era `theodb_rs/target` medir 13 GB contra o disco do
+    # runner padrão. Corrida de 2026-08-20: a `Rust test suite` (que constrói o estágio builder e roda
+    # a suíte dentro do contêiner) passou em **19 minutos**, e NENHUM job falhou por espaço. A receita
+    # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build TheoDB image (cache from image-and-bench)
-        uses: docker/build-push-action@v6
+      - name: Carregar a imagem construída uma vez pelo job `build`
+        uses: actions/download-artifact@v4
         with:
-          context: .
-          tags: theo-db:dev
-          load: true
-          cache-from: type=gha
-          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
-          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
-          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
+          name: theodb-ci-image
+          path: /tmp
+
+      - name: Carregar no daemon
+        run: |
+          zstd -d -c /tmp/theodb-ci.tar.zst | docker load
+          docker tag theo-db:ci theo-db:dev
       - name: Start TheoDB (host-gateway so the in-DB function reaches the host stub)
         run: |
-          # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
+          # Ephemeral host port — rationale in the image-guards "Start TheoDB" step.
           docker rm -f theo-db-nl 2>/dev/null || true
           # M134/#117 fecharam a classe de SSRF em ai._chat: o guard recusa endpoints que resolvem
           # para loopback/privado/link-local. Estas suites usam um STUB OFFLINE no host
@@ -659,28 +611,6 @@ jobs:
           echo "PGPORT=$port" >> "$GITHUB_ENV"
       - name: NL→SQL presence smoke (functions present + non-PUBLIC, no network)
         run: bash scripts/smoke.sh
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install harness deps
-        working-directory: benchmarks
-        run: pip install -r requirements.txt
-      - name: NL→SQL anti-prompt-injection suite (offline stub — proves the guards catch injections)
-        working-directory: benchmarks
-        env:
-          PGHOST: localhost
-          PGUSER: postgres
-          PGPASSWORD: postgres
-          PGDATABASE: postgres
-        run: pytest -m integration tests/test_nl_sql.py -q
-      - name: S3 ai.* no-regression (the stub changed)
-        working-directory: benchmarks
-        env:
-          PGHOST: localhost
-          PGUSER: postgres
-          PGPASSWORD: postgres
-          PGDATABASE: postgres
-        run: pytest -m integration tests/test_ai_sql.py -k 'not real' -q
       - name: Teardown
         if: always()
         run: docker rm -f theo-db-nl || true
@@ -689,7 +619,14 @@ jobs:
     timeout-minutes: 20
     # M6: columnar/HTAP (pg_mooncake) — prove + measure the columnstore mirror vs row-store on the canonical
     # pg_mooncake distribution (MIT). Captures the DuckDBScan-vs-SeqScan plan choice (DoD-2). Run locally first.
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: grátis e ilimitado, e sobretudo PARALELO —
+    # a máquina paga era ÚNICA e SERIAL, e os dez workflows do mesmo push enfileiravam.
+    #
+    # DISCO: MEDIDO, não mais suposto. A dúvida era `theodb_rs/target` medir 13 GB contra o disco do
+    # runner padrão. Corrida de 2026-08-20: a `Rust test suite` (que constrói o estágio builder e roda
+    # a suíte dentro do contêiner) passou em **19 minutos**, e NENHUM job falhou por espaço. A receita
+    # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: License sweep — columnar candidates permissive verdict (reproducible)
@@ -698,7 +635,7 @@ jobs:
         run: docker build -f packaging/Dockerfile.columnar -t theo-db-columnar .
       - name: Start columnar image
         run: |
-          # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
+          # Ephemeral host port — rationale in the image-guards "Start TheoDB" step.
           docker rm -f theo-db-col 2>/dev/null || true
           docker run -d --name theo-db-col -e POSTGRES_PASSWORD=postgres -p 5432 theo-db-columnar
           for _ in $(seq 1 40); do docker exec theo-db-col pg_isready -U postgres -q && break; sleep 2; done
@@ -709,20 +646,6 @@ jobs:
           port="$(docker port theo-db-col 5432/tcp | head -1 | sed 's/.*://')"
           case "$port" in ''|*[!0-9]*) echo "::error::PGPORT resolution failed for theo-db-col (got: '$port')"; exit 1;; esac
           echo "PGPORT=$port" >> "$GITHUB_ENV"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install harness deps
-        working-directory: benchmarks
-        run: pip install -r requirements.txt
-      - name: Columnar measurement (mirror vs row + DuckDBScan plan, DoD-1/DoD-2)
-        working-directory: benchmarks
-        env:
-          PGHOST: localhost
-          PGUSER: postgres
-          PGPASSWORD: postgres
-          PGDATABASE: postgres
-        run: pytest -m integration tests/test_columnar.py -q
       - name: Teardown
         if: always()
         run: docker rm -f theo-db-col || true

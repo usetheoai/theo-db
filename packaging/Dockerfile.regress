@@ -14,10 +14,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       tcl-dev perl libperl-dev python3-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# MUST track the engine major (Dockerfile ARG PG_MAJOR). pg_regress expected-outputs differ
-# across majors, so a PG17 harness against a PG18 server produces meaningless diffs.
-# Guarded by benchmarks/tests/test_packaging_pg_major.py.
-ARG PG_TAG=REL_18_4
+# MUST track the engine version. pg_regress expected-outputs differ across majors, so a PG17
+# harness against a PG18 server produces meaningless diffs — and the PATCH matters too, which is
+# what broke this gate on 2026-08-20: o default era `REL_18_4`, a imagem base `postgres:18-bookworm`
+# avançou para **18.6**, e o guard de `run-regress.sh` reprovou com "engine is not 18.4 (got 18.6)".
+#
+# Uma versão de patch do PostgreSQL não é decisão nossa. O caller DERIVA o tag do engine e passa
+# aqui; o default abaixo existe só para `docker build` manual e é deliberadamente o do dia.
+# `ENV` além de `ARG` para que `run-regress.sh` compare contra o MESMO valor que clonou o fonte,
+# em vez de contra uma constante própria — duas constantes divergem, uma derivação não.
+ARG PG_TAG=REL_18_6
+ENV PG_TAG=$PG_TAG
 RUN git clone --depth 1 --branch $PG_TAG https://github.com/postgres/postgres /src
 WORKDIR /src
 RUN ./configure --with-tcl --with-perl --with-python --with-pam --with-openssl \

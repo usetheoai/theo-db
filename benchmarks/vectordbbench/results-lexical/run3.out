@@ -1,0 +1,12 @@
+== pré-voo ==
+   stemming do TheoDB ativo: 1  (1 = sim)
+== theodb-b044 ==
+   recall=0.8464 ndcg=0.7351 mrr=0.7034 qps=1794.0 p99=0.0043 load=28.86
+   ok
+== elastic-8153 ==
+   recall=0.7972 ndcg=0.6908 mrr=0.6616 qps=6634.0 p99=0.0025 load=60.25
+   ok
+== opensearch-2171 ==
+   recall=0.7973 ndcg=0.6909 mrr=0.6617 qps=6101.3 p99=0.0029 load=59.55
+   ok
+== os três completaram ==

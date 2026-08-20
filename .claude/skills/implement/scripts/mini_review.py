@@ -7,7 +7,8 @@ Aggregates four checks:
   1. phase_completeness — every phase task `committed`, phase DoD non-empty
   2. diff_cohesion       — modified files match each task's `Files to edit`
   3. wiring_summary      — `check_wiring.py` aggregated for every new symbol
-  4. code_quality_delta  — `/code-quality` invoked on the phase's file delta
+  4. delta_audit_coverage — will Step 5's /code-quality audit even look at
+                            these files? (language ENABLED in the rules file)
 
 Severity is aggregated using the standard /review vocabulary:
   BLOCKER > HIGH > MEDIUM > LOW > INFO
@@ -40,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,6 +55,8 @@ from check_diff_cohesion import check_diff_cohesion
 from check_phase_completeness import check_phase_completeness
 from diff_symbols import added_symbols_from_shas, shas_from_progress
 from wiring_recheck import recheck_pillar_a
+
+from _layout import default_mini_reviews_dir
 
 
 SEVERITY_RANK = {"INFO": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "BLOCKER": 4}
@@ -135,23 +139,87 @@ def _aggregate_wiring(progress_path: Path, phase: str, repo_root: Path) -> dict[
     }
 
 
-def _invoke_code_quality_on_delta(
-    slug: str,
-    progress_path: Path,
-    phase: str,
-    project_root: Path,
-) -> dict[str, Any]:
-    """Invoke /code-quality scoped to files modified in this phase only.
+#: Extensão → linguagem, para a única pergunta que a fronteira de fase consegue
+#: responder sobre o audit: ele vai olhar para estes arquivos?
+_EXT_TO_LANGUAGE = {
+    ".py": "python",
+    ".ts": "typescript", ".tsx": "typescript",
+    ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+    ".kt": "kotlin", ".kts": "kotlin",
+    ".rb": "ruby",
+    ".cs": "csharp",
+}
 
-    Honest behavior: cq_invoke today scores the whole plan, not a file subset.
-    Until cq_invoke supports `--files`, this is an unconditional SKIP rather than
-    a faked delta-scoped audit. The full audit still runs at Step 5. The function
-    keeps its signature so the wiring is ready the day cq_invoke gains `--files`.
+
+def _check_delta_audit_coverage(files: tuple[str, ...], project_root: Path) -> dict[str, Any]:
+    """Os arquivos desta fase serão auditados pelo `/code-quality` do Step 5?
+
+    Esta função substitui `_invoke_code_quality_on_delta`, que era um SKIP
+    incondicional: o `cq_invoke` pontua o plano inteiro, não um subconjunto de
+    arquivos, e fingir um audit delta-scoped teria sido pior. A metade honesta
+    era admitir isso; a metade desonesta era a linha do relatório, que se lia
+    como um check que rodou — o Step 4.7 anunciava mais rigor do que entregava.
+
+    O que sobra é a pergunta que o SKIP deixava em aberto, e essa a fronteira
+    responde de graça: um arquivo cuja linguagem não está ENABLED em
+    `rules/code-quality-languages.txt` não será visto por detector nenhum, nem
+    aqui nem no Step 5. É a mesma classe de defeito que o D5 persegue — um
+    auditor que nunca roda reporta sucesso — e não tinha detector na fronteira.
+
+    Sem o arquivo de regra: SKIP. Adivinhar quais linguagens um projeto audita
+    produziria o achado inventado que o kit recusa em toda parte.
     """
+    rule_path = None
+    for candidate in (project_root / "rules" / "code-quality-languages.txt",
+                      project_root / ".claude" / "rules" / "code-quality-languages.txt"):
+        if candidate.is_file():
+            rule_path = candidate
+            break
+    if rule_path is None:
+        return {
+            "status": "SKIP",
+            "reason": "rules/code-quality-languages.txt ausente — sem ele, quais linguagens "
+                      "são auditadas é adivinhação",
+            "uncovered_files": [],
+            "findings": [],
+        }
+
+    enabled: set[str] = set()
+    for raw_line in rule_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) >= 3 and parts[2] == "ENABLED":
+            enabled.add(parts[0])
+
+    uncovered = [
+        f for f in files
+        if (language := _EXT_TO_LANGUAGE.get(Path(f).suffix)) and language not in enabled
+    ]
+    if not uncovered:
+        return {
+            "status": "PASS",
+            "reason": f"toda fonte do delta cai em linguagem ENABLED ({', '.join(sorted(enabled)) or 'nenhuma'})",
+            "uncovered_files": [],
+            "findings": [],
+        }
     return {
-        "status": "SKIP",
-        "reason": "delta-scoped code-quality not implemented yet; full audit runs at Step 5",
-        "findings": [],
+        "status": "WARN",
+        "reason": "arquivos do delta que nenhum detector vai auditar",
+        "uncovered_files": uncovered,
+        "findings": [{
+            "severity": "MEDIUM",
+            "code": "delta_language_not_audited",
+            "message": (
+                f"{len(uncovered)} arquivo(s) desta fase em linguagem que não está ENABLED em "
+                f"{rule_path.name} — o audit do Step 5 não vai olhar para eles: "
+                f"{', '.join(uncovered[:5])}"
+            ),
+        }],
     }
 
 
@@ -200,6 +268,18 @@ def _compute_verdict(findings: list[dict[str, str]]) -> tuple[str, str]:
     return "PHASE_REVIEW_PASS", max_severity
 
 
+def _current_head(project_root: Path) -> str | None:
+    """`git rev-parse HEAD`, or None when git cannot answer — never a fabricated value."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(project_root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=False, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return proc.stdout.strip() if proc.returncode == 0 else None
+
+
 def _render_report(
     slug: str,
     phase: str,
@@ -210,13 +290,25 @@ def _render_report(
     wiring: dict[str, Any],
     cq: dict[str, Any],
     findings: list[dict[str, str]],
+    project_root: Path,
 ) -> str:
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    ran_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    head = _current_head(project_root) or "unknown"
     md = f"""# Mini review — {slug} — Phase {phase}
 
 **Date:** {date}
+**Ran at:** {ran_at}
+**Reviewed at head:** `{head}`
 **Verdict:** `{verdict}`
 **Max severity:** `{max_severity}`
+
+<!-- B-039 — `Reviewed at head` is the field a downstream check can trust. Three mini reviews in
+     this repository were written 41 minutes after the phase they grade had already closed, and
+     their recorded DATE said nothing about it: a timestamp is whatever the writer says it is.
+     `check_phase_review.py` compares this sha against the phase's last commit with
+     `git merge-base --is-ancestor`, so a review that ran after the phase moved on is detectable
+     from the repository rather than from a clock. -->
 
 This is the **Step 4.7 phase-boundary mini review** — runs at the end of every
 phase, before the next phase begins (cycle-implement.md § Hard gates). Companion
@@ -256,10 +348,12 @@ to `/review` (which runs once at the end of all phases).
     md += f"- pillar_a_fails: {wiring.get('pillar_a_fails', 'n/a')}\n"
     if wiring.get("reason"):
         md += f"- reason: {wiring['reason']}\n"
-    md += "\n### 4. Code-quality delta\n\n"
+    md += "\n### 4. Delta audit coverage\n\n"
     md += f"- status: `{cq.get('status')}`\n"
     if cq.get("reason"):
         md += f"- reason: {cq['reason']}\n"
+    for path in cq.get("uncovered_files", []):
+        md += f"- uncovered: `{path}`\n"
     md += "\n## Recommendation\n\n"
     if verdict == "PHASE_REVIEW_PASS":
         md += "Phase passes mini review. Halt-loop may proceed to next phase.\n"
@@ -284,7 +378,7 @@ def run_mini_review(
     pc = check_phase_completeness(plan_path, progress_path, phase)
     dc = check_diff_cohesion(plan_path, progress_path, phase, project_root)
     wiring = _aggregate_wiring(progress_path, phase, project_root)
-    cq = _invoke_code_quality_on_delta(slug, progress_path, phase, project_root)
+    cq = _check_delta_audit_coverage(dc.modified_files, project_root)
 
     findings = _collect_all_findings(pc, dc, wiring, cq)
     findings.extend(_phase_checkpoint_findings(plan_path, progress_path, phase, project_root))
@@ -294,7 +388,7 @@ def run_mini_review(
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     report_path = output_dir / f"{slug}-phase{phase}-review-{date}.md"
     report_path.write_text(
-        _render_report(slug, phase, verdict, max_severity, pc, dc, wiring, cq, findings),
+        _render_report(slug, phase, verdict, max_severity, pc, dc, wiring, cq, findings, project_root),
         encoding="utf-8",
     )
     return verdict, max_severity, report_path
@@ -307,12 +401,14 @@ def main() -> int:
     parser.add_argument("--progress", type=Path, required=True)
     parser.add_argument("--phase", required=True)
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
-    parser.add_argument(
-        "--output-dir", type=Path,
-        default=Path("knowledge-base/mini-reviews"),
-    )
+    # B-032 — resolved AFTER parsing, from --project-root, because the layout is a property of the
+    # install and not of the caller's memory. `default=None` so an explicit flag is distinguishable
+    # from an omitted one.
+    parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    if args.output_dir is None:
+        args.output_dir = default_mini_reviews_dir(args.project_root)
 
     if not args.plan.exists():
         print(f"plan file not found: {args.plan}", file=sys.stderr)

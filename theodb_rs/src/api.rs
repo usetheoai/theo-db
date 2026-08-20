@@ -118,7 +118,7 @@ mod theodb_rs {
         TableIterator::once((index_name.to_string(), ef, p, c, l, r))
     }
 
-    // ── M18: the generative ai.* surface (was plpython3u in sql/50) ──────────────────────────────────
+    // ── M18: the generative ai.* surface (was plpython3u in theodb_rs/sql/surface/50-ai-text.sql) ──────────────────────────────────
     // Thin delegates to `crate::chat`; the public `ai.*` SQL wrappers (below) carry the documented names,
     // return types, VOLATILE, and REVOKE. `ai._chat` stays SQL-callable so ai.generate/summarize/the
     // aggregate finalfunc / M19 nl_to_sql keep working.
@@ -453,7 +453,8 @@ mod theodb_rs {
 
 // SQL wrapper: the public `theodb.embed(content, model DEFAULT NULL) RETURNS vector`. Casts the Rust
 // function's text output to `vector` via pgvector's input function (plan ADR D5 — no extra crate).
-// Both functions are REVOKEd from PUBLIC (least-privilege parity with sql/30:80).
+// Both functions are REVOKEd from PUBLIC (paridade de menor privilégio com o original em
+// `git show d0771b3^:sql/30-theodb-embed.sql`).
 extension_sql!(
     r#"
 CREATE FUNCTION theodb.embed(content text, model text DEFAULT NULL)
@@ -583,12 +584,28 @@ CREATE FUNCTION theodb.explain_scan(index_table regclass, vector_col text, query
                                     ef int DEFAULT 100, k int DEFAULT 10)
 RETURNS TABLE(index_name text, ef_effective int, pages_read bigint, candidates_seen bigint, latency_us bigint, results bigint)
 LANGUAGE sql
+-- B-021: o índice é resolvido pelo HANDLER, não pelo nome do access method.
+--
+-- A forma anterior casava `a.amname = 'theodb_hnsw'`, e isso deixava invisível todo índice criado pela
+-- sintaxe pgvector (`USING hnsw`), que é o alias registrado por `sql/vector--0.6.0.sql`. O alias é uma
+-- SEGUNDA entrada em `pg_am` — medido: `hnsw` OID 17174 vs `theodb_hnsw` OID 16568 — então o nome nunca
+-- casaria, e `explain_scan` devolvia `(no theodb_hnsw index on this table)` para uma tabela que TEM índice.
+--
+-- Isso não era um detalhe: todo índice que o `theo-rag` cria usa `USING hnsw`, então o diagnóstico era cego
+-- justamente nas consultas que o dogfood exercita.
+--
+-- Os dois AMs compartilham o mesmo handler own-code (medido: ambos `theodb_hnsw_amhandler`), que é
+-- exatamente o invariante que importa aqui — "este índice é servido pelo nosso AM" — e continua verdadeiro
+-- se amanhã surgir um terceiro alias. O join passa por `pg_proc` em vez de `'…'::regproc` para não depender
+-- do `search_path` de quem chama.
 AS $$ SELECT index_name, ef_effective, pages_read, candidates_seen, latency_us, results
       FROM theodb_rs._explain_scan(
         index_table::oid,
         COALESCE((SELECT ci.relname FROM pg_index i JOIN pg_class ci ON ci.oid = i.indexrelid
                   JOIN pg_am a ON a.oid = ci.relam
-                  WHERE i.indrelid = index_table AND a.amname = 'theodb_hnsw' LIMIT 1),
+                  JOIN pg_proc h ON h.oid = a.amhandler
+                  WHERE i.indrelid = index_table AND h.proname = 'theodb_hnsw_amhandler'
+                  ORDER BY ci.relname LIMIT 1),
                  '(no theodb_hnsw index on this table)'),
         index_table::text, vector_col, query, ef, k) $$;
 
@@ -604,7 +621,7 @@ REVOKE ALL ON FUNCTION theodb_rs._explain_scan(oid, text, text, text, text, int,
     requires = [_explain_scan, "theodb_schema_bootstrap"],
 );
 
-// SQL wrappers: the public generative `ai.*` surface (M18 — was plpython3u in sql/50, now Rust). Created
+// SQL wrappers: the public generative `ai.*` surface (M18 — was plpython3u in theodb_rs/sql/surface/50-ai-text.sql, now Rust). Created
 // INTO the existing `ai` schema (owned by the `theodb` umbrella; theodb_rs `requires = theodb` so it exists
 // first). Exact public signatures / RETURNS / VOLATILE preserved; every function REVOKEd from PUBLIC (it
 // makes server-side outbound HTTP). `ai._chat` stays SQL-callable (ai.generate/summarize/the aggregate
@@ -677,7 +694,7 @@ REVOKE ALL ON FUNCTION theodb_rs._ai_rerank(text, text[], text, int) FROM PUBLIC
 
 // SQL wrappers: the public NL→SQL surface (M19 — `ai.nl_to_sql` was the last plpython3u, now Rust). Created
 // INTO the existing `ai` schema; exact public signatures preserved; REVOKEd from PUBLIC (they make an
-// outbound LLM call via ai._chat and ai.nl_query executes dynamic SQL). The M12 config layer (sql/61) and
+// outbound LLM call via ai._chat and ai.nl_query executes dynamic SQL). The M12 config layer (theodb_rs/sql/surface/61-nl-config.sql) and
 // `ai.nl_query` resolve `ai.nl_to_sql` by name.
 extension_sql!(
     r#"
@@ -698,7 +715,8 @@ REVOKE ALL ON FUNCTION theodb_rs._nl_to_sql(text, text[], text) FROM PUBLIC;
     requires = [_nl_to_sql, "theodb_schema_bootstrap"],
 );
 
-// SQL wrappers: the public hybrid-search surface (M19 — was plpgsql in sql/40, now Rust). Created INTO the
+// SQL wrappers: the public hybrid-search surface (M19 — era plpgsql em `sql/40-theodb-hybrid.sql`,
+// removido em `d0771b3`; agora Rust). Created INTO the
 // existing `ai` schema. The public ai.hybrid_search_rrf keeps its exact named parameters + DEFAULTs (callers
 // use tbl => …, query_vector => … named notation) and the `regclass`/`vector` types pgrx cannot express
 // natively — the thin SQL wrapper bridges them to the text-typed Rust entrypoint (tbl::text, query_vector::text).
@@ -764,7 +782,7 @@ REVOKE ALL ON FUNCTION theodb_rs._hybrid_search_json(jsonb) FROM PUBLIC;
     requires = [_hybrid_search_rrf, _hybrid_search_json, "theodb_schema_bootstrap"],
 );
 
-// SQL wrapper: the public migration helper `theodb.import_vectors` (M19 — was plpgsql in sql/80, now Rust).
+// SQL wrapper: the public migration helper `theodb.import_vectors` (M19 — was plpgsql in theodb_rs/sql/surface/80-import-vectors.sql, now Rust).
 // The chunked PROCEDURE theodb.import_vectors_chunked STAYS plpgsql (ADR-D — only a plpgsql PROCEDURE can
 // COMMIT per batch). Created INTO the existing `theodb` schema; exact signature + DEFAULTs preserved; REVOKEd
 // from PUBLIC (writes to caller-owned tables). The thin wrapper bridges `regclass` to the text-typed Rust fn.
@@ -1009,5 +1027,4 @@ REVOKE ALL ON FUNCTION theodb_rs._pq_knn(text, text, text, text, real[], int, in
 #[pgrx::pg_schema]
 mod surface_tests {
     use pgrx::prelude::*;
-
 }

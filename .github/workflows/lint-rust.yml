@@ -10,6 +10,20 @@
 name: lint-rust
 
 on:
+  # 2026-08-12 — gatilho de `pull_request` REMOVIDO por decisão do owner: o runner é único e serial, e
+  # cada PR disparava a esteira inteira a cada push, com custo elevado. A esteira passa a rodar SÓ no
+  # `push` para `develop`/`main` — ou seja, DEPOIS do merge.
+  #
+  # A TROCA É REAL e fica dita: sem gate no PR, um defeito só aparece quando já está em `develop`, e
+  # quem descobre é o próximo a integrar. A proteção não some, muda de lugar — passa a depender de
+  # rodar os gates LOCALMENTE antes de promover, no contêiner com o toolchain pinado:
+  #   docker run --rm -v $PWD/theodb_rs:/src theodb-builder:latest bash -c '
+  #     rustup component add clippy rustfmt --toolchain 1.97.0-x86_64-unknown-linux-gnu
+  #     mkdir -p /tmp/b && cp -r /src/. /tmp/b/ && cd /tmp/b
+  #     cargo fmt -- --check && cargo clippy --features pg18 --no-deps -- $(grep -v "^#" .clippy_args | tr "\n" " ")
+  #     cargo pgrx test pg18'
+  # `workflow_dispatch` continua disponível para rodar sob demanda num PR específico quando valer a pena.
+  workflow_dispatch:
   push:
     branches: [develop, main]
     # #211 — NÃO adicione `paths-ignore:` aqui. O GitHub proíbe `paths` e `paths-ignore` no MESMO
@@ -21,13 +35,6 @@ on:
     # O `!**/*.md` é guarda de FUTURO, não economia de hoje: em 2026-07-27 não existe nenhum `.md`
     # sob `theodb_rs/`, mas `theodb_rs/**` engoliria um `theodb_rs/README.md` no dia em que alguém
     # criar um — e recompilar pgrx por causa de um README é exatamente o desperdício que #187 atacava.
-    paths:
-      - 'theodb_rs/**'
-      - '.github/workflows/lint-rust.yml'
-      - '!**/*.md'
-  pull_request:
-    branches: [develop, main]
-    # Mesmo filtro do `push` acima (o `!**/*.md` cobre o PR só-de-CHANGELOG observado no #189).
     paths:
       - 'theodb_rs/**'
       - '.github/workflows/lint-rust.yml'
@@ -48,13 +55,61 @@ concurrency:
 
 jobs:
   lint:
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: runner padrão é grátis e ilimitado, enquanto
+    # o `theodb-do` é pago, único e SERIAL. Medido: este workflow levou de 66 a 120 minutos para um
+    # `cargo fmt --check`, quase tudo fila atrás dos outros nove.
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
       run:
         working-directory: theodb_rs
     steps:
       - uses: actions/checkout@v4
+
+      # 2026-08-20 — runner efêmero não tem o toolchain quente que a máquina paga tinha.
+      # O Dockerfile já ensina o caminho barato: `cargo pgrx init --pg18 "$(which pg_config)"`
+      # usa o pg_config do SISTEMA em vez de compilar PostgreSQL. Reproduzido aqui.
+      - name: PostgreSQL 18 do PGDG (o `pg_config` que o pgrx vai usar)
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+            https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-18 postgresql-server-dev-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+
+      # `~/.cargo/bin` e `~/.pgrx` cacheados juntos: sem isso, cada corrida reinstala o
+      # `cargo-pgrx` (compilação longa) para rodar um `cargo fmt` de segundos.
+      - name: Cache do cargo-pgrx e do pgrx init
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.pgrx
+          key: pgrx-${{ runner.os }}-0.19.0-pg18-${{ hashFiles('theodb_rs/Cargo.lock') }}
+          restore-keys: pgrx-${{ runner.os }}-0.19.0-pg18-
+
+      - name: cargo-pgrx + init (no-op quando o cache acertou)
+        run: |
+          set -euo pipefail
+          command -v cargo-pgrx >/dev/null || cargo install --locked cargo-pgrx --version 0.19.0
+          [ -d "$HOME/.pgrx" ] || cargo pgrx init --pg18 "$(which pg_config)"
+
+      # Verifica AQUI, e não no primeiro passo que precisa deles. A toolchain declara `components`
+      # em `rust-toolchain.toml` desde 2026-08-20, mas quem depende disso deve provar que chegou:
+      # a corrida anterior morreu em `error: 'cargo-fmt' is not installed`, e morreu três passos
+      # depois do ponto onde a causa estava.
+      - name: Os componentes da toolchain chegaram?
+        run: |
+          set -euo pipefail
+          rustup show active-toolchain
+          cargo fmt --version
+          cargo clippy --version
 
       - name: Lockfile drift (cargo metadata --locked)
         run: |

@@ -177,3 +177,19 @@ def test_cli_exit_code_1_when_blocked(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "blocked_task_ids" in result.stdout
     assert "T1.1" in result.stdout
+
+
+def test_assertion_over_a_function_call_is_an_executable_shape(tmp_path: Path) -> None:
+    """`assert add(1, 2) == 3` is as executable as `assert total == 3`.
+
+    The assertion pattern only accepted `[\\w.\\[\\]]` before the operator, so any
+    call expression fell through to "prose only". Found when the shape gate became
+    blocking at the end of the run: a perfectly executable plan was rejected.
+    """
+    plan = tmp_path / "p-plan.md"
+    plan.write_text(
+        "### T1.1 — sum\n#### TDD\nassert add(1, 2) == 3\n", encoding="utf-8"
+    )
+    report = check_tdd_shape(plan)
+    assert report.tasks_with_shape == 1
+    assert report.tasks[0].has_assertion_shape is True

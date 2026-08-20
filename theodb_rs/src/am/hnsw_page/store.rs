@@ -380,7 +380,11 @@ pub(crate) unsafe fn insert_inplace(
         None => return Ok(false),
     };
     // (2) find Z's neighbors in the CURRENT graph, before the slot becomes Z.
-    let neighbors = insert_search_ground(rel, meta, vec, crate::am::build::HNSW_EF_CONSTRUCTION)?;
+    // B-036: o INSERT também tem de usar o `ef_construction` DO ÍNDICE. Com a constante, um índice criado com
+    // `ef_construction=200` degradaria a cada linha inserida depois do build — em silêncio, e sem nada no meta
+    // para denunciar (o `efc` não é persistido). A reloption está na relação, que já temos aberta aqui.
+    let efc = unsafe { crate::am::options::hnsw_ef_construction_from_relation(rel) };
+    let neighbors = insert_search_ground(rel, meta, vec, efc)?;
     // (3) revive the slot as Z (v1 only).
     if !write_reused_element(rel, slot, tid, vec) {
         return Ok(false);

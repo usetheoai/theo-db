@@ -78,7 +78,7 @@ This is the entire point of having an orthogonal jury: agreement = high confiden
 
 The plugin's per-stage hard caps mirror the canonical golden rules:
 
-- `:discover` consults `rules/discover-blueprint-golden-rule.md`.
+- `:discover` consults `rules/discover-plan-golden-rule.md` — the blueprint contract of this ecosystem. (The plugin's own docs name a `discover-blueprint-golden-rule.md`, which exists in other installs and never existed here.)
 - `:plan` consults `rules/plan-confidence-golden-rule.md` (and the **unbreakable** `feedback_never_single_source_evidence` rule that is currently encoded in memory; will be promoted to a hard-cap detector in a follow-up slice).
 - `:implementation` consults `rules/cycle-implement.md` + `rules/code-quality-golden-rule.md`.
 - `:final` consults `rules/cycle-review.md`.

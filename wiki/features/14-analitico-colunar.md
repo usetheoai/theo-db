@@ -24,7 +24,7 @@ Os agregados, `GROUP BY` e `WHERE` vetorizados vêm de um `CustomScan` sobre
 # Uso
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
+CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 
 CREATE TABLE eventos (...) USING theodb_columnar;
 ```

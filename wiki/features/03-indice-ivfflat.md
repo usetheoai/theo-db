@@ -20,7 +20,7 @@ foram removidos no [ADR 0029](/decisions/0029-m70-drop-pgvector.md).
 # Criar o índice
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
+CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 
 CREATE INDEX products_ivfflat_idx
 ON products

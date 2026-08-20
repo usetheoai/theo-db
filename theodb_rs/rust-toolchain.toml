@@ -1,2 +1,12 @@
+# A toolchain é fixada para que CI e máquina local formatem igual — rustfmt muda entre versões.
+#
+# `components` acrescentado em 2026-08-20. Na máquina self-hosted o `rustfmt` e o `clippy` tinham
+# sido instalados à mão, uma vez, e nada no repositório dizia isso. Ao migrar para runner efêmero o
+# `rustup` baixou a toolchain fixada SEM os componentes, e o gate morreu em
+# `error: 'cargo-fmt' is not installed for the toolchain '1.97.0'`.
+#
+# Declarar aqui em vez de num passo de workflow: assim vale para TODO consumidor da toolchain — o
+# CI, o contêiner de build e o desenvolvedor que clonar o repo — em vez de só para quem lembrar.
 [toolchain]
 channel = "1.97.0"
+components = ["rustfmt", "clippy"]

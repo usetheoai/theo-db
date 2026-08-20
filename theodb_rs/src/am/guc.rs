@@ -26,6 +26,25 @@ const MAX_EF_SEARCH: i32 = 1000; // pgvector's hnsw.ef_search ceiling
 
 pub(crate) static EF_SEARCH: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_EF_SEARCH);
 
+// ---- B-034: os nomes do pgvector, para o drop-in valer também no AJUSTE ----
+//
+// O shim já toma o nome `hnsw` para o access method: uma app pgvector faz
+// `CREATE INDEX ... USING hnsw (e vector_l2_ops)` e funciona. Depois ela faz `SET hnsw.ef_search` para
+// ajustar recall — e, ANTES deste bloco, não acontecia nada. Sem erro, sem aviso.
+//
+// A causa, medida em 2026-08-12: o PostgreSQL aceita GUC de prefixo não registrado como PLACEHOLDER.
+// `SET hnsw.ef_search = 200` sucedia, `current_setting` devolvia 200, e
+// `SELECT count(*) FROM pg_settings WHERE name LIKE 'hnsw%'` devolvia ZERO. Ninguém lia.
+//
+// Meia compatibilidade é pior que nenhuma: se o access method faltasse, o erro seria alto e o usuário
+// saberia. Assim ele acreditava ter ajustado o índice e media outra coisa — e a forma da falha é uma
+// curva recall×QPS PLANA, indistinguível de "esse parâmetro não importa neste dataset".
+//
+// Faixas idênticas às dos nomes próprios de propósito (ADR D3 do plano `b034-guc-alias`): aceitar um
+// valor que o motor não honra seria o mesmo defeito noutra forma.
+pub(crate) static ALIAS_EF_SEARCH: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_EF_SEARCH);
+pub(crate) static ALIAS_PROBES: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_PROBES);
+
 /// M51 — `SET theodb_hnsw.over_fetch = N`: for an SBQ index, widen the Hamming-ranked candidate pool by ×N before
 /// the exact f32 rerank, so the true NN survives the approximate ranking (recall recovery, M40). Default 1 (the
 /// `ef_search` pool is reranked as-is); higher trades scan cost for recall. No effect on a v1 f32-only index.
@@ -367,6 +386,29 @@ pub(crate) fn init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+    // B-034 — os aliases pgvector. Registrados como GUC de verdade (não placeholder), com as MESMAS
+    // faixas dos nomes próprios, e portanto visíveis em `pg_settings` — que é como um operador
+    // descobre que um parâmetro existe.
+    GucRegistry::define_int_guc(
+        c"hnsw.ef_search",
+        c"pgvector-compatible alias for theodb_hnsw.ef_search",
+        c"Same knob under the name a pgvector application emits. When theodb_hnsw.ef_search is left at its default, this value is used; otherwise the TheoDB-native name wins.",
+        &ALIAS_EF_SEARCH,
+        MIN_EF_SEARCH,
+        MAX_EF_SEARCH,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_int_guc(
+        c"ivfflat.probes",
+        c"pgvector-compatible alias for theodb_ivfflat.probes",
+        c"Same knob under the name a pgvector application emits. When theodb_ivfflat.probes is left at its default, this value is used; otherwise the TheoDB-native name wins.",
+        &ALIAS_PROBES,
+        MIN_PROBES,
+        MAX_PROBES,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
     GucRegistry::define_int_guc(
         c"theodb_hnsw.over_fetch",
         c"For an SBQ index, widen the Hamming candidate pool by this factor before the exact f32 rerank",
@@ -504,12 +546,39 @@ pub(crate) fn egress_allowlist() -> String {
 
 /// The effective probes for a scan: the GUC value (never below 1). The caller still clamps to the actual list count.
 pub(crate) fn probes() -> usize {
-    PROBES.get().max(MIN_PROBES) as usize
+    resolve_alias(PROBES.get(), DEFAULT_PROBES, ALIAS_PROBES.get()).max(MIN_PROBES) as usize
+}
+
+/// B-034 — a precedência entre o nome próprio e o alias pgvector: **o específico vence quando está fora
+/// do default; caso contrário vale o alias.**
+///
+/// A regra é resolvida na LEITURA, e não por `assign_hook` de escrita, por um motivo de corretude e não
+/// de estilo (ADR D1 do plano `b034-guc-alias`). O pgrx oferece `define_int_guc_with_hooks`, e espelhar o
+/// alias no armazenamento próprio daria a semântica mais intuitiva — "o último `SET` vence". Mas o
+/// PostgreSQL restaura GUCs ao fim de transação e no `RESET`, disparando os hooks, e **a ordem entre duas
+/// variáveis independentes não é definida**: um rollback poderia deixar o valor efetivo vindo do alias
+/// restaurado depois do próprio. Trocar um defeito silencioso por outro, mais raro e mais difícil de
+/// diagnosticar, não é conserto.
+///
+/// A alternativa de detectar "foi setado explicitamente?" foi descartada por medição: o `GucSetting` do
+/// pgrx não expõe a origem do valor, e obtê-la exigiria consultar `pg_settings` via SPI **dentro do
+/// caminho de scan** — caro no lugar mais quente do produto.
+///
+/// **Por que o específico vence, e não o alias:** é a única ordem que não altera o comportamento de quem
+/// já usa o produto. Um usuário atual que sete `theodb_hnsw.ef_search` continua obtendo o que obtinha.
+///
+/// **Aresta conhecida, documentada em vez de escondida:** quem setar o nome próprio EXATAMENTE ao valor
+/// default e o alias a outro valor verá o alias vencer. É patológico — setar ao default equivale a não
+/// setar — e não há como distingui-los sem a origem que a API não dá.
+#[inline]
+fn resolve_alias(native: i32, native_default: i32, alias: i32) -> i32 {
+    if native != native_default { native } else { alias }
 }
 
 /// The effective `ef_search` for a theodb_hnsw scan (never below 1).
 pub(crate) fn ef_search() -> usize {
-    EF_SEARCH.get().max(MIN_EF_SEARCH) as usize
+    resolve_alias(EF_SEARCH.get(), DEFAULT_EF_SEARCH, ALIAS_EF_SEARCH.get()).max(MIN_EF_SEARCH)
+        as usize
 }
 
 /// The effective SBQ `over_fetch` factor for a theodb_hnsw scan (never below 1).
@@ -526,4 +595,123 @@ pub(crate) fn max_scan_tuples() -> usize {
 /// M118: the resume frontier memory ceiling in bytes (`0` = disabled/unbounded).
 pub(crate) fn hnsw_resume_max_bytes() -> usize {
     (HNSW_RESUME_MAX_MB.get().max(0) as usize).saturating_mul(1024 * 1024)
+}
+
+#[cfg(any(test, feature = "pg_test"))]
+#[pgrx::pg_schema]
+mod tests {
+    use pgrx::prelude::*;
+
+    /// Semeia uma tabela com índice `theodb_hnsw` grande o suficiente para que `ef_search` importe.
+    /// Com poucos vetores o grafo é percorrido inteiro e qualquer `ef` acha tudo — o teste passaria
+    /// mesmo com o GUC inerte, que é exatamente o defeito que ele existe para pegar.
+    fn seed_hnsw() {
+        Spi::run(
+            "CREATE TABLE b034h (id int, e vector(8));
+             INSERT INTO b034h
+               SELECT g, (SELECT '['||string_agg(((g*i)%97)::text, ',')||']' FROM generate_series(1,8) i)::vector
+               FROM generate_series(1,3000) g;
+             CREATE INDEX b034h_ix ON b034h USING theodb_hnsw (e theodb_hnsw_l2_ops);
+             SET enable_seqscan = off;",
+        )
+        .unwrap();
+    }
+
+    /// Recall@10 do índice contra a verdade exata (seqscan), para um `ef_search` já configurado.
+    fn recall_at_10() -> f64 {
+        Spi::get_one::<f64>(
+            "WITH q AS (SELECT '[3,6,9,12,15,18,21,24]'::vector AS v),
+                  exato AS (SELECT id FROM b034h, q ORDER BY e <-> v LIMIT 10)
+             SELECT count(*)::float8 / 10.0
+             FROM (SELECT id FROM b034h, q ORDER BY e <-> v LIMIT 10) aprox
+             WHERE aprox.id IN (SELECT id FROM exato)",
+        )
+        .unwrap()
+        .unwrap()
+    }
+
+    /// T1.1 — `SET hnsw.ef_search` (o nome que a app pgvector emite) tem EFEITO.
+    ///
+    /// Assere o VALOR EFETIVO, não que o `SET` foi aceito: o `SET` já era aceito antes desta mudança —
+    /// como placeholder, sem que ninguém lesse. Um teste que checasse `current_setting` passaria com o
+    /// defeito presente.
+    #[pg_test]
+    fn pgvector_ef_search_alias_has_effect() {
+        Spi::run("SET hnsw.ef_search = 200").unwrap();
+        let ef =
+            Spi::get_one::<i32>("SELECT current_setting('hnsw.ef_search')::int").unwrap().unwrap();
+        assert_eq!(ef, 200, "o alias deveria estar registrado como GUC de verdade");
+
+        // O efetivo: com o nome próprio no default, o alias manda.
+        assert_eq!(
+            super::ef_search(),
+            200,
+            "o alias pgvector não teve efeito no valor efetivo do scan"
+        );
+    }
+
+    /// T1.2 — `SET ivfflat.probes` tem efeito.
+    #[pg_test]
+    fn pgvector_probes_alias_has_effect() {
+        Spi::run("SET ivfflat.probes = 42").unwrap();
+        assert_eq!(
+            super::probes(),
+            42,
+            "o alias pgvector não teve efeito no valor efetivo do scan"
+        );
+    }
+
+    /// T1.3 — precedência: o nome específico vence quando está fora do default.
+    #[pg_test]
+    fn alias_precedence_specific_wins() {
+        Spi::run("SET theodb_hnsw.ef_search = 300; SET hnsw.ef_search = 7;").unwrap();
+        assert_eq!(
+            super::ef_search(),
+            300,
+            "o nome próprio, setado fora do default, deveria vencer o alias"
+        );
+
+        Spi::run("SET theodb_ivfflat.probes = 99; SET ivfflat.probes = 3;").unwrap();
+        assert_eq!(super::probes(), 99, "o nome próprio deveria vencer o alias também para probes");
+    }
+
+    /// T1.4 — rede de regressão: o nome próprio sozinho continua funcionando como antes.
+    #[pg_test]
+    fn native_guc_unchanged() {
+        Spi::run("SET theodb_hnsw.ef_search = 123").unwrap();
+        assert_eq!(super::ef_search(), 123);
+        Spi::run("SET theodb_ivfflat.probes = 17").unwrap();
+        assert_eq!(super::probes(), 17);
+    }
+
+    /// T1.5 — os aliases são GUC de verdade, logo VISÍVEIS em `pg_settings`.
+    ///
+    /// É assim que um operador descobre que um parâmetro existe. Antes desta mudança a consulta abaixo
+    /// devolvia 0, medido — o placeholder não aparece no catálogo.
+    #[pg_test]
+    fn alias_gucs_are_registered_in_catalog() {
+        let n = Spi::get_one::<i64>(
+            "SELECT count(*) FROM pg_settings WHERE name IN ('hnsw.ef_search','ivfflat.probes')",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(n, 2, "os aliases deveriam aparecer em pg_settings; obtido {n}");
+    }
+
+    /// T1.1/T1.2 — o efeito END-TO-END: recall cresce com `ef_search` setado pelo NOME PGVECTOR.
+    ///
+    /// Este é o teste que o defeito original não sobreviveria: com o GUC inerte, os dois recalls seriam
+    /// idênticos e a curva sairia plana.
+    #[pg_test]
+    fn pgvector_alias_changes_recall_end_to_end() {
+        seed_hnsw();
+        Spi::run("SET hnsw.ef_search = 1").unwrap();
+        let baixo = recall_at_10();
+        Spi::run("SET hnsw.ef_search = 400").unwrap();
+        let alto = recall_at_10();
+        assert!(
+            alto >= baixo,
+            "recall com ef=400 ({alto}) deveria ser >= com ef=1 ({baixo}) — se forem sempre iguais, o GUC está inerte"
+        );
+    }
 }

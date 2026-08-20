@@ -1,0 +1,149 @@
+{
+  "run_id": "116a7dde4b554db3b2719d7cd101276c",
+  "task_label": "116a7dde4b554db3b2719d7cd101276c",
+  "results": [
+    {
+      "metrics": {
+        "max_load_count": 0,
+        "insert_duration": 24.6568,
+        "optimize_duration": 2.1876,
+        "load_duration": 26.8444,
+        "qps": 1722.5838,
+        "serial_latency_p99": 0.0039,
+        "serial_latency_p95": 0.0034,
+        "recall": 0.8025,
+        "ndcg": 0.6962,
+        "mrr": 0.667,
+        "conc_num_list": [
+          1,
+          5,
+          10,
+          20,
+          30,
+          40,
+          60,
+          80
+        ],
+        "conc_qps_list": [
+          360.8724,
+          1170.7169,
+          1559.2798,
+          1721.9691,
+          1722.5838,
+          1719.6041,
+          1693.8707,
+          1682.8182
+        ],
+        "conc_latency_p99_list": [
+          0.00377026787997238,
+          0.006101021259944446,
+          0.00937247231996025,
+          0.025513250809972302,
+          0.039616725569926535,
+          0.0562224078000099,
+          0.08446526267996432,
+          0.10672493999009015
+        ],
+        "conc_latency_p95_list": [
+          0.00326277440008198,
+          0.005005723600027068,
+          0.008489709400009815,
+          0.019824465600055397,
+          0.02886633849997792,
+          0.04357070700007171,
+          0.0679621633999659,
+          0.08601950835001161
+        ],
+        "conc_latency_avg_list": [
+          0.002767826512877248,
+          0.004263398130962646,
+          0.00638018699684968,
+          0.011548183143731981,
+          0.017334434563843714,
+          0.023100731035251315,
+          0.03504709488040391,
+          0.04680162338513104
+        ],
+        "payload_profile": "ids_only",
+        "payload_estimated_bytes_per_query": 200,
+        "inserted_count": 100000,
+        "insert_rows_per_second": 0.0,
+        "insert_completion_seconds": 0.0,
+        "searchable_after_insert_seconds": 0.0,
+        "indexed_after_searchable_seconds": 0.0,
+        "additional_parameters": {
+          "num_per_batch": 100,
+          "load_concurrency": 0
+        },
+        "st_ideal_insert_duration": 0,
+        "st_search_stage_list": [],
+        "st_search_time_list": [],
+        "st_max_qps_list_list": [],
+        "st_recall_list": [],
+        "st_ndcg_list": [],
+        "st_serial_latency_p99_list": [],
+        "st_serial_latency_p95_list": [],
+        "st_conc_failed_rate_list": [],
+        "st_conc_num_list_list": [],
+        "st_conc_qps_list_list": [],
+        "st_conc_latency_p99_list_list": [],
+        "st_conc_latency_p95_list_list": [],
+        "st_conc_latency_avg_list_list": []
+      },
+      "task_config": {
+        "db": "TheoDB",
+        "db_config": {
+          "db_label": "sem-stemming",
+          "version": "",
+          "note": "",
+          "user_name": "**********",
+          "password": "**********",
+          "host": "127.0.0.1",
+          "port": 55435,
+          "db_name": "theo"
+        },
+        "db_case_config": {
+          "metric_type": "BM25",
+          "create_index_before_load": false,
+          "create_index_after_load": true,
+          "index": "FTS",
+          "k1": null,
+          "b": null
+        },
+        "case_config": {
+          "case_id": 503,
+          "custom_case": {
+            "dataset_with_size_type": "MS MARCO Small (100K documents)",
+            "payload_profile": "ids_only"
+          },
+          "k": 10,
+          "concurrency_search_config": {
+            "num_concurrency": [
+              1,
+              5,
+              10,
+              20,
+              30,
+              40,
+              60,
+              80
+            ],
+            "concurrency_duration": 30,
+            "concurrency_timeout": 3600,
+            "serial_cooldown": 0.0
+          }
+        },
+        "stages": [
+          "drop_old",
+          "load",
+          "search_serial",
+          "search_concurrent"
+        ],
+        "load_concurrency": 0
+      },
+      "label": ":)"
+    }
+  ],
+  "file_fmt": "result_{}_{}_{}.json",
+  "timestamp": 1786579200.0
+}

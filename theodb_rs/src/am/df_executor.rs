@@ -45,10 +45,12 @@ impl Drop for HeldInterrupts {
         // do backend. Só se cura porque o pgrx re-lança o erro e outro `errfinish` zera de novo — o que depende do
         // panic nunca ser capturado. Guardar é grátis e não depende dessa invariante (achado de review; é o mesmo
         // idioma do `lwlock.rs` do pgrx).
+        // `InterruptHoldoffCount` é `volatile uint32` (miscadmin.h) — UNSIGNED, então `saturating_sub` satura
+        // em 0 e é exatamente o `if > 0 { -= 1 }` que estava aqui, sem o `if` que o clippy recusa
+        // (`implicit_saturating_sub`). A verificação do tipo não é cerimônia: sobre um inteiro COM sinal
+        // `0.saturating_sub(1)` daria `-1`, e a mesma sugestão do lint teria mudado o comportamento.
         unsafe {
-            if pg_sys::InterruptHoldoffCount > 0 {
-                pg_sys::InterruptHoldoffCount -= 1;
-            }
+            pg_sys::InterruptHoldoffCount = pg_sys::InterruptHoldoffCount.saturating_sub(1);
         }
     }
 }
@@ -1225,11 +1227,10 @@ impl futures::Stream for ChunkGroupBatchStream {
                 self.done = true;
                 Poll::Ready(None)
             }
-            Ok(Some(cols)) => match build_arrow_from_decoded(&cols)
-                .and_then(|(sc, arrays)| {
-                    RecordBatch::try_new(Arc::new(sc), arrays)
-                        .map_err(|e| format!("df_executor: arrow batch: {e}"))
-                }) {
+            Ok(Some(cols)) => match build_arrow_from_decoded(&cols).and_then(|(sc, arrays)| {
+                RecordBatch::try_new(Arc::new(sc), arrays)
+                    .map_err(|e| format!("df_executor: arrow batch: {e}"))
+            }) {
                 Ok(b) => {
                     // Same instrument as the eager path's `theodb_decode_batch`, so before/after are comparable
                     // by construction. It also PROVES which path ran: `_stream` lines can only come from here,
@@ -1431,8 +1432,14 @@ pub(super) unsafe fn run_columnar_topk(
     // eager path below stays as the fallback for the one case the stream cannot serve (nothing visible), and
     // because a source that yields zero batches is exactly the empty-but-green result the oracles guard against.
     if super::columnar_agg::ENABLE_COLUMNAR_TOPK_STREAM.get()
-        && let Some((part, _varlena_bytes)) =
-            open_streaming_source(rel, &proj_names, predicates, text_predicates, in_predicates, skip)?
+        && let Some((part, _varlena_bytes)) = open_streaming_source(
+            rel,
+            &proj_names,
+            predicates,
+            text_predicates,
+            in_predicates,
+            skip,
+        )?
     {
         // O top-k IGNORA o total de bytes, e a razão é de ESCOPO, não de segurança: o eager daqui materializa a
         // relação inteira do mesmo jeito, então tem o MESMO teto de offsets i32 — o fail-open abaixo pode cair
@@ -1531,10 +1538,10 @@ pub(super) unsafe fn run_columnar_topk(
 unsafe fn run_df_collect_streaming<F>(
     part: Arc<ColumnarPartition>,
     build: F,
-// Devolve o `DataFusionError` **tipado**, não uma `String`. O chamador precisa distinguir "a pool estourou" de
-// "os dados estão corrompidos" / "a consulta foi cancelada" para decidir se o fail-open se aplica, e casar
-// substring de mensagem de erro para isso seria exatamente o que a Regra 8 proíbe (erros explícitos e tipados).
-// A conversão para `String` acontece no chamador, depois da classificação.
+    // Devolve o `DataFusionError` **tipado**, não uma `String`. O chamador precisa distinguir "a pool estourou" de
+    // "os dados estão corrompidos" / "a consulta foi cancelada" para decidir se o fail-open se aplica, e casar
+    // substring de mensagem de erro para isso seria exatamente o que a Regra 8 proíbe (erros explícitos e tipados).
+    // A conversão para `String` acontece no chamador, depois da classificação.
 ) -> Result<Vec<RecordBatch>, DataFusionError>
 where
     F: FnOnce(
@@ -1552,7 +1559,8 @@ where
     // Dimensionar só por `work_mem` fazia um top-k largo com k grande, que o caminho eager servia, falhar com
     // "Resources exhausted" (achado de review). O múltiplo cobre a retenção do TopK sem reintroduzir O(N).
     let pool_bytes = work_mem_bytes.saturating_mul(2) + 64 * 1024 * 1024;
-    let schema = datafusion::physical_plan::streaming::PartitionStream::schema(part.as_ref()).clone();
+    let schema =
+        datafusion::physical_plan::streaming::PartitionStream::schema(part.as_ref()).clone();
     let held = HeldInterrupts::hold();
     // A pool é criada FORA do bloco async e clonada para dentro, para que a MARCA D'ÁGUA possa ser lida depois.
     // Sem isso, o único número instrumentado é o maior batch individual — e a retenção do TopK (que segura cada
@@ -2052,7 +2060,7 @@ mod m169_fail_open_tests {
     //! O RED destes testes não foi escrito no vácuo: é a regressão MEDIDA na corrida de 43 consultas a 100M, em
     //! que q08/q09 saíram de `ok` para `error:XX000` com exatamente a mensagem de spill abaixo. O predicado
     //! anterior só casava `ResourcesExhausted` e portanto não recuava.
-    use super::{stream_failure_is_fail_open, SPILL_CREATE_MARKER};
+    use super::{SPILL_CREATE_MARKER, stream_failure_is_fail_open};
     use datafusion::error::DataFusionError;
 
     /// A mensagem real, copiada da corrida (o `Os { code: 24 }` é `EMFILE`).
@@ -2073,7 +2081,8 @@ mod m169_fail_open_tests {
 
     #[test]
     fn wrapped_spill_failure_is_found_through_context() {
-        let wrapped = DataFusionError::Context("GroupedHashAggregate".into(), Box::new(spill_error()));
+        let wrapped =
+            DataFusionError::Context("GroupedHashAggregate".into(), Box::new(spill_error()));
         assert!(
             stream_failure_is_fail_open(&wrapped, 1_000),
             "find_root() tem de atravessar o Context — casar a variante nua perde o recuo"
@@ -2083,7 +2092,10 @@ mod m169_fail_open_tests {
     #[test]
     fn resources_exhausted_still_authorises_fail_open() {
         let e = DataFusionError::ResourcesExhausted("pool limit".into());
-        assert!(stream_failure_is_fail_open(&e, 1_000), "a classe original não pode ter sido perdida");
+        assert!(
+            stream_failure_is_fail_open(&e, 1_000),
+            "a classe original não pode ter sido perdida"
+        );
     }
 
     #[test]

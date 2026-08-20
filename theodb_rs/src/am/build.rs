@@ -19,21 +19,19 @@ use crate::am::options::{DEFAULT_LISTS, lists_from_relation};
 /// LEAD FORTE p/ o M60: o recall e NAO-MONOTONICO em `ef_search` (melhor no MENOR ef) → o teto e provavelmente um
 /// BUG NO SCAN (`am/hnsw_page.rs` traverse — beam search/heap), comum aos dois builds, e nao a conectividade do
 /// grafo. Investigar o traverse primeiro no M60. Ver `wiki/decisions/0018` + `wiki/benchmarks/m57-sbq-superiority.md`.
-pub(crate) const HNSW_M: usize = 16;
-pub(crate) const HNSW_EF_CONSTRUCTION: usize = 64;
+// B-036: os defaults passam a viver em `am::options` (onde o `add_int_reloption` os declara ao PostgreSQL), e
+// estes aliases existem para que o valor não fique escrito em dois lugares — se divergissem, o `CREATE INDEX`
+// sem `WITH` e o `\d+` do usuário contariam histórias diferentes.
+pub(crate) const HNSW_M: usize = crate::am::options::DEFAULT_HNSW_M as usize;
+pub(crate) const HNSW_EF_CONSTRUCTION: usize =
+    crate::am::options::DEFAULT_HNSW_EF_CONSTRUCTION as usize;
 const BUILD_SEED: u64 = 42;
 
-/// Effective build `ef_construction`, overridable via `THEODB_HNSW_EF_CONSTRUCTION` (env). Default = the const
-/// above, so shipped behavior is unchanged. Purpose: sweep efc for the M60/M71 graph-navigability investigation
-/// (does recall rise monotonically with efc, as a correct HNSW must?) without recompiling — mirrors
-/// `hnsw_parallel::parallel_threshold`. Benchmark-only knob; production uses the default.
-pub(crate) fn hnsw_ef_construction() -> usize {
-    std::env::var("THEODB_HNSW_EF_CONSTRUCTION")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&v| v >= HNSW_M)
-        .unwrap_or(HNSW_EF_CONSTRUCTION)
-}
+// B-036: `hnsw_ef_construction()` — que lia `THEODB_HNSW_EF_CONSTRUCTION` do ambiente do SERVIDOR — saiu daqui.
+// Ela existia porque não havia reloption; agora há, e a reloption é estritamente melhor: é por índice, não por
+// servidor, e alcançável por uma sessão de cliente. Manter as duas seria duas fontes para o mesmo knob, que é
+// exatamente a armadilha de precedência que o B-034 pagou para resolver. As varreduras de efc do M60/M71
+// continuam possíveis — com `WITH (ef_construction = N)`, sem reiniciar nada.
 
 /// Collected during the heap scan (one entry per live, non-NULL-vector heap tuple).
 struct BuildState {
@@ -412,8 +410,8 @@ pub extern "C-unwind" fn ambuild_hnsw(
         // holds the f32 vectors twice — the corpus is freed as it is drained.
         let idx = HnswIndex::build_owned(
             corpus,
-            HNSW_M,
-            hnsw_ef_construction(),
+            unsafe { crate::am::options::hnsw_m_from_relation(indexrel) },
+            unsafe { crate::am::options::hnsw_ef_construction_from_relation(indexrel) },
             metric,
             BUILD_SEED,
             &|| {
@@ -435,7 +433,6 @@ pub extern "C-unwind" fn ambuild_hnsw(
         build_result(ntuples, corpus_len)
     }
 }
-
 
 /// M59 T3.3 — pick the persisted layout for an initial `theodb_hnsw` build from the reloptions: `WITH
 /// (pq_subspaces=M)` (M > 0) trains the anisotropic PQ and packs **v3** (AQ ⊥ SBQ per index, D1); otherwise
@@ -674,7 +671,7 @@ pub(crate) unsafe fn vacuum_rebuild(
 
 /// M35 VACUUM fold for the structured HNSW layout: enumerate every element tuple + pending, drop dead, rebuild the
 /// graph, and rewrite the structured layout in place (folding pending in, dropping dead TIDs). Returns live count.
-unsafe fn vacuum_rebuild_hnsw_structured(
+pub(crate) unsafe fn vacuum_rebuild_hnsw_structured(
     indexrel: pg_sys::Relation,
     dead: &mut dyn FnMut(i64) -> bool,
 ) -> usize {
@@ -697,14 +694,18 @@ unsafe fn vacuum_rebuild_hnsw_structured(
         }
         let live: Vec<(i64, Vec<f32>)> = all.into_iter().filter(|(id, _)| !dead(*id)).collect();
         let live_len = live.len(); // capture before `build_owned` consumes `live` (DoD-4 move, not clone)
-        // HNSW build params are fixed consts (no reloption), so rebuild with them; preserve the metric from meta.
+        // B-036: o fold lê a RELOPTION, não o meta — e a diferença com o `sbq_bits` (que lê o meta) é deliberada.
+        // O `sbq_bits` determina o codebook JÁ GRAVADO nas páginas, então o fold tem de respeitar o que está lá.
+        // O fold do HNSW reconstrói o grafo INTEIRO a partir de `live`, então qualquer `m` produz um grafo novo e
+        // autoconsistente — não há nada no disco para respeitar. É o que dispensa persistir `ef_construction` e o
+        // bump de versão do meta que ele exigiria. Métrica continua vindo do meta (é propriedade do dado).
         // T4.1: the fold's rebuild is also cancellable (a VACUUM of a huge index responds to cancel per batch).
         // M56 DoD-4: `build_owned` MOVES `live` into the graph (no clone) so the compaction fold of a 1M index
         // does not hold the live f32 vectors twice.
         let idx = HnswIndex::build_owned(
             live,
-            HNSW_M,
-            hnsw_ef_construction(),
+            unsafe { crate::am::options::hnsw_m_from_relation(indexrel) },
+            unsafe { crate::am::options::hnsw_ef_construction_from_relation(indexrel) },
             metric,
             BUILD_SEED,
             &|| {
@@ -841,7 +842,15 @@ pub extern "C-unwind" fn ambuildempty(indexrel: pg_sys::Relation) {
 #[pg_guard]
 pub extern "C-unwind" fn ambuildempty_hnsw(indexrel: pg_sys::Relation) {
     let metric = unsafe { resolve_metric(indexrel) }; // M49: empty cosine/ip index persists the right tag (edge #4)
-    let idx = HnswIndex::build(&[], HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED);
+    // O índice vazio também grava um meta, e é ele que o primeiro INSERT vai ler — nascer com o default
+    // enquanto o usuário pediu outro `m` faria o grafo divergir do pedido sem nenhum aviso.
+    let (m, efc) = unsafe {
+        (
+            crate::am::options::hnsw_m_from_relation(indexrel),
+            crate::am::options::hnsw_ef_construction_from_relation(indexrel),
+        )
+    };
+    let idx = HnswIndex::build(&[], m, efc, metric, BUILD_SEED);
     unsafe {
         // M35: an empty structured graph is meta-only (entry_level = -1).
         match crate::am::hnsw_page::pack(&idx) {

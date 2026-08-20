@@ -172,7 +172,13 @@ def _coerce_value(raw: str) -> Any:
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _VALID_ECOSYSTEMS = frozenset({"python", "typescript", "rust", "go"})
-_VALID_FINDING_TYPES = frozenset({"dead_code", "symbol_fab", "orphan_export", "mutation_low"})
+# `architecture` is D5. The detectors in `detectors/_arch.py` have always emitted an
+# `allowlist_key` whose FINDING-TYPE column is literally "architecture" — only this set and
+# `_detector_to_finding_type` below were never updated to match, so every D5 finding resolved
+# to `finding_type == ""`, matched no entry, and was structurally unallowlistable (#343).
+_VALID_FINDING_TYPES = frozenset(
+    {"dead_code", "symbol_fab", "orphan_export", "mutation_low", "architecture"}
+)
 
 
 def load_allowlist(rule_file: Path) -> list[AllowlistEntry]:
@@ -263,6 +269,9 @@ def _detector_to_finding_type(detector: str) -> str:
         "d2_symbol_fab": "symbol_fab",
         "d3_orphan_export": "orphan_export",
         "d4_mutation": "mutation_low",
+        # #343 — the detector side already writes "architecture" into its allowlist_key; this was
+        # the missing half of that agreement.
+        "d5_architecture": "architecture",
     }
     return mapping.get(detector, "")
 

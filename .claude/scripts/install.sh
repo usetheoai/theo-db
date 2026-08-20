@@ -32,15 +32,19 @@ SRC_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # --- args ---
 if [ $# -lt 1 ]; then
-  echo "Usage: bash scripts/install.sh <target-project-dir> [--force]" >&2
+  echo "Usage: bash scripts/install.sh <target-project-dir> [--force|--merge]" >&2
   exit 2
 fi
 
 TARGET="$1"
 FORCE=0
-if [ "${2:-}" = "--force" ]; then
-  FORCE=1
-fi
+MERGE=0
+case "${2:-}" in
+  --force) FORCE=1 ;;
+  --merge) MERGE=1 ;;
+  "") ;;
+  *) echo "ERROR: unknown flag ${2}. Expected --force or --merge." >&2; exit 2 ;;
+esac
 
 if [ ! -d "$TARGET" ]; then
   echo "ERROR: target is not a directory: $TARGET" >&2
@@ -55,8 +59,12 @@ if [ "$TARGET" = "$SRC_DIR" ]; then
   exit 2
 fi
 
-if [ -d "$ECO" ] && [ "$FORCE" -ne 1 ]; then
-  echo "ERROR: $ECO already exists. Use --force to overwrite (existing knowledge-base/ contents will be preserved if also present)." >&2
+if [ -d "$ECO" ] && [ "$FORCE" -ne 1 ] && [ "$MERGE" -ne 1 ]; then
+  echo "ERROR: $ECO already exists." >&2
+  echo "  --merge  add the kit's files, delete nothing. Use this when the target has a .claude/ of" >&2
+  echo "           its own (project skills, project agents) that must survive." >&2
+  echo "  --force  replace skills/rules/hooks/commands/scripts/agents wholesale. Snapshots first" >&2
+  echo "           and names what it overwrote, but anything the source does not have is DELETED." >&2
   exit 2
 fi
 
@@ -64,13 +72,56 @@ echo "==> Installing Squad ecosystem"
 echo "    source: $SRC_DIR"
 echo "    target: $ECO"
 
+# --- snapshot what the project owns, before overwriting it ---
+# `rules/` and `agents/` are exactly where a project's own configuration lives: the routing
+# table, its domain specialists, and every gate the "Next steps" below tells you to edit
+# (code-quality-languages.txt, live-target.txt, acceptance-target.txt, the allow-lists).
+# `--force` overwrote all of it silently. Measured: a `typescript | ... | ENABLED` line and a
+# live-target block added to a fresh install were both gone after one re-run, with no message.
+#
+# In a repo that versions `.claude/` that is recoverable with `git restore`. TheoCode does not
+# version it — the kit is a maintainer's tool, not product code — so silent was also permanent.
+# The fix is not to merge (guessing which side of a config wins is how you get it wrong): it is
+# to make the overwrite recoverable and loud. For an upgrade that must NOT clobber, use
+# `patch_install.sh`, which copies a manifest and leaves agents/ and settings.json alone.
+BACKUP_DIR=""
+if [ -d "$ECO" ]; then
+  BACKUP_DIR="$ECO/.install-backups/$(date +%Y%m%dT%H%M%S)"
+  mkdir -p "$BACKUP_DIR"
+  for item in rules agents; do
+    [ -d "$ECO/$item" ] && cp -r "$ECO/$item" "$BACKUP_DIR/$item"
+  done
+  echo "==> Snapshot of the previous rules/ and agents/: $BACKUP_DIR"
+fi
+
 # --- copy ecosystem code ---
+# Two modes, because a target with a `.claude/` of its own has no correct answer in one of them.
+# Measured on `theo-data-cells`: 598 files under `skills/` — 5 of the kit's, 10 the project wrote
+# (`architecture-debate-table`, `placement-algorithms`, `quota-isolation`, …) — plus 13 named
+# architect agents and their memory. The `rm -rf` below would have deleted every one of them, and
+# a snapshot in `.install-backups/` is a consolation prize, not a correct install.
 mkdir -p "$ECO"
-for item in skills rules hooks commands scripts agents; do
-  echo "==> Copying $item/"
-  rm -rf "$ECO/$item"
-  cp -r "$SRC_DIR/$item" "$ECO/$item"
+for item in skills rules hooks commands scripts; do
+  if [ "$MERGE" -eq 1 ]; then
+    echo "==> Merging $item/ (adding, deleting nothing)"
+    mkdir -p "$ECO/$item"
+    cp -r "$SRC_DIR/$item/." "$ECO/$item/"
+  else
+    echo "==> Copying $item/"
+    rm -rf "$ECO/$item"
+    cp -r "$SRC_DIR/$item" "$ECO/$item"
+  fi
 done
+
+# agents/ is copied FILE BY FILE, not wholesale. This repo dogfoods its own cycles, and
+# `/implement` and `/review` write their per-run agent definitions into subdirectories here
+# (`implement-slice-*/`, `review-*/`). Those are THIS repo's audit trail, not template content —
+# and `cp -r` shipped two of them, dated May 2026, into every consumer install. The header above
+# already promises to skip audit trails; this is what keeping that promise looks like.
+echo "==> Copying agents/ (specialists only — per-run artifacts stay behind)"
+[ "$MERGE" -eq 1 ] || rm -rf "$ECO/agents"
+mkdir -p "$ECO/agents"
+find "$SRC_DIR/agents" -maxdepth 1 -type f -name '*.md' -exec cp {} "$ECO/agents/" \;
 
 # Top-level docs and manifest
 for f in plugin.json HOW-TO-USE.md README.md .active_plan.example; do
@@ -82,8 +133,16 @@ if [ ! -f "$SRC_DIR/settings.plugin.json" ]; then
   echo "ERROR: $SRC_DIR/settings.plugin.json missing — required for plugin install layout." >&2
   exit 1
 fi
-cp "$SRC_DIR/settings.plugin.json" "$ECO/settings.json"
-echo "==> settings.json written (plugin install variant)"
+if [ "$MERGE" -eq 1 ] && [ -f "$ECO/settings.json" ]; then
+  # It wires this project's hooks. Replacing it is the one thing a merge must never do — a
+  # settings.json is the most project-specific file in the tree, and losing it costs more than
+  # every skill combined.
+  cp "$SRC_DIR/settings.plugin.json" "$ECO/settings.json.kit-reference"
+  echo "==> settings.json KEPT (yours). The kit's is at settings.json.kit-reference — diff it in."
+else
+  cp "$SRC_DIR/settings.plugin.json" "$ECO/settings.json"
+  echo "==> settings.json written (plugin install variant)"
+fi
 
 # --- knowledge-base scaffold (empty, idempotent) ---
 # Mirrors the SEMANTIC structure of the source's knowledge-base/ — every
@@ -129,13 +188,46 @@ fi
 # resolve and the specialist behind it would be missing.
 
 
+# --- What the overwrite actually took ---
+# A snapshot nobody is told about is a snapshot nobody uses. Naming the files that CHANGED (not
+# every file, which would be noise) is what turns a silent clobber into a diff someone can act on.
+if [ -n "$BACKUP_DIR" ]; then
+  CLOBBERED=$(
+    cd "$BACKUP_DIR" && find . -type f | while read -r f; do
+      cmp -s "$f" "$ECO/${f#./}" || echo "  ${f#./}"
+    done
+  )
+  if [ -n "$CLOBBERED" ]; then
+    echo ""
+    # "or REMOVED" is not hedging: a specialist the source repo does not have — which is every
+    # specialist a consumer writes for its own domains — is not overwritten, it is deleted by the
+    # `rm -rf` above. Calling that "overwritten" would understate what just happened.
+    echo "==> These files were OVERWRITTEN or REMOVED (they differed from the source):"
+    echo "$CLOBBERED"
+    echo ""
+    echo "    Your previous copies: $BACKUP_DIR"
+    echo "    Nothing was merged — diff them and re-apply what is yours. Project config lives in"
+    echo "    rules/*.txt, the routing table in rules/cycle-backlog.md, and agents/*.md."
+    echo "    To upgrade WITHOUT clobbering next time, use patch_install.sh instead."
+  fi
+fi
+
 # --- Validation ---
-echo "==> Validating install"
-python3 "$ECO/scripts/check_xrefs.py" --strict > /dev/null 2>&1 \
+# Run FROM THE TARGET. test_e2e_smoke.py resolves the ecosystem from the CWD, and the normal way
+# to invoke this script is `cd squad && bash scripts/install.sh <target>` — so it was validating
+# the source repo and printing OK for the installation it never opened. Measured: with a routed
+# specialist and a cycle rule deleted from a fresh install, it answered
+# `ecosystem: <workspace>/squad` / `ALL CHECKS PASSED` / exit 0. A check that cannot
+# fail is worse than no check: it puts a green line next to a broken install.
+#
+# check_xrefs.py resolves from its own path and caught the same corruption (exit 1). Two lines
+# printed the same word for two different amounts of verification.
+echo "==> Validating install (from the target, not from here)"
+( cd "$TARGET" && python3 .claude/scripts/check_xrefs.py --strict > /dev/null 2>&1 ) \
   && echo "    check_xrefs.py: OK" \
   || { echo "    check_xrefs.py: FAIL (re-run manually)"; }
 
-python3 "$ECO/scripts/test_e2e_smoke.py" > /dev/null 2>&1 \
+( cd "$TARGET" && python3 .claude/scripts/test_e2e_smoke.py > /dev/null 2>&1 ) \
   && echo "    test_e2e_smoke.py: OK" \
   || { echo "    test_e2e_smoke.py: FAIL (re-run manually)"; }
 
@@ -148,18 +240,24 @@ Next steps for the target project:
   1. (optional) Add a CLAUDE.md at the project root pointing to .claude/ and
      listing project-specific stack/conventions. Hooks read it on SessionStart.
 
-  2. Configure project-specific gates (defaults are no-op until set):
+  2. Derive the domain routing table FOR THIS PROJECT (it ships with the source
+     ecosystem's, and gate G1 refuses every item until this runs):
+       python3 .claude/skills/backlog-init/scripts/detect_domains.py --root . \
+         --write .claude/rules/cycle-backlog.md
+     Then write the specialist file(s) it names under .claude/agents/.
+
+  3. Configure project-specific gates (defaults are no-op until set):
        .claude/rules/code-quality-languages.txt    # uncomment languages you ship
        .claude/rules/discover-web-allowlist.txt    # domains for /discover-execute
        .claude/rules/code-quality-thresholds.txt   # per-project overrides
        .claude/rules/deps-audit-allowlist.txt      # CVE exemptions (with sunset)
 
-  3. Verify ralph-loop plugin is installed (required by /implement, /discover-execute,
+  4. Verify ralph-loop plugin is installed (required by /implement, /discover-execute,
      /plan-improve):
        jq '.enabledPlugins' ~/.claude/settings.json | grep ralph-loop
 
-  4. Open the project in Claude Code. The settings.json wires hooks; skills/
+  5. Open the project in Claude Code. The settings.json wires hooks; skills/
      and commands/ are auto-discovered.
 
-  5. First run: /to-plan "{one-sentence feature}"  OR  /grill-me {topic}
+  6. First run: /to-plan "{one-sentence feature}"  OR  /grill-me {topic}
 EOF

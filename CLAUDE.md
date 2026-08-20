@@ -109,7 +109,18 @@ buscar **superioridade de performance no pilar vetorial comprovada por benchmark
 5. **Performance é claim, não opinião.** Nenhuma afirmação de performance ("Nx mais rápido")
    sem benchmark reproduzível e publicado em `wiki/benchmarks/` (`../.claude/rules/public-copy.md`).
    Metas de design são marcadas como metas, não como fatos.
-6. **100% wire-compatible com PostgreSQL é gate**, não feature opcional.
+6. **100% wire-compatible com PostgreSQL é gate**, não feature opcional. **Mas compatibilidade de
+   PROTOCOLO não é compatibilidade de ECOSSISTEMA, e a diferença é medida, nunca deduzida.** O TheoDB *é*
+   PostgreSQL 18, então driver e aplicação falam com ele sem mudança — isso é dedutível. O que **não** é:
+   como ele se comporta atrás de um pooler, de um proxy, de um replicador lógico ou de um agendador. Essas
+   peças interagem com **estado de sessão**, e o TheoDB carrega bastante: **42 GUCs** (o ajuste de busca é
+   `SET theodb_hnsw.ef_search`) e **sete blocos por backend** (`SCAN_PAGES_READ`/`SCAN_CANDIDATES` em
+   `am/autotune.rs`, `BREAKERS`, `CSR_CACHE`, `AI_CALLS`, `WRITE_STATES`, o `CACHE` do lexical).
+
+   Antes de afirmar que uma ferramenta do ecossistema "funciona": **rode-a**. Até rodar, a frase honesta é
+   "não medido", e ela vai para o README com o número do item. Foi assim que a pergunta do owner sobre
+   PgBouncer (2026-08-13) virou [[B-055]] em vez de um "sim" — e a leitura do código já mostrou que sob
+   *transaction pooling* o `ef_search` precisa de `SET LOCAL`, o que "funcionam sem mudança" negava.
 7. **Honestidade extrema (Regra 3).** Diga quando algo é incerto, quando um trade-off existe
    (ex.: nosso columnar/lakehouse é own-code disk/Parquet — DataFusion/Arrow, sem DuckDB desde o M143 —, não
    in-memory-auto como o AlloyDB — D2), e quando uma técnica ainda não foi validada.

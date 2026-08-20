@@ -47,3 +47,8 @@
 # Orchestrator
 # orchestrator.no_network_disables_d2 = true
 # orchestrator.detector_timeout_seconds = 300
+
+# Coverage gate (/implement final validation — skills/implement/scripts/coverage_gate.py)
+# Floor for TOTAL line coverage, read from the project's coverage report.
+# Unset = 80. The report says which source the number came from (cli/project/default).
+# coverage.min_percent = 80

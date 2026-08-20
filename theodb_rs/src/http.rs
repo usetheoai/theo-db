@@ -312,10 +312,17 @@ mod tests {
     #[pg_test]
     fn m104_breaker_success_closes() {
         let ep = "http://127.0.0.1:1/close";
+        // B-016: as K falhas passam a ser registradas DIRETO na máquina de estados, em vez de saírem de
+        // `post_json` contra loopback. O caminho antigo parou de funcionar quando a guarda de egress passou a
+        // recusar 127.0.0.1 — e ela recusa ANTES de tentar conectar, então aquilo nunca chegava a ser falha de
+        // endpoint e o disjuntor, corretamente, não abria. O teste reprovava por o produto estar CERTO.
+        //
+        // Registrar direto não afrouxa: o comentário acima já declara a intenção de "assert the state-machine
+        // directly", e a segunda metade do teste sempre usou `breaker_record`. Agora as duas metades usam a
+        // mesma porta, o teste é hermético (zero rede) e continua provando o que promete — K falhas abrem, um
+        // sucesso fecha. O caminho de rede vive no teste vizinho, que mede o fail-fast do disjuntor aberto.
         for _ in 0..BREAKER_K {
-            PgTryBuilder::new(|| post_json("bt", ep, "{}".to_string(), None))
-                .catch_others(|_| Value::Null)
-                .execute();
+            breaker_record(ep, false);
         }
         assert!(breaker_is_open(ep), "open after K failures");
         breaker_record(ep, true); // a success (e.g. after open_ms half-open probe) closes + resets

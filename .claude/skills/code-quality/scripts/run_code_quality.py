@@ -222,8 +222,16 @@ def main(argv: list[str] | None = None) -> int:
         languages_audited.append(language)
 
         # D1 — dead code
+        # The dead-code CLIs resolve their project from the cwd, and the manifest marker is a
+        # repo-relative path — so a crate at `theodb_rs/Cargo.toml` or a package under `web/` must
+        # send the detector to the manifest's directory. Passing repo_root made cargo-udeps exit
+        # with "could not find `Cargo.toml`", which the detector honestly reported as
+        # `auditor_unavailable_cargo-udeps` — a soft cap blocking the cycle over a path assumption
+        # rather than over the code (measured on theo-db 2026-07-23, usetheoai/theo-db#175).
+        # Collapses to repo_root when the manifest sits at the root, which is the common case.
+        manifest_dir = (repo_root / manifest_marker).parent
         d1_findings, d1_crash = _safe_call(
-            "d1", detector.detect_dead_code, repo_root, language=language
+            "d1", detector.detect_dead_code, manifest_dir, language=language
         )
         if d1_crash:
             findings.append(d1_crash)
@@ -250,6 +258,16 @@ def main(argv: list[str] | None = None) -> int:
             if d2_crash:
                 findings.append(d2_crash)
             findings.extend(d2_findings)
+
+        # D5 — architecture rules the REPO declared, plus the meta-gate that they can still fire.
+        # Runs against the manifest's directory for the same reason D1 does: the linters resolve
+        # their project from the cwd.
+        d5_findings, d5_crash = _safe_call(
+            "d5", detector.detect_architecture_violations, manifest_dir, language=language
+        )
+        if d5_crash:
+            findings.append(d5_crash)
+        findings.extend(d5_findings)
 
     # Apply allowlist (downgrade severities by 1 level when ACTIVE entry matches)
     findings = _apply_allowlist(findings, allowlist, repo_root)
@@ -295,6 +313,29 @@ def _emit_and_exit(
     languages_skipped: dict[str, str] | None = None,
 ) -> int:
     verdict, stable_ids = compute_verdict(findings)
+
+    # B-084 / B-092 — an audit that ran zero detectors is not a clean audit.
+    #
+    # Before this check, an empty or misconfigured `code-quality-languages.txt` — or a config whose
+    # every ENABLED language was skipped for a missing manifest — produced `findings == []`, and
+    # `compute_verdict([])` reports PASS. That PASS is consumed as a HARD gate by `cycle-review.md`
+    # (which admits on PASS / PASS_WITH_CAVEATS) and by `skills/implement/scripts/run_validation.py`
+    # (which fails on FAIL_HARD / INVALID). Both were reading a constant.
+    #
+    # This is the umbrella defect B-084 names, in the gate that surfaced it: the gate reports on the
+    # set it managed to see, and nothing verified that set was the right one — or, here, that it was
+    # non-empty at all.
+    #
+    # It does NOT close B-060. That item is "audits TypeScript only, so 220 Python files pass a gate
+    # that never looked at them": the gate looked at SOMETHING, just not at Python. This fires only
+    # when it looked at nothing. B-060's fix is enabling `python` in the languages file; this guard
+    # is what stops that configuration regressing silently to a PASS afterwards.
+    if verdict == "PASS" and not languages_audited:
+        verdict = "INVALID"
+        stable_ids = list(stable_ids)
+        if "no_languages_audited" not in stable_ids:
+            stable_ids.append("no_languages_audited")
+
     summary = emit_json_summary(findings, verdict, stable_ids)
     summary["languages_audited"] = languages_audited or []
     summary["languages_skipped"] = list((languages_skipped or {}).keys())
@@ -347,7 +388,7 @@ def _write_markdown_report(findings: list[Finding], summary: dict, audit_path: P
             rows.append(f"| `{f.file_path}` | `{f.symbol_or_line}` | {f.severity} | {msg} |")
         return "\n".join(rows)
 
-    by_detector: dict[str, list[Finding]] = {"d1_dead_code": [], "d2_symbol_fab": [], "d3_orphan_export": [], "d4_mutation": []}
+    by_detector: dict[str, list[Finding]] = {"d1_dead_code": [], "d2_symbol_fab": [], "d3_orphan_export": [], "d4_mutation": [], "d5_architecture": []}
     for f in findings:
         by_detector.setdefault(f.detector, []).append(f)
 
@@ -378,6 +419,10 @@ def _write_markdown_report(findings: list[Finding], summary: dict, audit_path: P
 
 ### D4 — Mutation testing
 {_table(by_detector['d4_mutation'])}
+
+### D5 — architecture
+
+{_table(by_detector['d5_architecture'])}
 
 ## Related
 

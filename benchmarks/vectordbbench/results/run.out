@@ -1,0 +1,10 @@
+== gate 1: mesma versão de PostgreSQL dos dois lados ==
+   theodb=180004  pgvector=180004
+== pré-voo: as portas publicadas aceitam TCP? ==
+   127.0.0.1:55435 ok
+   127.0.0.1:55436 ok
+== corrida: theodb-pg18 ==
+   ok: theodb-pg18
+== corrida: pgvector-pg18 ==
+   ok: pgvector-pg18
+== as duas corridas completaram. Resultados em /root/b035/results ==

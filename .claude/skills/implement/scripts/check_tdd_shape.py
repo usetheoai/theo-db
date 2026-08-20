@@ -44,6 +44,9 @@ SHAPE_ASSERTION_PATTERNS = (
     r"\bassert(?:Equals?|True|False|Raises|That|In|NotEqual|NotNull|Null|Throws)\s*\(",
     # `assert X (op) Y` where X may be dotted (response.body, result.status_code)
     r"\bassert\s+[\w.\[\]]+\s*(?:==|!=|<=|>=|<|>|\bin\b|\bis\b)",
+    # `assert f(args) (op) Y` — a call expression is as executable as a name, and
+    # rejecting it made a valid plan look like prose once this gate became blocking.
+    r"\bassert\s+[\w.]+\([^)\n]*\)\s*(?:==|!=|<=|>=|<|>)",
     r"\bexpect\s*\([^)]+\)\s*\.\s*(?:to|toBe|toEqual|toMatch|toHaveBeenCalled)",
     # "X should equal/raise/throw Y" — RSpec/Chai style — must name the expected value
     # (excludes vibe phrases like "tests should be green" by requiring object after verb)

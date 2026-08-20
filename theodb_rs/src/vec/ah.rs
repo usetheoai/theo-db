@@ -113,9 +113,13 @@ pub(crate) fn build_lut16(query: &[f32], q: &AqQuantizer) -> Result<Lut16, Strin
 // groups reproduce the full dot (up to the int8 requant). REUSES `ah_score_block` unchanged (it is LUT-agnostic).
 // ------------------------------------------------------------------------------------------------------------
 
-/// Build the per-query sign LUT for the FastScan 1-bit estimate. `m = ⌈dim/4⌉` groups of ≤4 sign-dims (the last
-/// group may be partial — no `dim % 4 == 0` requirement, so any dim is layout-compatible; `⌈⌈dim/4⌉/2⌉ = ⌈dim/8⌉`
-/// keeps `row_bytes` unchanged). Eligibility (D5, gated by the scan caller): `m ≤ 258` (int16-accumulator-safe,
+// B-026 — doc comment ÓRFÃO removido daqui. Ele documentava um "per-query sign LUT for the FastScan 1-bit
+// estimate"; nenhuma função com esse nome existe no crate (verificado por grep antes de apagar). A função
+// foi removida e o comentário ficou pendurado sobre `nibble`, que tem o seu próprio — e a última frase
+// estava TRUNCADA no meio ("int16-accumulator-safe,"), o que é a assinatura de um corte parcial.
+//
+// Mesma classe do resíduo em `options.rs`: uma remoção que deixou rastro. Aqui o custo era só o gate de
+// clippy (`empty_line_after_doc_comment`); lá era um null-deref latente.
 
 /// The 4-bit code index of subspace `i` from packed code bytes (even → low nibble, odd → high nibble). Mirrors
 /// `AqQuantizer`'s packing exactly so a code encoded there scores here.

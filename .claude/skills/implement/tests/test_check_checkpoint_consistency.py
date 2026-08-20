@@ -120,8 +120,48 @@ def test_not_yet_committed_task_is_not_flagged(tmp_path: Path) -> None:
     assert report.findings == ()
 
 
-def test_empty_progress_no_commits_is_pass(tmp_path: Path) -> None:
+def test_empty_progress_against_a_non_empty_plan_fails(tmp_path: Path) -> None:
+    """This test used to assert PASS, and that assertion WAS the bypass.
+
+    A plan declaring T1.1 with an empty checkpoint is not a neutral state: both call sites run
+    after the work was supposed to happen — `mini_review` at a phase boundary (that phase's
+    tasks must be done) and `run_validation` at the final gate (all of them must be). There is
+    no invocation where "the plan declares work and the checkpoint accounts for none of it" is
+    a pass, so PASS here encoded exactly the omission the gate exists to catch.
+
+    Measured before the fix: a plan with T1.1/T1.2/T1.3 and a checkpoint holding the first two
+    exited 0 on both this gate and `check_phase_completeness`, while the same T1.3 recorded as
+    `pending` was caught HIGH. Omission was cheaper than admission.
+    """
     repo = _repo(tmp_path)
     _commit(repo, "README.md", "# hi\n", "docs: init")  # unrelated, no task id
     report = check_checkpoint_consistency({"tasks": []}, repo, ["T1.1"])
-    assert report.status == "PASS"
+    assert report.status == "FAIL"
+    assert [f.code for f in report.findings] == ["plan_task_absent_from_progress"]
+
+
+def test_an_empty_plan_still_passes(tmp_path: Path) -> None:
+    """The refusal must not swallow the genuinely-empty case: no declared tasks, nothing owed."""
+    repo = _repo(tmp_path)
+    _commit(repo, "README.md", "# hi\n", "docs: init")
+    assert check_checkpoint_consistency({"tasks": []}, repo, []).status == "PASS"
+
+
+def test_a_task_absent_from_the_checkpoint_is_reported_once(tmp_path: Path) -> None:
+    """The inventory check defers to the backward check when the task IS in git.
+
+    "Committed but unrecorded" is strictly more informative than "absent", and reporting both
+    would double-count one problem — inflating the finding count, which is how a report stops
+    being read.
+    """
+    repo = _repo(tmp_path)
+    sha1 = _commit(repo, "src/a.py", "x = 1\n", "feat: a\n\nT1.1: foo")
+    _commit(repo, "src/b.py", "y = 2\n", "feat: b\n\nT1.2: bar")
+    progress = {"tasks": [{"id": "T1.1", "phase": "1", "status": "committed", "commit_sha": sha1}]}
+
+    # T1.2 is in git but not in the checkpoint; T1.3 is in neither.
+    report = check_checkpoint_consistency(progress, repo, ["T1.1", "T1.2", "T1.3"])
+    codes = sorted(f.code for f in report.findings)
+    assert codes == ["plan_task_absent_from_progress", "task_committed_in_git_not_in_progress"]
+    absent = [f for f in report.findings if f.code == "plan_task_absent_from_progress"]
+    assert "T1.3" in absent[0].message and "T1.2" not in absent[0].message

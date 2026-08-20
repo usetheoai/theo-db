@@ -53,5 +53,32 @@ síncrona por linha das funções de IA
 [ADR 0024](/decisions/0024-m65-ai-rerank-cross-encoder.md) diverge deliberadamente de um nome de função
 para evitar colisão interna.
 
+# O Omni, medido — 2026-08-17
+
+Até 2026-08-17 este conceito descrevia o AlloyDB por documentação. O
+[AlloyDB Omni](https://cloud.google.com/alloydb/omni) foi então executado e medido no
+[B-057](/benchmarks/b057-scann-am-headtohead.md), e o que se aprendeu não estava na documentação.
+
+**O Omni é query layer, não o serviço gerenciado.** Planner, o AM `scann` e o engine colunar sobre
+armazenamento PostgreSQL comum. **Não** tem storage desagregado, read pool nem failover gerenciado —
+declarar essas capacidades numa corrida mediria um produto que não está rodando.
+
+**A imagem publicada serve PostgreSQL 17.9** enquanto o TheoDB é 18.6, então uma corrida cruza uma
+major. A tag diz `latest` e não diz nada; a versão vai ao artefato **lida do servidor**.
+
+**Nada vem instalado.** `alloydb_scann` 0.1.4 é criado por `CREATE EXTENSION … CASCADE`, que traz
+`vector 0.8.2.google-1` — um **fork do pgvector**. O `google_columnar_engine` 1.0 vem instalado e
+pré-carregado, mas `enabled = off` com `context = postmaster`: ligar exige `ALTER SYSTEM` e **restart**.
+
+**Os opclasses do `scann` são `cosine`, `dot_product` e `l2`** — nenhum casa com a convenção
+`vector_*_ops` do pgvector, que a mesma instalação também oferece.
+
+**O engine colunar tem quatro estados distinguíveis**, e três respondem consultas corretamente caindo
+para heap em silêncio: desligado (o default); ligado e não populado; **ligado, registrado e com o store
+vazio** — `g_columnar_columns` reporta 4 colunas enquanto `Memory Used = 0 MB`, porque o refresh falha
+por memória compartilhada num contêiner Docker default; e ligado, populado, com
+`Parallel Custom Scan (columnar scan)` no plano. Ver
+[o instrumento reporta o pedido](/guides/instrumento-reporta-o-pedido.md).
+
 [^alloydb-site]: AlloyDB, documentação oficial do Google Cloud
 [^recalled]: Conhecimento do produtor, não verificado contra fonte nesta redação

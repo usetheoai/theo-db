@@ -57,7 +57,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # - skill-creator: standalone skill-authoring tool (the official Anthropic skill-creator);
 #   invoked on demand to create/improve any skill at skills/{purpose}/. Deliberately decoupled
 #   from every cycle (replaced the retired skill-writer/validator/register discover tail).
-AUXILIARY_SKILLS = {"ast-grep", "deck", "marp-slide", "excalidraw", "dogfood", "backlog-init", "backlog-review", "cycle-goal", "plan-help", "quality-init", "skill-creator", "frontend-design", "cap-theorem-specialist", "backpressure-specialist", "resilience-specialist"}
+AUXILIARY_SKILLS = {"ast-grep", "deck", "marp-slide", "excalidraw", "dogfood", "backlog-init", "backlog-review", "cycle-goal", "plan-help", "quality-init", "skill-creator", "frontend-design", "cap-theorem-specialist", "backpressure-specialist", "resilience-specialist", "arch-check"}
 
 
 def _is_auto_generated(skill: str) -> bool:
@@ -79,6 +79,10 @@ def _is_auto_generated(skill: str) -> bool:
 LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 BACKTICK_PATH_RE = re.compile(r"`(\.?[a-zA-Z0-9_./\-]+\.(?:md|py|sh|json|txt|yml|yaml))`")
 CYCLE_REF_RE = re.compile(r"`?cycle-([a-z]+)`?")
+# Trechos entre crases — onde uma citação a um cycle é uma referência, não prosa.
+BACKTICK_SPAN_RE = re.compile(r"`([^`\n]+)`")
+# `cycle-<nome>` dentro de um trecho de código, com o sufixo .md opcional.
+CYCLE_NAME_RE = re.compile(r"\bcycle-([a-z][a-z0-9]*(?:-[a-z0-9]+)*)")
 SKILL_REF_RE = re.compile(r"`?(?:\.claude/)?skills/([a-z0-9\-]+)/SKILL\.md`?")
 # Detect rules references in SKILL bodies and Python scripts.
 # Examples matched:
@@ -310,12 +314,56 @@ def validate_xrefs(ecosystem_dir: Path, strict: bool = False) -> dict[str, Any]:
     for skill_md in (ecosystem_dir / "skills").rglob("SKILL.md"):
         if skill_md.is_file():
             _scan_for_rule_refs(skill_md)
+    # Uma regra citando outra regra era o ponto cego: o scan cobria skills e
+    # scripts e pulava `rules/` inteiro, que é onde as âncoras normativas moram.
+    for rule_md in rules_dir.glob("*.md") if rules_dir.exists() else []:
+        if rule_md.is_file():
+            _scan_for_rule_refs(rule_md)
     for py in (ecosystem_dir / "skills").rglob("*.py"):
         if py.is_file() and "__pycache__" not in py.parts:
             _scan_for_rule_refs(py)
     for py in (ecosystem_dir / "scripts").rglob("*.py"):
         if py.is_file() and "__pycache__" not in py.parts:
             _scan_for_rule_refs(py)
+
+    # Check 8: `cycle-<nome>` citado em código/regra tem de resolver para um
+    # cycle rule (`rules/cycle-<nome>.md`) ou para uma skill (`skills/cycle-<nome>/`).
+    # Motivo: `rules/cycle-acceptance.md` e `rules/cycle-release.md` ancoravam o
+    # single-flip invariant em "cycle-roadmap § Hard gates" DEPOIS que o
+    # cycle-roadmap virou cycle-maintenance. Nenhum check via: o Check 7 casa
+    # caminhos do tipo rules/<arquivo>.md, e uma citação por nome não é um caminho.
+    # Só conta o que está entre crases — texto solto ("a cycle-level decision")
+    # produziria ruído sem nomear nada.
+    # Existência em disco, não a lista de cycles: `cycle-rule-schema.md` é meta-
+    # documentação e fica FORA de `cycle_rules` de propósito — mas citá-la é
+    # legítimo, o arquivo está lá.
+    cycle_skill_names = {s for s in existing_skills if s.startswith("cycle-")}
+
+    def _scan_for_cycle_refs(path: Path) -> None:
+        try:
+            content = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError):
+            return
+        for code_span in BACKTICK_SPAN_RE.findall(content):
+            for name in CYCLE_NAME_RE.findall(code_span):
+                cycle_id = f"cycle-{name}"
+                if (rules_dir / f"{cycle_id}.md").exists() or cycle_id in cycle_skill_names:
+                    continue
+                findings.append({
+                    "severity": "FAIL",
+                    "check": "cycle_reference_resolves",
+                    "source": _rel(path),
+                    "broken_ref": cycle_id,
+                    "message": f"{_rel(path)} references `{cycle_id}` — no rules/{cycle_id}.md "
+                               f"and no skills/{cycle_id}/ exists",
+                })
+
+    for rule_md in rules_dir.glob("*.md") if rules_dir.exists() else []:
+        if rule_md.is_file():
+            _scan_for_cycle_refs(rule_md)
+    for skill_md in (ecosystem_dir / "skills").rglob("SKILL.md"):
+        if skill_md.is_file():
+            _scan_for_cycle_refs(skill_md)
 
     # Check 4: orphan skills (not in any cycle, not auxiliary)
     skills_in_cycles: set[str] = set()

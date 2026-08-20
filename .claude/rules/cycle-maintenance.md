@@ -16,7 +16,7 @@ So the empty state is `BACKLOG_EMPTY`, and it is a **prompt to sweep**, not a te
 
 ## Pre-conditions
 
-- `BACKLOG.md` exists at the umbrella root (created once by `/backlog-init`).
+- `BACKLOG.md` exists at the root of the governed scope — umbrella or autonomous repo (created once by `/backlog-init`).
 - At least one item is `raw` or `triaged`.
 - The working branch is `workspace` (per `rules/git-safety.md` § 1 — `develop` integrates, `main` is release-only).
 

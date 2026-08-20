@@ -1,0 +1,54 @@
+# Os dois bancos da comparação, na MESMA versão de PostgreSQL.
+#
+# Isto é o detalhe que decide se a tabela mede TheoDB x pgvector ou PG18 x PG16: o
+# compose do VectorDBBench upstream fixa `pgvector/pgvector:pg16`, e o TheoDB é PG18-only.
+# Comparar assim mediria a diferença entre duas versões do PostgreSQL e a atribuiria ao
+# índice. O runner (`run.sh`) recusa a corrida se `server_version_num` divergir.
+
+services:
+  theodb:
+    image: theodb:b036
+    container_name: vdbb-theodb
+    environment:
+      POSTGRES_PASSWORD: theo
+      POSTGRES_DB: theo
+    ports: ["55435:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d theo"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    # shared_buffers igual dos dois lados: um banco com cache maior que o outro mede o
+    # cache, não o índice.
+    # /dev/shm padrão do Docker é 64 MB. Com maintenance_work_mem alto o build paralelo
+    # de índice pede segmento de memória compartilhada maior e o PostgreSQL morre com
+    # "DiskFull: could not resize shared memory segment" — que NÃO é disco do host.
+    # Igual dos dois lados, como todo o resto.
+    shm_size: 2gb
+    command: ["postgres", "-c", "shared_buffers=1GB", "-c", "maintenance_work_mem=1GB"]
+
+  pgvector:
+    image: pgvector/pgvector:pg18
+    container_name: vdbb-pgvector
+    environment:
+      POSTGRES_PASSWORD: theo
+      POSTGRES_DB: theo
+    # A extensão é criada na inicialização porque o cliente pgvector do arnês registra os
+    # adaptadores ANTES de criar a extensão (`pgvector.py:93` vs `:61`) e falha com
+    # "vector type not found" num banco novo — medido num host limpo. Isto NÃO dá
+    # vantagem a lado nenhum: a imagem do TheoDB já traz `theodb_rs` e `vector` no
+    # `template1`, então os dois motores começam a corrida com a extensão presente.
+    volumes:
+      - ./pgvector-init.sql:/docker-entrypoint-initdb.d/10-vector.sql:ro
+    ports: ["55436:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d theo"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    # /dev/shm padrão do Docker é 64 MB. Com maintenance_work_mem alto o build paralelo
+    # de índice pede segmento de memória compartilhada maior e o PostgreSQL morre com
+    # "DiskFull: could not resize shared memory segment" — que NÃO é disco do host.
+    # Igual dos dois lados, como todo o resto.
+    shm_size: 2gb
+    command: ["postgres", "-c", "shared_buffers=1GB", "-c", "maintenance_work_mem=1GB"]

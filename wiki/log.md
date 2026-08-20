@@ -1,3 +1,165 @@
+#
+## 2026-08-12
+
+**b035 — a comparação que só existe com recall casado.**
+
+Acrescentado `benchmarks/b035-theodb-vs-pgvector-pg18.md` — primeira corrida do VectorDBBench com cliente
+próprio, contra pgvector 0.8.6, os dois em PostgreSQL 18.4, num droplet `g-16vcpu-64gb` (o `16c64g` que é o
+rótulo de referência do upstream), destruído ao fim.
+
+**A recall casado (~0,983) o pgvector faz +16% de QPS.** A leitura ingênua da mesma tabela — `ef_search=64`
+dos dois lados, que *parece* a comparação justa — diria TheoDB +26%, porque nesse ponto o TheoDB entrega
+recall 0,96 contra 0,9835. Ele é mais rápido porque procura menos.
+
+Registro isto por acréscimo e com destaque porque o defeito é sedutor: o parâmetro estava igual dos dois
+lados, e mesmo assim o ponto de operação não estava.
+
+**Não contradiz o [m72](benchmarks/m72-qps-multiclient.md)**, que mede +11% para o índice próprio a 1M × 128d
+e recall ~0,91. São regimes diferentes (50K × 1536d, recall ~0,983 aqui) e o M72 já se declarava num regime
+favorável. O que a corrida mostra é que aquele resultado **não generaliza** — não que fosse falso.
+# 2026-08-12
+
+## 2026-08-13
+
+**b045 — a paridade lexical passa de observada a demonstrada.**
+
+Teste de permutação pareada sobre **6.980 consultas**: TheoDB vs Elasticsearch **p=0,477**, vs OpenSearch
+**p=0,466**, com IC 95% de [−0,0011, +0,0025] em NDCG e `d_z` de 0,009. **6.484 consultas empatam
+exatamente**; as 496 restantes se dividem 233 a 263.
+
+**É a espécie certa de não-significância** — e a ferramenta distingue as duas explicitamente, porque tratá-las
+como iguais é como se afirma paridade sem tê-la medido: `p` alto com IC **estreito** em torno de zero é
+evidência de equivalência; `p` alto com IC **largo** é falta de poder.
+
+O dado por consulta veio **por fora do arnês**: ele computa métrica por consulta em `serial_runner.py` e a
+descarta no `return`, e persistí-la lá atravessaria o núcleo que a Política de Fork manda não tocar. O
+avaliador reusa a porta `VectorDB.search_documents` e as funções de métrica do próprio arnês — idênticas por
+construção — e a média por consulta foi **verificada contra o agregado publicado** antes de qualquer `p` sair.
+
+**O guard do [[B-041]] disparou de verdade** durante a execução: apontei o avaliador para um nome de coleção
+errado e o cliente recusou buscar, em vez de devolver 6.980 zeros que virariam NDCG 0.
+
+**O que segue sem teste:** os 4,3× de QPS (QPS não tem valor por consulta — o caminho é N corridas
+repetidas) e o +5,6% do stemming (os arrays do lado sem stemming não foram preservados).
+
+## 2026-08-13
+
+**b047 — a comparação lexical real, e a terceira variação do mesmo erro.**
+
+TheoDB × Elasticsearch 9.1.2 × OpenSearch 2.17.1, MS MARCO 100K, mesma máquina, mesma corrida. **Com o
+analisador casado, a qualidade é paridade** (NDCG 0,7351 contra 0,7343 e 0,7344 — terceira casa decimal) e o
+**Elasticsearch faz 4,3× o nosso QPS**, com p99 2,3× menor. Somos **2× mais rápidos na carga**.
+
+**A tabela que eu quase publiquei dizia +6,4% de NDCG para nós.** Era product-default: o mapeamento que o
+arnês configura para Elastic e OpenSearch usa o analisador `standard`, que **não stemiza**. Dando `english`
+aos dois, o NDCG deles sobe de 0,6908 para 0,7343 e a vantagem some inteira.
+
+É a terceira variação do mesmo erro em três ciclos: no b035 o **parâmetro** era igual e o ponto de operação
+não; no b044 o **rótulo** era igual e a máquina não; aqui a **configuração padrão** era a de cada um e o
+pré-processamento não. O ADR-0061 passa a exigir também o pré-processamento casado.
+
+As duas rodadas ficam publicadas, porque respondem perguntas diferentes: product-default diz o que o usuário
+recebe ao instalar; analisador casado diz qual motor ranqueia melhor.
+
+**Dois defeitos de ferramenta no caminho:** o cliente OpenSearch do arnês era inrodável (`"30m"` passado como
+timeout numérico — corrigido no fork, candidato a PR upstream), e o `elasticsearch-py` não-pinado instala 9.x,
+que contra servidor 8.15 dá um 400 opaco na criação do índice.
+
+## 2026-08-13
+
+**b044 — stemming entra, e o controle na mesma máquina desfaz uma conclusão minha.**
+
+A/B controlado (mesma máquina, mesmo caso, mesmo dataset em cache, só a imagem muda): NDCG@10 **+5,6%**,
+recall **+5,5%**, MRR **+5,5%** — e **QPS +10,9%**, com p99 10% menor. Remover stopwords encurta as listas
+de postings mais do que o stemmer as alonga. O único custo é o build: +1,03 s sobre 100.000 documentos.
+
+**Minha primeira leitura dizia −31,8% de QPS e estava errada.** Eu comparara a corrida com stemming (Xeon
+8168) contra a corrida sem, feita antes noutro droplet (Xeon 8358). NDCG/recall/MRR são independentes de
+hardware; QPS e latência não são. Refeito na mesma máquina, o sinal inverte.
+
+É o erro do b035 num eixo novo: lá o parâmetro era igual e o ponto de operação não; aqui o rótulo era igual
+e a máquina não. O ADR-0061 já exigia mesma máquina para concorrentes — vale igual para antes-e-depois do
+mesmo motor, e o ADR passa a dizer isso.
+
+**Desenho que tornou tudo isso barato:** o analisador é registrado sob nome próprio (`theodb_en`), nunca
+redefinindo `default`. O Tantivy serializa o nome no schema de cada índice, então índice antigo continua
+respondendo igual, sem migração — provado por teste que constrói um índice legado e verifica que ele NÃO
+stemiza.
+
+## 2026-08-13
+
+**ADR-0061 — todo pilar mensurável tem benchmark oficial público.**
+
+Decisão do owner depois das duas primeiras corridas: arnês de terceiros (não caseiro), concorrentes na mesma
+máquina e na mesma corrida, métrica de qualidade ao lado de toda métrica de velocidade, e ponto de operação
+casado — não parâmetro casado.
+
+**A decisão diz o próprio limite:** não é mecanizada (nenhum hook verifica) e ainda não inclui significância
+estatística. Enquanto o B-045 estiver aberto, toda diferença publicada é observada, não demonstrada.
+
+**Uma correção de número publicado, feita no mesmo dia.** O artefato do b035 dizia "pgvector constrói o
+índice 2,7× mais rápido", citando `load_duration` — que soma inserção e construção. Decomposto: a inserção
+está em paridade (18,80 s contra 19,66 s) e o **build é 3,6× mais lento** (35,09 s contra 125,09 s). A
+redação anterior atribuía à carga um custo que é do build.
+
+## 2026-08-13
+
+**b040 — o pilar lexical entra no arnês, e o handicap vem antes do número.**
+
+Acrescentado `benchmarks/b040-theodb-fts-msmarco.md`. MS MARCO 100K, num droplet `g-16vcpu-64gb` destruído
+ao fim: **NDCG@10 0,6962, recall@10 0,8025, MRR 0,667**, 1.616 QPS de pico, p99 serial 4,8 ms.
+
+O artefato abre declarando que o TheoDB **não faz stemming**, não tem operadores de consulta e não expõe
+`k1`/`b` — porque Elasticsearch e OpenSearch, os motores da mesma tabela, stemmizam por padrão. Um número de
+NDCG lido sem isso atribui ao motor de ranqueamento uma diferença que é de pré-processamento.
+
+**Não há comparação com outro motor neste artefato**, e isso é deliberado: citar os números publicados do
+leaderboard ao lado destes compararia corridas em máquinas, versões e datas diferentes — o mesmo erro que o
+b035 documentou no eixo vetorial.
+
+Correção medida a caminho: a nota do B-004 dizia que "a superfície não expõe busca multi-termo". **Falso como
+escrito** — multi-termo funciona com scores acumulados corretos. O que falta são operadores e stemming.
+
+**B-030/B-031 — uma extensão, e o que a wiki teve de deixar como estava.**
+
+`CREATE EXTENSION theodb CASCADE` deixou de funcionar: o umbrella `theodb` foi absorvido pelo
+`theodb_rs` e não existe mais como extensão instalável. **13 linhas em 12 arquivos** foram atualizadas
+para `theodb_rs` — os guias e as páginas de feature que *instruem* o leitor a instalar. Um guia que manda
+rodar um comando que falha é pior que nenhum guia.
+
+**Três ocorrências ficaram deliberadamente intactas**, e a distinção é a mesma que o bundle já aplica em
+outros pontos: elas não instruem, elas **registram**.
+
+* `wiki/decisions/0029-m70-drop-pgvector.md` (duas) — o ADR descreve uma decisão **como ela foi tomada**,
+  num momento em que `CREATE EXTENSION theodb` era o comando correto. Reescrevê-lo faria o registro
+  afirmar que a decisão de 2026 previa um mundo que só passou a existir agora.
+* `wiki/benchmarks/m184-pilares-superficie-medida-verdict.md` — o veredito registra **o comando que foi de
+  fato executado** na medição. Trocá-lo transformaria um relato de execução em ficção, exatamente o
+  `cobertura-alegada-sem-execucao` que este acervo documenta como classe de defeito.
+
+**Correção registrada por acréscimo.** Durante a análise que originou o B-031, afirmei — citando o
+cabeçalho de `theodb_rs/sql/schema_snapshot.sql` — que o oráculo da cadeia de upgrade não cobre ACL.
+**Está errado.** O arquivo tem um segundo bloco que faz snapshot de `proacl` e declara fechar a lacuna; o
+cabeçalho é que ficou obsoleto quando a lacuna foi fechada. O problema real é outro e permanece: quem
+comparava aquele snapshot contra uma baseline era um script removido em `8605677`, de modo que a cobertura
+existia como SQL e não como verificação. Fica por acréscimo porque a leitura errada chegou a ser
+comunicada ao owner e baseou a redação inicial do item de backlog.
+
+## 2026-08-11
+
+* **Creation**: `benchmarks/b015-cinco-contadores-em-zero-duas-causas.md` — a medição do B-015. Registra
+  duas coisas que só a medição separou: os cinco testes com contador em zero não tinham causa comum (três
+  eram o fixture do `pg_test`, dois eram instrumentação perdida num caminho de scan que virou default), e a
+  **hipótese de paralelismo que o item carregava está refutada** — o `Custom Scan` colunar não paraleliza, e
+  o próprio seed já desligava paralelismo desde que foi escrito.
+
+  A hipótese refutada fica escrita no conceito em vez de ser apagada, porque foi ela que sustentou a
+  prioridade do item durante um dia. Mesmo critério dos honest-negatives já no acervo.
+
+  Não vira conceito, e o skip é declarado: `B-018` (o planner na junção) **não reproduziu** em seis cenários
+  e continua aberto — não há medição conclusiva para registrar, só um espaço de busca reduzido, que vive no
+  `BACKLOG.md`. Registrar "não achei" como `Measurement` inflaria o acervo com a ausência de resultado.
+
 ## 2026-08-08
 
 * **Update**: `benchmarks/m184-symqg-profile-simbolos-verdict.md` — fechado o regime que faltava: a **busca**, onde os 2,6–3,9× do e2 foram medidos. O contraste é o achado: no HNSW **nenhuma função do `theodb_rs.so` passa de 1,3%**, enquanto no SymQG **`gather_symqg_candidates` concentra 18,23%**. Build e busca têm gargalos **distintos**, ambos em funções específicas do caminho SymQG. E um achado de planner que explica duas falhas anteriores de perfilar a busca: **sem `enable_seqscan=off` E `enable_sort=off` o planner escolhe `Sort` + `Seq Scan` em vez do índice vetorial** — eu perfilava um caminho que não passava pelo índice. Registrado como pergunta aberta maior que o SymQG: se o planner também despreza o `theodb_hnsw` em produção, isso não foi investigado.
@@ -46,3 +208,157 @@
 * **Nenhum conceito carrega `verified`.** Todo o conteúdo foi gerado por agente a partir dos documentos de origem; nenhuma confirmação humana ocorreu. Semear esse campo inflaria o tier de confiança que um consumidor calcula.
 * **A entity pass é fechada sobre os nomes que os conceitos ligam.** Nomes que aparecem apenas dentro dos conceitos de entidade (por exemplo, bibliotecas citadas dentro de `technologies/`) permaneceram como prosa, conforme a regra de recursão de um anel.
 * **O acervo de referências primárias do projeto não foi convertido.** O catálogo de papers e repositórios clonados citado no `CLAUDE.md` está fora do versionamento e fora do escopo desta conversão.
+
+## 2026-08-13
+
+**B-036 — `m` e `ef_construction` deixam de ser constantes de compilação.**
+
+`features/02-indice-hnsw.md` **atualizado** (não duplicado): a seção "A armadilha dos parâmetros de build"
+descrevia como verdade permanente algo que era estado — `WITH (m = …)` falhava com `unrecognized parameter`.
+Virou "Parâmetros de build", com a tabela de faixas, os quatro caminhos que honram o valor, e o teto de `m`
+derivado do page layout (39, não o 100 do pgvector, cujo teto de nível é outro).
+
+Acrescentado à seção de qualidade do grafo o honest-negative que o knob torna relevante: **`ef_construction`
+maior não é sempre melhor** — o M57 mediu 64→200 *piorando* o recall a 100k–500k, e `m` 16→32 idem (0,952).
+O knob existe para ser varrido por medição, não subido no escuro; sem essa linha ao lado da tabela, a tabela
+convida exatamente ao erro que o projeto já pagou.
+
+## 2026-08-16
+
+**O veredito vetorial mediu a biblioteca; o concorrente é um índice do PostgreSQL.**
+`decisions/0035-m73-northstar-vector-verdict.md` recebeu acréscimo — nunca sobrescrita — registrando que o gap
+de ~25× foi medido contra o **ScaNN OSS**, e que o produto expõe `CREATE INDEX ... USING scann`, um access
+method que paga o mesmo imposto de MVCC/WAL que nós. Como o próprio ADR atribui o gap a "AH-LUT **+ não pagar o
+imposto**", metade da causa não se aplica ao AM.
+
+O veredito **não** foi invalidado: a vantagem do AH-LUT é real e medida. O que mudou é o que se pode afirmar
+sobre o *produto* — e o AlloyDB Omni, que traz o ScaNN e o colunar sem GCP, tornou a comparação do ADR-0061
+possível. Virou [[B-057]] (vetorial) e [[B-058]] (colunar).
+
+Gatilho: avaliação independente publicada em 2026-08-15, que mediu o índice ScaNN 30× menor que o ivfflat com
+build 7–9× mais rápido, e **não conseguiu estabelecer a recall** — 0,15 obtido, com a causa identificada
+(`scann.num_leaves_to_search` sem efeito sem `LOAD`, e sem aviso). Registramos a **não-reprodução**, não uma
+refutação: o avaliador declara não confiar no número e não o publica.
+
+---
+
+## 2026-08-17
+
+**A comparação do ADR-0061 foi feita, e três configurações erradas vieram antes da certa.**
+
+**O gap contra o access method foi medido, e ele colapsa.** `benchmarks/b057-scann-am-headtohead.md`:
+a recall casado no SIFT-128 a 100k, na mesma máquina e no mesmo arnês, o `scann` AM é **1,2–1,6×** o
+`theodb_hnsw` — não os ~25× que o ADR-0035 registrou contra a biblioteca. A entrada de 2026-08-16 acima
+previu exatamente isto; a medição a confirmou.
+
+**Duas correções ao que eu mesmo escrevi, ambas por acréscimo no ADR-0035.** A primeira comparou
+`theodb_hnsw` — grafo puro, sem quantizador — contra o `scann` com AH e rescore: nosso grafo contra o
+IVF-quantizado deles, comparação real e pergunta errada. O TheoDB **tem** a receita, e o arco no código
+chama-se `pg_scann` (`ann/ivf_aqah.rs` no M75, `am/scan.rs::scan_ivf_aq` no M77): `pq_subspaces` é o
+quantizador anisotrópico, `pq_bits=4` a largura LUT16, `aq_threshold` o T, `soar_lambda` o SOAR,
+`separate_storage=1, refine=1` o rescore exato. A recall casado ≈ 0,957, o `pg_scann` faz **476,5 QPS**
+contra **438,8** do `scann` — um ponto, não uma fronteira.
+
+A segunda: `benchmarks/b061-columnar-crossover.md` preserva a retratação de que o `theodb_columnar` seria
+14–20× mais lento que o heap sem crossover. Medi no default, e `theodb.enable_columnar_agg` vem **`off`** —
+1407 ms com `Seq Scan` contra 108 ms com `Custom Scan (theodb_columnar_agg)`, mesma tabela, mesma query.
+Com o pushdown ligado o crossover existe entre 10 mil e 100 mil linhas.
+
+**A classe que atravessa tudo virou guia.** `guides/instrumento-reporta-o-pedido.md`: quatro instrumentos
+respondem o que foi *pedido* em vez do que está *em vigor* — `current_setting` contra `pg_settings`,
+`g_columnar_columns` contra `Memory Used`, residência contra o plano (e por query), e o default contra o
+flag verificado. Nenhum falha; três produziram bundle `VALID` com fronteira plausível.
+
+A assimetria é o que torna isto sério e está escrita lá: medir-nos num default aleijado custa um número;
+**medir o concorrente num default aleijado produz alegação falsa que nos favorece**. O resultado que estava
+na mão era "o scann teto em 0,66 de recall enquanto o nosso chega a 0,9956" — e o teto era o rescore
+desligado, não o índice.
+
+**`technologies/alloydb.md` e `technologies/scann.md` deixaram de ser escritos por documentação.** O Omni
+foi executado: query layer sem storage desagregado, imagem em PostgreSQL 17.9, nada instalado por default,
+opclasses `cosine`/`dot_product`/`l2`, e um engine colunar com quatro estados dos quais três caem para heap
+em silêncio.
+
+**Limite honesto:** três destas medições saíram de script direto contra os adapters, não de bundle do arnês —
+corretas e **não reproduzíveis por terceiros**. Virou [[B-069]], e a regra de que toda medição publicável sai
+do `theodb-bench` passou a ser invariante do repositório do arnês.
+
+**Teto de escala do arnês, medido.** `benchmarks/harness-scale-ceiling.md` registra 10 000 000 de vetores
+carregados em 155 s com **1,16 GB de RSS** contra 5,1 GB de corpus — o corpus nunca residente. A escada até
+lá: `executemany` **122 s** → COPY texto **75 s** → COPY binário **16,8 s** por milhão, e o degrau do meio é
+o que justificou o terceiro (dos 75 s, **72 eram `repr()` em Python**, 128 milhões deles).
+
+**O bilhão está quantificado e não alcançado:** 520 GB de tabela, ~780 GB com HNSW, 4,3 h de carga — contra
+**284 GB livres** no host medido. A capacidade está entregue e verificada a 10M; a corrida exige outra máquina,
+e construir HNSW sobre 1B é trabalho de dias. Registrado porque um benchmark cujas alegações de escala
+ultrapassam suas medições é pior que um que declara seus limites, e este vai ser publicado.
+
+**A escala de referência passou a ser 20M, escolhida por medição e não por ambição.** `1,27 GB por milhão`
+medido no host (558 MB de heap + 724 MB de `theodb_hnsw` para 1M × 128, m=16) põe 20M em **25,4 GB — 9% do
+disco**. 100M cabe e transforma o build em horas; **~200M é o teto físico** e não deixa margem para
+`maintenance_work_mem` nem para spill de ordenação. Um bilhão são 1,27 TB e **não cabe** — o que
+`benchmarks/harness-scale-ceiling.md` já registrava por outra conta.
+
+O corpus é **real**: os primeiros 20 000 000 registros do BIGANN (`bvecs`, SIFT uint8 do TEXMEX), verificados
+por checksum. Repetir o SIFT1M vinte vezes exercitaria os mesmos bytes e produziria recall sem sentido — a
+ressalva que a medição de 10M carrega e que esta remove.
+
+Três peças tiveram que existir. Um **leitor** de `bvecs` que checa a dimensão declarada por registro (ela se
+repete; ler plano reinterpretaria todo vetor seguinte no deslocamento errado). Um **oráculo em streaming**,
+exato porque a ordem `(distância, id ascendente)` é total e o top-k de uma ordem total se recupera fundindo
+top-k por partição — um top-k corrente que guardasse "os k menores por valor" **não** seria, porque num chunk
+com mais empates que k a escolha é arbitrária e os ids menores morrem antes da fusão. E **uma abstração no
+lugar de dois `isinstance`**: o benchmark faz exatamente duas coisas com o corpus, e nenhuma delas tem
+interesse em qual forma ele tem.
+
+**A verdade fundamental (`ground truth`) é computada, nunca lida.** O BIGANN publica ids de vizinhos para o
+bilhão inteiro; contra um prefixo de 20M eles nomeiam linhas que não existem. O arnês **recusa**, em vez de
+descartar — descartar **aumentaria** o recall, removendo exatamente os vizinhos que o sistema não achou.
+
+**E a carga de 20M abortou, por defeito nosso.** `guides/orcamento-que-limita-a-coisa-errada.md` registra:
+`COPY bench_vectors, line 4569000`, cancelado pelo `statement_timeout` de **consulta** aplicado a uma
+**carga**. O arnês classificou certo — `budget_exceeded`, com a frase *"the system under test did not
+fail"* — e essa distinção é o valor inteiro: colapsá-la publicaria *"o TheoDB não aguentou 20M"* quando o
+que não aguentou foi um timeout que nós escrevemos. Build e carga agora compartilham um mecanismo só, porque
+são a mesma classe de trabalho: não medido, em massa, duração proporcional ao tamanho.
+
+
+**E a escala de 20M produziu o achado que corrige a própria recomendação que a escolheu.** O
+`CREATE INDEX … USING theodb_hnsw` sobre 20M foi **morto pelo OOM killer** — `anon-rss:10033724kB`, com o
+`DETAIL` do PostgreSQL nomeando exatamente esse comando. `benchmarks/build-hnsw-teto-de-ram.md` registra a
+curva medida isoladamente: **250k → 606 MB**, **1M → 1871 MB**, ou **~1687 MB por milhão** — e
+`maintenance_work_mem` estava em 64 MB o tempo todo.
+
+**O dimensionamento que eu publiquei horas antes olhava o disco.** 1,27 GB/milhão dizia que ~200M cabiam;
+pela RAM, o host de 16 GB comporta **~5,8M**. As duas contas estão certas sobre o que mediram, e escolher
+20M com base só na primeira foi a omissão. A correção entrou **por acréscimo** em
+`benchmarks/harness-scale-ceiling.md`, não por reescrita.
+
+Causa-raiz localizada e filada como **#230**: `am/build.rs:403` chama `collect_corpus` incondicionalmente
+no `ambuild_hnsw`, enquanto a rota de memória limitada do M96 (`should_stream`, que já lê o GUC certo) fica
+atrás de um gate de opções do **IVFFlat**. E a **#221** registra a mesma classe no colunar — dois
+componentes ignorando o mesmo orçamento é ausência de contrato de memória, não dois bugs.
+
+**O que a escala de 20M de fato entrega, dito inteiro:** carrega (20 000 000 de linhas, 11 GB) e consulta
+por varredura exata; **não** constrói índice de grafo neste host. Reportar só a primeira metade seria a
+omissão que o acervo existe para impedir.
+**E a projeção que eu tinha acabado de publicar foi contradita pela medição direta, por 2,6×.** Rodei o
+build de 20M numa máquina de 64 GB em vez de extrapolar: o consumo privado real é **~13,0 GB**
+(`RssAnon`), ou **0,65 GB por milhão**, contra os 1,73 GB/milhão que o ajuste de 250k–2M dava. **O consumo
+é sublinear.**
+
+O detalhe que vale guardar é que **o ajuste era bom** — o terceiro ponto (2M) foi previsto pelos dois
+primeiros com 2% de erro. Ele era bom **onde foi ajustado**, e eu o usei uma década de escala adiante.
+Confirmar um modelo dentro da faixa medida não licencia extrapolá-lo para fora dela, e o intervalo de
+confiança de uma extrapolação não é o do ajuste.
+
+As grandezas foram verificadas antes de afirmar a contradição: o host antigo tinha `shared_buffers` de
+128 MB, então o `VmRSS` de lá é essencialmente `RssAnon`; os dois têm `max_parallel_maintenance_workers=2`
+e o build corre com um backend só. A diferença é real, não de instrumento.
+
+**O defeito não muda** — 13 GB privados para indexar 11 GB de corpus continua sendo o corpus
+materializado, continua ignorando `maintenance_work_mem`, e o OOM veio com `anon-rss:10033724kB`, **logo
+abaixo** dos 13 GB necessários. Muda só o teto: ~13M num host de 16 GB, não os ~4,7M projetados.
+
+A correção entrou na issue #230 e no conceito **por acréscimo**, com o número errado riscado e não
+apagado, porque ele foi publicado e citado.
