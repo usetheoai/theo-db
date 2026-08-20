@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-85 items — **Open** 43 · **In flight** 11 · **Closed** 31
+85 items — **Open** 43 · **In flight** 4 · **Closed** 38
 
 ### Open (43)
 
@@ -118,23 +118,16 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-084`](#b-084--a-esteira-do-banco-rodava-o-avaliador-e-três-constantes-fixavam-uma-versão-que-o-upstream-move----) | A esteira do banco rodava o avaliador, e três constantes fixavam uma versão que o upstream move | `triaged` | — |
 | [`B-085`](#b-085--a-imagem-era-construída-onze-vezes-por-corrida-e-nenhum-job-dependia-de-outro----) | A imagem era construída onze vezes por corrida, e nenhum job dependia de outro | `triaged` | — |
 
-### In flight (11)
+### In flight (4)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
-| [`B-060`](#b-060--o-arnês-verifica-que-o-índice-foi-usado-e-não-verifica-que-o-knob-de-busca-pegou----) | O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou | `planned` | — |
-| [`B-061`](#b-061--só-duas-suites-registradas-as-duas-vetoriais-o-colunar-não-tem-onde-ser-comparado----) | Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado | `planned` | — |
-| [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default----) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `planned` | — |
-| [`B-064`](#b-064--o-eixo-theodb-do-próprio-arnês-não-constrói-índice-ele-emite-a-sintaxe-do-pgvector-contra-os-ams-do-theodb----) | O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB | `planned` | — |
-| [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada----) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `planned` | — |
-| [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala----) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
-| [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina----) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-079`](#b-079--o-tooling-escrito-em-claude-protege-uma-máquina-até-chegar-ao-repo-do-kit----) | O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit | `planned` | — |
 
-### Closed (31)
+### Closed (38)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -167,6 +160,13 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-047`](#b-047--rodar-os-motores-concorrentes-nos-benchmarks-oficiais-na-mesma-máquina-como-prática-recorrente----) | Rodar os motores concorrentes nos benchmarks oficiais, na mesma máquina, como prática recorrente | `shipped` | — |
 | [`B-048`](#b-048--a-superfície-responde-onde-deveria-recusar-três-instâncias-novas-e-a-classe-já-foi-consertada-três-vezes----) | A superfície responde onde deveria recusar: três instâncias novas, e a classe já foi consertada três vezes | `shipped` | — |
 | [`B-053`](#b-053--o-núcleo-de-distância-vetorial-é-puro-por-uma-linha-e-é-ela-que-prende-o-micro-bench-na-suíte----) | O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte | `shipped` | — |
+| [`B-060`](#b-060--o-arnês-verifica-que-o-índice-foi-usado-e-não-verifica-que-o-knob-de-busca-pegou----) | O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou | `shipped` | — |
+| [`B-061`](#b-061--só-duas-suites-registradas-as-duas-vetoriais-o-colunar-não-tem-onde-ser-comparado----) | Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado | `shipped` | — |
+| [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default----) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `shipped` | — |
+| [`B-064`](#b-064--o-eixo-theodb-do-próprio-arnês-não-constrói-índice-ele-emite-a-sintaxe-do-pgvector-contra-os-ams-do-theodb----) | O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB | `shipped` | — |
+| [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada----) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `shipped` | — |
+| [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala----) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `shipped` | — |
+| [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina----) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `shipped` | — |
 | [`B-078`](#b-078--seis-módulos-de-teste-do-kit-não-coletam-um-símbolo-removido-levou-as-suítes-junto----) | Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto | `killed` | — |
 | [`B-080`](#b-080--o-renumbered-do-revisor-de-backlog-é-blocker-e-afirma-um-dano-que-a-evidência-não-mostra----) | O `renumbered` do revisor de backlog é BLOCKER e afirma um dano que a evidência não mostra | `killed` | — |
 
@@ -2454,6 +2454,12 @@ OSS, enquanto o produto expõe um access method do PostgreSQL que paga o mesmo i
 com Elasticsearch/OpenSearch. Com o AlloyDB nunca foi feito, e desde que o Omni é `docker pull
 google/alloydbomni:18` a impossibilidade deixou de existir.
 status: planned
+nao_shipped_porque: 2026-08-20 — o corte `v0.1.0` do bench saiu e este item **não** avança, porque o
+  quarto bullet do DoD não fechou: ele exige que a corrida `theodb × alloydbomni × pgvector` produza
+  **bundle válido**, e o campo `measured:` deste mesmo bloco registra que ela reporta **INVALID**.
+  O adapter está entregue e citado no CHANGELOG lançado; a CORRIDA é que não passou. Marcar `shipped`
+  pela citação seria trocar o DoD por um proxy — o mesmo cuidado que segurou o [[B-079]] no theo-db.
+
 merged: PR #2 → `9be30b1` em `develop` (`theodb-bench`), 2026-08-17. `shipped` aguarda o corte de release (`develop → main` + tag semver), per `cycle-backlog.md`.
 plan: .claude/knowledge-base/plans/b059-omni-adapter-plan.md
 opportunity: .claude/knowledge-base/discoveries/opportunities/b059-omni-adapter-opportunity.md
@@ -2498,7 +2504,11 @@ por quê. Para o pgvector a lacuna é benigna (um `SET` de GUC registrado funcio
 e **o [[B-034]] provou que também é fatal para nós** — `SET hnsw.ef_search` era aceito em silêncio sem efeito.
 Um arnês que não verifica o knob publica o motor num ponto de operação que não é o declarado, que é a forma mais
 cara de errar: o número parece certo.
-status: planned
+status: shipped
+shipped_em: theodb-bench v0.1.0 (2026-08-20) — **derivado, não afirmado**: verificação do knob em vigor + valor efetivo no bundle. O trabalho está numa
+  seção JÁ LANÇADA do `CHANGELOG.md` do bench, cuja entrada descreve o que este DoD pedia, e a `main`
+  do repositório recebeu o corte. Até hoje o `theodb-bench` NUNCA havia lançado — zero tags —, então
+  todo item entregue nele aparecia como `planned`.
 dod:
   - existe `assert_parameter_applied` (ou equivalente) espelhando `assert_index_used`: depois de aplicar os
     parâmetros de busca, o adapter **lê de volta do servidor** o valor em vigor e recusa a medição se divergir
@@ -2564,7 +2574,11 @@ why_now: o [[B-058]] tem números públicos do concorrente para o eixo colunar, 
 (**311×**) a SF100, `Q5 9,8×`, `Q1 2,0×`, `Q18 1,14×`, point lookup sem ganho, e o colunar **perdendo** para o
 heap abaixo de ~centenas de milhares de linhas. Do nosso lado o [[B-006]] registra 43 queries do ClickBench e a
 suíte completa nunca. Sem suite analítica registrada, esses números não têm onde ser respondidos.
-status: planned
+status: shipped
+shipped_em: theodb-bench v0.1.0 (2026-08-20) — **derivado, não afirmado**: suíte analítica alcançando motor real + portão de residência. O trabalho está numa
+  seção JÁ LANÇADA do `CHANGELOG.md` do bench, cuja entrada descreve o que este DoD pedia, e a `main`
+  do repositório recebeu o corte. Até hoje o `theodb-bench` NUNCA havia lançado — zero tags —, então
+  todo item entregue nele aparecia como `planned`.
 opportunity: .claude/knowledge-base/discoveries/opportunities/b061-analytical-suite-opportunity.md
 review: .claude/knowledge-base/reviews/b061-analytical-suite-review-2026-08-17.md
 measured: `theodb-bench` `4055420`, droplet `138.197.22.192`. **700 testes** (era 673), mypy strict e ruff
@@ -2617,7 +2631,11 @@ why_now: é o [[B-052]] um repositório ao lado, e com um agravante: no `theo-db
 ele não tinha onde olhar. Criei `develop` a partir de `b6a5bfd` para que o PR #1 tivesse alvo — o que resolve o
 sintoma e **não** a estrutura: não há `main`, não há tag de release, não há branch protection, e nada impede o
 próximo push de ir direto para a default.
-status: planned
+status: shipped
+shipped_em: theodb-bench v0.1.0 (2026-08-20) — **derivado, não afirmado**: as quatro partes verificadas contra a API do GitHub em 2026-08-20. O trabalho está numa
+  seção JÁ LANÇADA do `CHANGELOG.md` do bench, cuja entrada descreve o que este DoD pedia, e a `main`
+  do repositório recebeu o corte. Até hoje o `theodb-bench` NUNCA havia lançado — zero tags —, então
+  todo item entregue nele aparecia como `planned`.
 entregue: 2026-08-20, as quatro partes do DoD, verificadas contra a API do GitHub e não contra a intenção.
   (1) `main` criada a partir de `develop` (`f6f98c5`), então `workspace → develop → main` existe no remoto;
   (2) branch protection nas DUAS exigindo pull request — `gh api .../branches/{main,develop}` devolve
@@ -2710,7 +2728,11 @@ why_now: o [[B-059]] tem como último critério de DoD uma corrida `theodb × al
 máquina, e ela **não fecha** enquanto isto existir. O eixo do Omni foi consertado no mesmo dia declarando os
 opclasses do motor por adapter (o `scann` usa `cosine`/`dot_product`/`l2`); o TheoDB precisa do mesmo tratamento
 mais um: o **nome do access method** também difere, o que o Omni não exigia.
-status: planned
+status: shipped
+shipped_em: theodb-bench v0.1.0 (2026-08-20) — **derivado, não afirmado**: AM próprio emitido, medido contra a imagem. O trabalho está numa
+  seção JÁ LANÇADA do `CHANGELOG.md` do bench, cuja entrada descreve o que este DoD pedia, e a `main`
+  do repositório recebeu o corte. Até hoje o `theodb-bench` NUNCA havia lançado — zero tags —, então
+  todo item entregue nele aparecia como `planned`.
 merged: PR #2 → `9be30b1` em `develop` (`theodb-bench`), 2026-08-17. `shipped` aguarda o corte de release (`develop → main` + tag semver), per `cycle-backlog.md`.
 plan: consertado dentro do ciclo do [[B-059]], cujo DoD não fechava sem isto
 review: .claude/knowledge-base/reviews/b059-omni-adapter-review-2026-08-17.md § R-10
@@ -2797,7 +2819,11 @@ why_now: o primeiro bullet do DoD do [[B-061]] pede "suíte analítica **registr
 saiu para o [[B-065]]; o que sobrou — estar registrada — depende disto, e ficou **declarado e não feito**. O
 crossover do nosso colunar foi medido por script direto contra os adapters (números em
 `.claude/knowledge-base/reviews/b061-*`), que é medição legítima e **não** é bundle validado por schema.
-status: planned
+status: shipped
+shipped_em: theodb-bench v0.1.0 (2026-08-20) — **derivado, não afirmado**: protocolo Workload/Benchmark, runner desacoplado. O trabalho está numa
+  seção JÁ LANÇADA do `CHANGELOG.md` do bench, cuja entrada descreve o que este DoD pedia, e a `main`
+  do repositório recebeu o corte. Até hoje o `theodb-bench` NUNCA havia lançado — zero tags —, então
+  todo item entregue nele aparecia como `planned`.
 closed: FECHADO 2026-08-17: protocolo `Workload`/`Benchmark` em `bench/protocol.py`; runner desacoplado; suíte `analytical/synthetic/paths` registrada e com bundle **VALID** (colunar 3,5× em `total_rows`/`sum_amount`, **0,18×** em `group_by_category`); `pareto.json` e `regression.json` emitidos.
 dod:
   - existe um protocolo de benchmark que `VectorBenchmark` e `AnalyticalBenchmark` satisfazem, e o runner
@@ -2875,7 +2901,11 @@ why_now: duplica o [[B-068]] em espírito e o supera em precisão — o B-068 es
 medido, contra "não completou em 10 minutos" que era a fase de carga **mais** o build). Manter os dois é
 redundante; este bloco carrega a medição e o [[B-068]] deve ser fechado como `killed` com `kill_reason` apontando
 para cá, ou este ser fundido nele — decisão de quem planejar.
-status: planned
+status: shipped
+shipped_em: theodb-bench v0.1.0 (2026-08-20) — **derivado, não afirmado**: carga por COPY binário. O trabalho está numa
+  seção JÁ LANÇADA do `CHANGELOG.md` do bench, cuja entrada descreve o que este DoD pedia, e a `main`
+  do repositório recebeu o corte. Até hoje o `theodb-bench` NUNCA havia lançado — zero tags —, então
+  todo item entregue nele aparecia como `planned`.
 closed: FECHADO 2026-08-17: `COPY` binário. 1M vetores SIFT-128 — `executemany` **122 s** → COPY texto **75 s** → COPY binário **16,8 s** (7,3×). Verificado contra servidor real: 1 000 000 linhas, 5 vetores conferidos elemento a elemento, 0 divergências.
 dod:
   - a carga usa `COPY` binário, e um teste prova que o SQL emitido começa com `COPY` e não com `INSERT`
@@ -3015,7 +3045,11 @@ why_now: o teste pareado é o que torna o arnês publicável (I14), e ele acabou
 com p = 0,0001. Um veredito forte obtido sob um confundidor não controlado é mais perigoso que nenhum veredito:
 ele convida a citação. O SOTA para isto é **intercalar** — a mesma query respondida pelos dois sistemas em
 sequência imediata, alternando a ordem para não favorecer o aquecimento de nenhum lado.
-status: planned
+status: shipped
+shipped_em: theodb-bench v0.1.0 (2026-08-20) — **derivado, não afirmado**: deriva temporal da máquina no pareado. O trabalho está numa
+  seção JÁ LANÇADA do `CHANGELOG.md` do bench, cuja entrada descreve o que este DoD pedia, e a `main`
+  do repositório recebeu o corte. Até hoje o `theodb-bench` NUNCA havia lançado — zero tags —, então
+  todo item entregue nele aparecia como `planned`.
 closed: FECHADO 2026-08-17: `theodb-bench head2head` intercala query a query com ordem alternada. **Mudou um veredito**: o pareado sequencial dava theodb com dz=−0,94 e 448/500; intercalado, alloydbomni vence o ponto médio. Recusa par com gap de recall > 0,01 e declara quando o vencedor operava em recall menor.
 dod:
   - existe modo de corrida intercalada: um executor que percorre a query `i` nos dois sistemas antes de passar
