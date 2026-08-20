@@ -13,6 +13,84 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.160.1] - 2026-08-20
+
+### Added
+- **A esteira passa a criar a release.** Nenhum workflow fazia isso — medido: zero ocorrências de
+  `gh release`, gatilho `release:` ou equivalente nos nove arquivos existentes, e é por isso que
+  `main` ficou em 0.158.0 desde julho com duas versões escritas no changelog e nunca cortadas. O
+  novo `release.yml` dispara na tag `v*`, extrai as notas **do CHANGELOG** (não do log de commits,
+  porque o changelog é o texto que alguém revisou) e recusa publicar quando a versão não tem seção —
+  uma release de corpo vazio afirma que não houve mudança (#B-082)
+- `runner-probe`: sonda sob demanda que mede se os jobs pesados cabem num runner GitHub-hosted, em
+  vez de decidir isso por leitura de documentação (#B-083)
+- `dependabot.yml` para as actions — até aqui ninguém avisava que havia versão nova (#B-083)
+- **Os 14 planos de implementação deste projeto passam a ser medidos contra o avaliador de planos**, e
+  o resultado vira teste de regressão: doze pontuam entre 98,0 e 100,0 sem nenhuma reprovação
+  estrutural, um pontua 89,0 por não declarar teste de concorrência, e um não pontua porque o
+  avaliador **quebra** em vez de reprovar quando o plano não tem matriz de cobertura — registrado como
+  defeito em vez de aceito como contrato (#B-081)
+- Escala de referência de 20 000 000 de vetores registrada no backlog (B-075) e documentada na wiki:
+  corpus BIGANN real verificado por checksum, oráculo em streaming e a razão de 20M e não 100M (#B-075)
+- **`m` e `ef_construction` viram opções de índice de verdade** (B-036): `CREATE INDEX … USING theodb_hnsw (e) WITH (m = 32, ef_construction = 200)` passa a ser aceito **e honrado** — até aqui devolvia `unrecognized parameter "m"`, e o build era fixo em 16/64. É a sintaxe de build do pgvector, que o ADR-0029 § D2 promete como drop-in
+- O valor pedido é honrado nos **quatro** caminhos que constroem grafo, não só no `CREATE INDEX`: build inicial, índice vazio, INSERT posterior e o fold do VACUUM. Um índice criado com `ef_construction=200` deixaria de honrá-lo a cada linha inserida depois, e um VACUUM o reconstruiria com o default — em silêncio nos dois casos, porque `ef_construction` não é persistido em lugar nenhum (B-036)
+- Fora de faixa é **recusado nomeando a opção** (`m` em 2..39, `ef_construction` em 4..1000), não truncado em silêncio. O teto de `m` é derivado do page layout — no pior caso um nó ocupa `HNSW_MAX_LEVEL·m + m0 = 34m` slots e a tupla de vizinhos tem de caber em 8.168 bytes, o que dá 39; não é o 100 do pgvector, cujo teto de nível é outro (B-036)
+- **Teste de significância pareada volta ao projeto** (`benchmarks/significance/`, B-045): permutação pareada de Smucker/Allan/Carterette recuperada do histórico, mais o avaliador por consulta que nunca existiu para o VectorDBBench. 22 testes, sem banco e sem rede
+- A **paridade lexical do b047 deixa de ser observada e passa a ser demonstrada**: p=0,477 contra Elasticsearch e p=0,466 contra OpenSearch sobre **6.980 consultas**, com IC 95% estreito em torno de zero ([−0,0011, +0,0025] em NDCG) — evidência de equivalência, não falta de poder. 6.484 das 6.980 consultas empatam exatamente (B-045)
+- **Primeira comparação lexical contra concorrentes reais**, na mesma máquina e na mesma corrida (`wiki/benchmarks/b047-lexical-headtohead.md`): TheoDB × Elasticsearch 9.1.2 × OpenSearch 2.17.1, MS MARCO 100K. **Com pré-processamento casado a qualidade é paridade** — NDCG@10 0,7351 contra 0,7343 e 0,7344 — e o **Elasticsearch faz 4,3× o nosso QPS**. Somos 2× mais rápidos na carga (B-047)
+- **Stemming e remoção de stopwords no pilar lexical** (B-044). Índices novos usam o analisador `theodb_en` — SimpleTokenizer + RemoveLong + LowerCaser + StopWordFilter + Stemmer (Snowball inglês) — e a consulta `jumping` passa a casar documentos com `jumps`. Medido em A/B na mesma máquina, MS MARCO 100K: **NDCG@10 +5,6% (0,6962 → 0,7351), recall +5,5%, MRR +5,5% — e QPS +10,9%**, porque remover stopwords encurta as listas de postings mais do que o stemmer as alonga. Custo: +1,03 s no build de 100.000 documentos
+- Suporte a **full-text (BM25)** no cliente `theodb` do VectorDBBench — quatro métodos na classe existente, zero pontos de registro novos. É o **primeiro cliente PostgreSQL com FTS** no arnês (B-040)
+- Primeira medição do pilar lexical em arnês público (`wiki/benchmarks/b040-theodb-fts-msmarco.md`): MS MARCO 100K, **NDCG@10 0,6962, recall@10 0,8025, MRR 0,667** a 1.616 QPS de pico, p99 serial 4,8 ms. **Sem stemming, sem operadores de consulta e `k1`/`b` não configuráveis** — declarado antes da tabela, porque os motores comparáveis stemmizam por padrão (B-040)
+- Cliente `theodb` para o **VectorDBBench**, em fork de diff mínimo — `pip install "vectordb-bench[theodb] @ git+https://github.com/usetheoai/VectorDBBench@theodb"` — devolvendo ao projeto um arnês de benchmark reproduzível e multi-sistema, ausente desde a remoção de `benchmarks/` (B-035)
+- `benchmarks/vectordbbench/` — compose e runner que fixam a **mesma versão de PostgreSQL** nos dois motores comparados e recusam a corrida se divergirem (B-035)
+- Primeira medição comparativa publicada em `wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md`: **a recall casado (~0,983) o pgvector faz +16% de QPS**, e constrói o índice **3,6× mais rápido** (a inserção está em paridade — 18,8 s contra 19,7 s; a diferença é toda da construção do grafo). A leitura ingênua da mesma corrida — `ef_search` igual dos dois lados — diria o oposto, porque ali o TheoDB entrega recall 0,96 contra 0,9835 (B-035)
+
+### Changed
+- **A imagem do TheoDB passa a ser construída UMA vez por corrida, e não onze.** Cada job fazia o
+  próprio `docker build` e nenhum declarava dependência, então o único job que publicava cache e os
+  oito que o liam partiam no mesmo instante: em cache fria — isto é, sempre que o `Dockerfile` muda —
+  os nove compilavam Rust + pgrx do zero em paralelo. O ganho maior não é tempo: oito builds
+  independentes produzem oito imagens que só se **presume** idênticas, e agora todo job exercita o
+  mesmo artefato, publicado uma vez e puxado por digest (#B-085)
+- **A esteira do banco para de rodar o avaliador, que virou projeto próprio.** O harness Python foi
+  removido em 2026-08-12 e hoje é o repositório irmão `theodb-bench`, independente, que consome o
+  TheoDB como sistema sob teste — mas o `ci.yml` continuava instalando um `requirements.txt` que não
+  existe mais, em **sete** jobs. A esteira do produto passa a guardar só o que vive com o produto:
+  smokes, presença de superfície SQL, regressão upstream, migração e licença. Recall, QPS, nDCG e
+  comparação com concorrente são avaliação, e avaliação é do bench (#B-084)
+- **Versões de patch do PostgreSQL deixam de ser constantes nossas.** Três lugares fixavam `18.4` — a
+  versão que a máquina antiga por acaso tinha — enquanto a imagem base já servia **18.6**: o caminho
+  do pgrx, o `source tag` da suíte de regressão e a checagem que os compara. Todos derivados agora,
+  e o erro passa a dizer o que fazer em vez de só recusar (#B-084)
+- **A esteira inteira passa a rodar em runner GitHub-hosted.** Os doze workflows saíram da máquina
+  própria: em repositório público o runner padrão é grátis e ilimitado, e sobretudo **paralelo** — a
+  máquina paga era única e serial, e os dez workflows do mesmo push enfileiravam. A primeira medição
+  já apareceu: `actionlint` fechou em **11 segundos**, contra os 66 a 120 minutos que o `lint-rust`
+  levava para rodar um `cargo fmt --check` — quase tudo fila (#B-083)
+- Os jobs que compilam ganharam o preparo que a máquina quente dispensava: PostgreSQL 18 do PGDG
+  como `pg_config`, `cargo-pgrx` e `pgrx init` **com cache**, seguindo o mesmo caminho barato que o
+  `Dockerfile` já usava (usar o `pg_config` do sistema em vez de compilar PostgreSQL) (#B-083)
+- **Os gates leves saem da máquina paga.** `actionlint`, `license-gate` e `schema-drift-gate` passam a
+  rodar em runner GitHub-hosted, que é grátis e ilimitado em repositório público. O runner próprio é
+  único e serial, e o custo disso estava medido: `lint-rust` levou de 66 a 120 minutos para rodar um
+  `cargo fmt --check`, quase tudo fila atrás de outros nove workflows. Os jobs que compilam continuam
+  na máquina grande até a sonda dizer que cabem (#B-083)
+- Quatro workflows não declaravam `permissions` e herdavam o default do repositório, que pode ser
+  write-all. Agora os dez declaram o mínimo que usam (#B-083)
+- **A tabela de roteamento de manutenção passa a ser deste projeto**, em vez da do ecossistema inteiro
+  (16 repositórios, dos quais esta máquina tem dois). A unidade de propriedade aqui é o **pilar** —
+  vetorial, lexical, colunar, motor, caminho crítico, superfície de IA, acervo, método, arnês,
+  governança — porque dois repositórios carregam oito pilares entre si, e uma tabela em forma de
+  repositório mandaria 66 de 80 itens para um dono genérico. Dois especialistas novos escritos, e o
+  registro de manutenção passa a fechar sem nenhum achado (#B-077)
+- O `README.md` **qualifica** a afirmação de compatibilidade (B-055). Ela dizia "100% compatível com PostgreSQL. Seus drivers, ferramentas e aplicações funcionam sem mudança" — absoluta, e um pooler é uma ferramenta. Compatibilidade de **protocolo** é dedutível (o TheoDB *é* PostgreSQL 18); compatibilidade de **ecossistema** não é: o ajuste de busca é GUC de sessão (`SET theodb_hnsw.ef_search`), então sob *transaction pooling* ele precisa de `SET LOCAL`. A matriz PgBouncer nos três modos **não foi medida**, e o README passa a dizer isso com o número do item
+- O núcleo numérico de distância vetorial virou um módulo **puro** (`theodb_rs/src/vec/kernels.rs`, zero `crate::`), separado da fronteira PostgreSQL que continua em `vec.rs` (B-053). Nenhuma verificação mudou de lugar e nenhum dos 17 call sites foi tocado — o re-export mantém a API. Foi o que permitiu tirar o micro-bench de SIMD da suíte funcional (B-023), onde ele cronometrava parede: o mesmo binário media 0,78× após os outros 439 testes e 0,66× com 3 contêineres ao lado, reportando a térmica do laptop como qualidade do kernel. Velocidade agora é `cargo bench --bench simd_cosine`, com o `criterion` reportando variância; a **correção** do despacho continua na suíte, comparada contra o oráculo escalar em 8 dimensões
+- O cliente do **VectorDBBench** deixa de recusar `m`/`ef_construction` por uma constante espelhada de `build.rs` e passa a **perguntar ao servidor** (B-046): um `CREATE INDEX` com as opções pedidas, numa tabela temporária dentro de um savepoint sempre revertido, antes da carga do dataset. Uma constante descreve o motor contra o qual o cliente foi escrito, não aquele para onde ele aponta — decidir por ela mede o rótulo em vez da capacidade, que é o erro que a corrida lexical do b047 documentou
+- **A variável de ambiente `THEODB_HNSW_EF_CONSTRUCTION` foi removida** (B-036). Quem a usava em varredura de benchmark passa a usar `WITH (ef_construction = N)`, que é estritamente melhor: vale por índice em vez de por servidor, e é alcançável por uma sessão de cliente sem reiniciar nada. Duas fontes para o mesmo knob obrigariam uma regra de precedência que ninguém pediu — o custo de descobrir isso tarde foi o que o B-034 pagou
+- **Índices existentes não mudam** (B-036): sem a opção declarada, `rd_options` é nulo e o acessor devolve exatamente o default de hoje (`m=16`, `ef_construction=64`), que por coincidência é o mesmo do pgvector. Nenhuma medição publicada (b035, b040, b044, b047) precisa ser refeita
+- A estimativa de custo do planner passa a ler o `m` **declarado no índice** em vez da constante 16 (`am/cost.rs`, B-036). Lê de `rd_options`, nunca do meta de página: uma segunda leitura de página ali seria uma superfície de erro nova dentro do `amcostestimate`, que não pode abortar plano nenhum
+- Índices lexicais **já construídos não mudam de comportamento e não precisam de migração**: o Tantivy serializa o nome do tokenizer no schema de cada índice, então os antigos continuam resolvendo `default`. Para ganhar stemming, rode `bm25_build` de novo (B-044)
+
 ### Fixed
 - **O portão de vulnerabilidades da imagem volta a poder passar.** Ele reprovava em 60 achados
   CRITICAL/HIGH da imagem base do PostgreSQL, dos quais **38 não têm correção disponível em lugar
@@ -41,92 +119,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   código nosso do `theodb_ivfflat`, inclusive a opção `WITH (lists = N)`, então a sintaxe é coberta
   por inteiro e não só o nome. O shim vai a **0.7.0**, com caminho de atualização para quem já tem
   0.6.0 instalada (#B-037)
-
-### Changed
-- **A imagem do TheoDB passa a ser construída UMA vez por corrida, e não onze.** Cada job fazia o
-  próprio `docker build` e nenhum declarava dependência, então o único job que publicava cache e os
-  oito que o liam partiam no mesmo instante: em cache fria — isto é, sempre que o `Dockerfile` muda —
-  os nove compilavam Rust + pgrx do zero em paralelo. O ganho maior não é tempo: oito builds
-  independentes produzem oito imagens que só se **presume** idênticas, e agora todo job exercita o
-  mesmo artefato, publicado uma vez e puxado por digest (#B-085)
-- **A esteira do banco para de rodar o avaliador, que virou projeto próprio.** O harness Python foi
-  removido em 2026-08-12 e hoje é o repositório irmão `theodb-bench`, independente, que consome o
-  TheoDB como sistema sob teste — mas o `ci.yml` continuava instalando um `requirements.txt` que não
-  existe mais, em **sete** jobs. A esteira do produto passa a guardar só o que vive com o produto:
-  smokes, presença de superfície SQL, regressão upstream, migração e licença. Recall, QPS, nDCG e
-  comparação com concorrente são avaliação, e avaliação é do bench (#B-084)
-- **Versões de patch do PostgreSQL deixam de ser constantes nossas.** Três lugares fixavam `18.4` — a
-  versão que a máquina antiga por acaso tinha — enquanto a imagem base já servia **18.6**: o caminho
-  do pgrx, o `source tag` da suíte de regressão e a checagem que os compara. Todos derivados agora,
-  e o erro passa a dizer o que fazer em vez de só recusar (#B-084)
-- **A esteira inteira passa a rodar em runner GitHub-hosted.** Os doze workflows saíram da máquina
-  própria: em repositório público o runner padrão é grátis e ilimitado, e sobretudo **paralelo** — a
-  máquina paga era única e serial, e os dez workflows do mesmo push enfileiravam. A primeira medição
-  já apareceu: `actionlint` fechou em **11 segundos**, contra os 66 a 120 minutos que o `lint-rust`
-  levava para rodar um `cargo fmt --check` — quase tudo fila (#B-083)
-- Os jobs que compilam ganharam o preparo que a máquina quente dispensava: PostgreSQL 18 do PGDG
-  como `pg_config`, `cargo-pgrx` e `pgrx init` **com cache**, seguindo o mesmo caminho barato que o
-  `Dockerfile` já usava (usar o `pg_config` do sistema em vez de compilar PostgreSQL) (#B-083)
-
-### Added
-- **A esteira passa a criar a release.** Nenhum workflow fazia isso — medido: zero ocorrências de
-  `gh release`, gatilho `release:` ou equivalente nos nove arquivos existentes, e é por isso que
-  `main` ficou em 0.158.0 desde julho com duas versões escritas no changelog e nunca cortadas. O
-  novo `release.yml` dispara na tag `v*`, extrai as notas **do CHANGELOG** (não do log de commits,
-  porque o changelog é o texto que alguém revisou) e recusa publicar quando a versão não tem seção —
-  uma release de corpo vazio afirma que não houve mudança (#B-082)
-- `runner-probe`: sonda sob demanda que mede se os jobs pesados cabem num runner GitHub-hosted, em
-  vez de decidir isso por leitura de documentação (#B-083)
-- `dependabot.yml` para as actions — até aqui ninguém avisava que havia versão nova (#B-083)
-
-### Changed
-- **Os gates leves saem da máquina paga.** `actionlint`, `license-gate` e `schema-drift-gate` passam a
-  rodar em runner GitHub-hosted, que é grátis e ilimitado em repositório público. O runner próprio é
-  único e serial, e o custo disso estava medido: `lint-rust` levou de 66 a 120 minutos para rodar um
-  `cargo fmt --check`, quase tudo fila atrás de outros nove workflows. Os jobs que compilam continuam
-  na máquina grande até a sonda dizer que cabem (#B-083)
-- Quatro workflows não declaravam `permissions` e herdavam o default do repositório, que pode ser
-  write-all. Agora os dez declaram o mínimo que usam (#B-083)
-
-## [0.160.1] - 2026-08-20
-
-### Added
-- **Os 14 planos de implementação deste projeto passam a ser medidos contra o avaliador de planos**, e
-  o resultado vira teste de regressão: doze pontuam entre 98,0 e 100,0 sem nenhuma reprovação
-  estrutural, um pontua 89,0 por não declarar teste de concorrência, e um não pontua porque o
-  avaliador **quebra** em vez de reprovar quando o plano não tem matriz de cobertura — registrado como
-  defeito em vez de aceito como contrato (#B-081)
-- Escala de referência de 20 000 000 de vetores registrada no backlog (B-075) e documentada na wiki:
-  corpus BIGANN real verificado por checksum, oráculo em streaming e a razão de 20M e não 100M (#B-075)
-- **`m` e `ef_construction` viram opções de índice de verdade** (B-036): `CREATE INDEX … USING theodb_hnsw (e) WITH (m = 32, ef_construction = 200)` passa a ser aceito **e honrado** — até aqui devolvia `unrecognized parameter "m"`, e o build era fixo em 16/64. É a sintaxe de build do pgvector, que o ADR-0029 § D2 promete como drop-in
-- O valor pedido é honrado nos **quatro** caminhos que constroem grafo, não só no `CREATE INDEX`: build inicial, índice vazio, INSERT posterior e o fold do VACUUM. Um índice criado com `ef_construction=200` deixaria de honrá-lo a cada linha inserida depois, e um VACUUM o reconstruiria com o default — em silêncio nos dois casos, porque `ef_construction` não é persistido em lugar nenhum (B-036)
-- Fora de faixa é **recusado nomeando a opção** (`m` em 2..39, `ef_construction` em 4..1000), não truncado em silêncio. O teto de `m` é derivado do page layout — no pior caso um nó ocupa `HNSW_MAX_LEVEL·m + m0 = 34m` slots e a tupla de vizinhos tem de caber em 8.168 bytes, o que dá 39; não é o 100 do pgvector, cujo teto de nível é outro (B-036)
-- **Teste de significância pareada volta ao projeto** (`benchmarks/significance/`, B-045): permutação pareada de Smucker/Allan/Carterette recuperada do histórico, mais o avaliador por consulta que nunca existiu para o VectorDBBench. 22 testes, sem banco e sem rede
-- A **paridade lexical do b047 deixa de ser observada e passa a ser demonstrada**: p=0,477 contra Elasticsearch e p=0,466 contra OpenSearch sobre **6.980 consultas**, com IC 95% estreito em torno de zero ([−0,0011, +0,0025] em NDCG) — evidência de equivalência, não falta de poder. 6.484 das 6.980 consultas empatam exatamente (B-045)
-- **Primeira comparação lexical contra concorrentes reais**, na mesma máquina e na mesma corrida (`wiki/benchmarks/b047-lexical-headtohead.md`): TheoDB × Elasticsearch 9.1.2 × OpenSearch 2.17.1, MS MARCO 100K. **Com pré-processamento casado a qualidade é paridade** — NDCG@10 0,7351 contra 0,7343 e 0,7344 — e o **Elasticsearch faz 4,3× o nosso QPS**. Somos 2× mais rápidos na carga (B-047)
-- **Stemming e remoção de stopwords no pilar lexical** (B-044). Índices novos usam o analisador `theodb_en` — SimpleTokenizer + RemoveLong + LowerCaser + StopWordFilter + Stemmer (Snowball inglês) — e a consulta `jumping` passa a casar documentos com `jumps`. Medido em A/B na mesma máquina, MS MARCO 100K: **NDCG@10 +5,6% (0,6962 → 0,7351), recall +5,5%, MRR +5,5% — e QPS +10,9%**, porque remover stopwords encurta as listas de postings mais do que o stemmer as alonga. Custo: +1,03 s no build de 100.000 documentos
-- Suporte a **full-text (BM25)** no cliente `theodb` do VectorDBBench — quatro métodos na classe existente, zero pontos de registro novos. É o **primeiro cliente PostgreSQL com FTS** no arnês (B-040)
-- Primeira medição do pilar lexical em arnês público (`wiki/benchmarks/b040-theodb-fts-msmarco.md`): MS MARCO 100K, **NDCG@10 0,6962, recall@10 0,8025, MRR 0,667** a 1.616 QPS de pico, p99 serial 4,8 ms. **Sem stemming, sem operadores de consulta e `k1`/`b` não configuráveis** — declarado antes da tabela, porque os motores comparáveis stemmizam por padrão (B-040)
-- Cliente `theodb` para o **VectorDBBench**, em fork de diff mínimo — `pip install "vectordb-bench[theodb] @ git+https://github.com/usetheoai/VectorDBBench@theodb"` — devolvendo ao projeto um arnês de benchmark reproduzível e multi-sistema, ausente desde a remoção de `benchmarks/` (B-035)
-- `benchmarks/vectordbbench/` — compose e runner que fixam a **mesma versão de PostgreSQL** nos dois motores comparados e recusam a corrida se divergirem (B-035)
-- Primeira medição comparativa publicada em `wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md`: **a recall casado (~0,983) o pgvector faz +16% de QPS**, e constrói o índice **3,6× mais rápido** (a inserção está em paridade — 18,8 s contra 19,7 s; a diferença é toda da construção do grafo). A leitura ingênua da mesma corrida — `ef_search` igual dos dois lados — diria o oposto, porque ali o TheoDB entrega recall 0,96 contra 0,9835 (B-035)
-
-### Changed
-- **A tabela de roteamento de manutenção passa a ser deste projeto**, em vez da do ecossistema inteiro
-  (16 repositórios, dos quais esta máquina tem dois). A unidade de propriedade aqui é o **pilar** —
-  vetorial, lexical, colunar, motor, caminho crítico, superfície de IA, acervo, método, arnês,
-  governança — porque dois repositórios carregam oito pilares entre si, e uma tabela em forma de
-  repositório mandaria 66 de 80 itens para um dono genérico. Dois especialistas novos escritos, e o
-  registro de manutenção passa a fechar sem nenhum achado (#B-077)
-- O `README.md` **qualifica** a afirmação de compatibilidade (B-055). Ela dizia "100% compatível com PostgreSQL. Seus drivers, ferramentas e aplicações funcionam sem mudança" — absoluta, e um pooler é uma ferramenta. Compatibilidade de **protocolo** é dedutível (o TheoDB *é* PostgreSQL 18); compatibilidade de **ecossistema** não é: o ajuste de busca é GUC de sessão (`SET theodb_hnsw.ef_search`), então sob *transaction pooling* ele precisa de `SET LOCAL`. A matriz PgBouncer nos três modos **não foi medida**, e o README passa a dizer isso com o número do item
-- O núcleo numérico de distância vetorial virou um módulo **puro** (`theodb_rs/src/vec/kernels.rs`, zero `crate::`), separado da fronteira PostgreSQL que continua em `vec.rs` (B-053). Nenhuma verificação mudou de lugar e nenhum dos 17 call sites foi tocado — o re-export mantém a API. Foi o que permitiu tirar o micro-bench de SIMD da suíte funcional (B-023), onde ele cronometrava parede: o mesmo binário media 0,78× após os outros 439 testes e 0,66× com 3 contêineres ao lado, reportando a térmica do laptop como qualidade do kernel. Velocidade agora é `cargo bench --bench simd_cosine`, com o `criterion` reportando variância; a **correção** do despacho continua na suíte, comparada contra o oráculo escalar em 8 dimensões
-- O cliente do **VectorDBBench** deixa de recusar `m`/`ef_construction` por uma constante espelhada de `build.rs` e passa a **perguntar ao servidor** (B-046): um `CREATE INDEX` com as opções pedidas, numa tabela temporária dentro de um savepoint sempre revertido, antes da carga do dataset. Uma constante descreve o motor contra o qual o cliente foi escrito, não aquele para onde ele aponta — decidir por ela mede o rótulo em vez da capacidade, que é o erro que a corrida lexical do b047 documentou
-- **A variável de ambiente `THEODB_HNSW_EF_CONSTRUCTION` foi removida** (B-036). Quem a usava em varredura de benchmark passa a usar `WITH (ef_construction = N)`, que é estritamente melhor: vale por índice em vez de por servidor, e é alcançável por uma sessão de cliente sem reiniciar nada. Duas fontes para o mesmo knob obrigariam uma regra de precedência que ninguém pediu — o custo de descobrir isso tarde foi o que o B-034 pagou
-- **Índices existentes não mudam** (B-036): sem a opção declarada, `rd_options` é nulo e o acessor devolve exatamente o default de hoje (`m=16`, `ef_construction=64`), que por coincidência é o mesmo do pgvector. Nenhuma medição publicada (b035, b040, b044, b047) precisa ser refeita
-- A estimativa de custo do planner passa a ler o `m` **declarado no índice** em vez da constante 16 (`am/cost.rs`, B-036). Lê de `rd_options`, nunca do meta de página: uma segunda leitura de página ali seria uma superfície de erro nova dentro do `amcostestimate`, que não pode abortar plano nenhum
-- Índices lexicais **já construídos não mudam de comportamento e não precisam de migração**: o Tantivy serializa o nome do tokenizer no schema de cada índice, então os antigos continuam resolvendo `default`. Para ganhar stemming, rode `bm25_build` de novo (B-044)
-
-### Fixed
 - **O primeiro comando do README apontava para uma conta que não hospeda o pacote.** A seção de
   instalação mandava `docker pull ghcr.io/usetheodev/theo-db:latest`; `usetheodev` existe como
   **usuário**, não como a organização (`usetheoai`) que hospeda os repositórios. A mesma grafia já

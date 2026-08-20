@@ -3276,7 +3276,19 @@ consertado_parcialmente: 2026-08-20 — o `publish-image.yml` deixou de delegar 
   **Aberto e MEDIDO como incerto:** o push para o GHCR pode ainda ser recusado por política de
   organização. Evidência: o job `build` do `ci.yml`, com `packages: write` declarado e verificado,
   recebeu `denied: permission_denied: read_package` ao publicar `ci-<sha>` — por isso o build único
-  do CI passou a entregar a imagem por ARTEFATO. A primeira corrida deste workflow é que responde.
+  do CI passou a entregar a imagem por ARTEFATO. A primeira corrida respondeu (run `32403860603`) e ISOLA o problema:
+  `Build` OK · **`Portão Trivy` OK** · **`Login no GHCR` OK** · `Push` **RECUSADO**, com
+  `denied: permission_denied: read_package` ao publicar `ghcr.io/usetheoai/theo-db:develop`.
+  **Descartado por medição, não por suposição:** o arquivo do workflow (roda e executa jobs), a
+  visibilidade cruzada (causa antiga, corrigida), o portão de CVE (passa desde que só bloqueia o
+  acionável) e a autenticação (o login sucede). Sobra AUTORIZAÇÃO sobre o pacote.
+  `read_package` num push é característico de pacote que JÁ EXISTE e ao qual o `GITHUB_TOKEN` não
+  tem acesso — plausível, dado que o README apontou por muito tempo para `usetheodev`, que existe
+  como USUÁRIO. Mas é hipótese, e digo assim: **não consigo verificar**. Meu token não tem escopo
+  `read:packages`, e ampliar o escopo do token do owner sem pedir está fora do que eu faço.
+  O passo seguinte é do owner: conferir em Settings > Packages da org se há pacote `theo-db`
+  conflitante e se a criação de pacote por Actions está permitida.
+  **Não bloqueia release:** a `v0.158.0` foi cortada com este mesmo gate vermelho.
 
 dod:
   - a causa da falha de CARREGAMENTO do `publish-image.yml` está identificada por medição, não por hipótese
