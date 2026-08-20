@@ -14,6 +14,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **A publicação da imagem deixa de depender de um repositório privado, e por isso volta a ser
+  possível.** O workflow delegava a um reutilizável em `usetheoai/theo`, que é privado, enquanto
+  este repositório é público — e o GitHub não permite essa combinação. Era essa a causa de as oito
+  execuções desde 2026-07-29 falharem sem sequer iniciar um job, incluindo a do release `v0.158.0`.
+  O workflow passa a ser próprio, com o portão de vulnerabilidades mantido **antes** do push
+  (#B-082)
 - **Índices `ivfflat` criados pela sintaxe do pgvector voltam a funcionar.** O shim de
   compatibilidade registrava o apelido `hnsw` e parava aí: `CREATE INDEX ... USING ivfflat (...)` —
   o que uma aplicação pgvector escreve — falhava com *"access method ivfflat does not exist"*, e um

@@ -3250,6 +3250,15 @@ passo do Trivy e reprovou por CVE; a de 2026-08-20 morreu no carregamento do wor
 *"This run likely failed because of a workflow file issue"*. O reutilizável (`usetheoai/theo@develop`) existe,
 aceita todos os inputs que passamos, tem todos os secrets `required: false`, e não muda desde 2026-07-31 —
 ou seja, a causa da falha de carregamento **não foi identificada** e continua aberta.
+**CAUSA-RAIZ ENCONTRADA em 2026-08-20, e ela explica os 8 de 8.** Medido:
+`gh repo view usetheoai/theo --json visibility` devolve **PRIVATE**, e `usetheoai/theo-db` é
+**PUBLIC**. O GitHub **não permite que um repositório público consuma workflow reutilizável de um
+repositório privado** — o `access_level: organization` que o `theo` declara libera repos
+privados/internos da org, não públicos. É por isso que o run morre com **zero jobs**: a referência
+`uses: usetheoai/theo/...@develop` não resolve, e nenhuma edição neste repositório resolveria.
+A hipótese que eu vinha perseguindo (input, secret ou versão do reutilizável) estava errada em todas
+as três — inputs conferem, todos os secrets são `required: false`, e o arquivo não muda desde
+2026-07-31. O que faltava era olhar para a VISIBILIDADE, que não é propriedade do arquivo.
 **(3) O manifesto não responde.** `GET /v2/{org}/theo-db/manifests/latest` no `ghcr.io`, com token anônimo,
 devolve **HTTP 403** em `usetheodev` **e** em `usetheoai`. Limite honesto: 403 não distingue "não existe" de
 "privado" — mas somado a 8/8 falhas de publicação, a leitura de que nunca foi publicada é a sustentada.
@@ -3259,6 +3268,16 @@ why_now: é o **primeiro comando** que um usuário executa, na seção `## Insta
 motivos independentes e nenhum dizia isso a quem tentasse. A org foi corrigida em 2026-08-20 e o README passa
 a declarar que a imagem não está publicada, com este número — mas declarar não publica.
 status: triaged
+consertado_parcialmente: 2026-08-20 — o `publish-image.yml` deixou de delegar e passou a ser NATIVO:
+  build, portão Trivy antes do push (pela imagem oficial fixada por digest, o precedente do
+  `actionlint` neste repo, e não por action nova que engordaria o [[B-083]]) e push por tag/branch.
+  **Não** foram reescritos SBOM, provenance SLSA e assinatura cosign — cada um traria action de
+  terceiro, e isso espera decisão do B-083 em vez de vir a reboque.
+  **Aberto e MEDIDO como incerto:** o push para o GHCR pode ainda ser recusado por política de
+  organização. Evidência: o job `build` do `ci.yml`, com `packages: write` declarado e verificado,
+  recebeu `denied: permission_denied: read_package` ao publicar `ci-<sha>` — por isso o build único
+  do CI passou a entregar a imagem por ARTEFATO. A primeira corrida deste workflow é que responde.
+
 dod:
   - a causa da falha de CARREGAMENTO do `publish-image.yml` está identificada por medição, não por hipótese
   - o gate do Trivy tem desfecho decidido pela ordem do grill `release-train-restart` (rebuild, depois
