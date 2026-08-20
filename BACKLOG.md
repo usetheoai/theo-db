@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-80 items — **Open** 41 · **In flight** 33 · **Closed** 6
+81 items — **Open** 39 · **In flight** 35 · **Closed** 7
 
-### Open (41)
+### Open (39)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -103,7 +103,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `triaged` | — |
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
-| [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default----) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `triaged` | — |
 | [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado----) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `triaged` | — |
 | [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela----) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `triaged` | — |
 | [`B-066`](#b-066--a-contenção-escritascan-não-é-medível-não-existe-arnês-concorrente----) | A contenção escrita×scan não é medível: não existe arnês concorrente | `triaged` | — |
@@ -113,10 +112,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem----) | Dois flags de perfil prometem gates que não existem | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 | [`B-077`](#b-077--a-tabela-de-roteamento-é-a-do-ecossistema-inteiro-e-os-dois-repos-que-existem-não-roteiam----) | A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam | `triaged` | — |
-| [`B-078`](#b-078--seis-módulos-de-teste-do-kit-não-coletam-um-símbolo-removido-levou-as-suítes-junto----) | Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto | `triaged` | — |
-| [`B-079`](#b-079--o-tooling-escrito-em-claude-protege-uma-máquina-até-chegar-ao-repo-do-kit----) | O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit | `triaged` | — |
+| [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar----) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `triaged` | — |
 
-### In flight (33)
+### In flight (35)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -147,14 +145,16 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-060`](#b-060--o-arnês-verifica-que-o-índice-foi-usado-e-não-verifica-que-o-knob-de-busca-pegou----) | O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou | `planned` | — |
 | [`B-061`](#b-061--só-duas-suites-registradas-as-duas-vetoriais-o-colunar-não-tem-onde-ser-comparado----) | Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado | `planned` | — |
+| [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default----) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `planned` | — |
 | [`B-064`](#b-064--o-eixo-theodb-do-próprio-arnês-não-constrói-índice-ele-emite-a-sintaxe-do-pgvector-contra-os-ams-do-theodb----) | O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB | `planned` | — |
 | [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada----) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `planned` | — |
 | [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala----) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina----) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
+| [`B-079`](#b-079--o-tooling-escrito-em-claude-protege-uma-máquina-até-chegar-ao-repo-do-kit----) | O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit | `planned` | — |
 
-### Closed (6)
+### Closed (7)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -163,6 +163,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-021`](#b-021--o-diagnóstico-não-enxerga-índice-criado-pela-sintaxe-pgvector-e-o-opclass-default-não-serve-----) | O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>` | `shipped` | — |
 | [`B-024`](#b-024--o-autotune-recomendou-ef_search-sobre-contadores-em-zero-e-ninguém-mediu-o-alcance----) | O autotune recomendou `ef_search` sobre contadores em ZERO, e ninguém mediu o alcance | `killed` | — |
 | [`B-028`](#b-028--o-harness-de-upgrade-declarou-todos-os-cenários-passaram-com-um-cenário-pulado---x) | O harness de upgrade declarou "TODOS OS CENÁRIOS PASSARAM" com um cenário PULADO | `killed` | — |
+| [`B-078`](#b-078--seis-módulos-de-teste-do-kit-não-coletam-um-símbolo-removido-levou-as-suítes-junto----) | Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto | `killed` | — |
 | [`B-080`](#b-080--o-renumbered-do-revisor-de-backlog-é-blocker-e-afirma-um-dano-que-a-evidência-não-mostra----) | O `renumbered` do revisor de backlog é BLOCKER e afirma um dano que a evidência não mostra | `killed` | — |
 
 <!-- BACKLOG-INDEX:END -->
@@ -2507,7 +2508,20 @@ why_now: é o [[B-052]] um repositório ao lado, e com um agravante: no `theo-db
 ele não tinha onde olhar. Criei `develop` a partir de `b6a5bfd` para que o PR #1 tivesse alvo — o que resolve o
 sintoma e **não** a estrutura: não há `main`, não há tag de release, não há branch protection, e nada impede o
 próximo push de ir direto para a default.
-status: triaged
+status: planned
+entregue: 2026-08-20, as quatro partes do DoD, verificadas contra a API do GitHub e não contra a intenção.
+  (1) `main` criada a partir de `develop` (`f6f98c5`), então `workspace → develop → main` existe no remoto;
+  (2) branch protection nas DUAS exigindo pull request — `gh api .../branches/{main,develop}` devolve
+  `protected=true`, `enforce_admins=true`, `required_pull_request_reviews` não-nulo, force-push e deleção
+  negados. `required_approving_review_count` é **0** de propósito: o GitHub não deixa o autor aprovar o
+  próprio PR, então num repo de mantenedor único exigir 1 aprovação é deadlock, não portão — zero continua
+  exigindo o PR, que é a garantia que faltava;
+  (3) `default_branch` passou de `workspace` para `main`;
+  (4) o `CLAUDE.md` do `theodb-bench` declara o fluxo (`a9a7d53`), com as duas camadas separadas — o hook
+  local governa onde o trabalho NASCE, a proteção é o que torna o PR OBRIGATÓRIO.
+  `planned` e não `shipped` pela mesma convenção do [[B-059]]: o commit da doc vive em `workspace` e o corte
+  de release ainda não passou. **Mas a metade que importava já está viva**, porque configuração de remoto não
+  espera release.
 dod:
   - a estrutura que o `ci.yml` já declara existe no remoto: `workspace` → `develop` → `main`
   - `main` e `develop` têm branch protection exigindo PR — sem isso o hook local garante a ORIGEM do trabalho e
@@ -3026,7 +3040,21 @@ para trás foram os testes que importavam o símbolo.
 why_now: um `pytest skills/` no diretório inteiro **aborta na coleta**, então quem rodar a suíte do kit de
 forma ampla não vê 210 verdes — vê seis erros e nenhum resultado. E a quebra é invisível para quem roda só
 os diretórios que mexeu, que foi como ela sobreviveu.
-status: triaged
+status: killed
+kill_reason: 2026-08-20 — **a causa que registrei estava ERRADA, e o item é retratado com o que foi medido
+  no lugar dela.** Eu escrevi que um símbolo removido (`_has_defer_corner_marker`) levara as suítes junto.
+  Medido depois: o símbolo EXISTE, em `skills/discover-plan-confidence/scripts/check_corner_coverage.py`, e a
+  slice inteira é byte a byte idêntica à do kit. O erro de coleta vem de eu ter rodado `pytest skills/`, que
+  põe os `scripts/` de 31 slices num só `sys.path` e faz `import check_corner_coverage` resolver para a
+  primeira que carregar. **O kit falha exatamente igual**, e `scripts/run_slice_tests.sh` documenta isso desde
+  sempre: as slices são import-isoladas de propósito e uma corrida ampla é *"a configuration that never
+  happens in real use"*. Rodei a invocação não suportada e filei o resultado como bug.
+  **O que a invocação CORRETA revelou, e isso sim era real:** quatro slices falhando por quatro causas
+  distintas, todas consertadas hoje e todas verdes agora (`run_slice_tests.sh` → ALL SUITES GREEN):
+  (a) `code-quality` — `rules/code-quality-languages.txt` tinha o CABEÇALHO do formato antigo (a config
+  `rust | theodb_rs/Cargo.toml | ENABLED` já estava correta, então o portão NÃO estava inerte);
+  (b) `plan-confidence` — os 14 planos reais deste projeto nunca tinham sido exercitados contra o scorer;
+  (c) e (d) `discover-confidence` e `discover-plan-confidence` — ver [[B-081]], que nasce daqui.
 status_nota: 2026-08-20 — filado por engano como `raw` carregando evidência medida. `raw` é hipótese SEM
   evidência (`cycle-backlog.md § Item schema`); achado com medição nasce `triaged`. Corrigido no mesmo dia,
   apontado por `check_backlog_structure.py`.
@@ -3075,7 +3103,22 @@ passa a descrever um estado conhecido; o que sobra é a decisão de sincronizar 
 existe até chegar ao repositório do kit"*.
 why_now: o trabalho está feito e verde. O custo de portar cresce com cada ciclo que roda por cima dele, e o
 `.claude/` deste repo recebe atualização do instalador — uma reinstalação sobrescreve o que não foi portado.
-status: triaged
+status: planned
+sincronizado: 2026-08-20 — a metade que faltava foi executada, com leitura arquivo a arquivo e NUNCA por
+  cópia cega. Trazidos do kit **13 arquivos** estritamente atrasados, mais `_layout.py` e seu teste, que eram
+  **dependência transitiva ausente** (o `check_phase_review.py` novo importa `_layout` e a primeira tentativa
+  morreu em `ModuleNotFoundError`). Entre eles dois consertos de correção real: `_layout.py`, que impede o
+  knowledge-base dividido (o defeito não chegou a se materializar aqui — não há `knowledge-base/` na raiz), e
+  `_shared.py` com o #343, em que todo achado D5 de arquitetura resolvia para `finding_type == ""` e era
+  **estruturalmente inallowlistável**.
+  **PRESERVADO por medição, não por cautela:** `skills/code-quality/scripts/detectors/rust.py` (+137 linhas
+  só aqui) e `tests/test_rust_detector.py` (+154, e ZERO linhas exclusivas do kit). Este projeto estendeu o
+  detector Rust localmente, que é exatamente o que um projeto pgrx deve fazer. Sincronizar por diretório teria
+  destruído isso — a mesma cópia cega que a primeira versão deste item recomendava.
+  Continuam divergentes de propósito: os dois arquivos do intake que este ciclo escreveu (`--rule` +
+  herméticos), o detector Rust e seu teste, `SKILL.md` e `conftest.py` do `code-quality` (±2 linhas), e agora
+  os dois resolvedores do [[B-081]]. `planned` e não `shipped` porque nada disso chegou ao kit — decisão de
+  escopo do owner, registrada e não esquecida.
 status_nota: 2026-08-20 — filado por engano como `raw` carregando evidência medida. `raw` é hipótese SEM
   evidência (`cycle-backlog.md § Item schema`); achado com medição nasce `triaged`. Corrigido no mesmo dia,
   apontado por `check_backlog_structure.py`.
@@ -3137,3 +3180,44 @@ segunda_instancia: 2026-08-20 — a mesma classe apareceu num segundo achado, e 
   ele entregou.
   **Não consertado aqui de propósito:** escrever um DoD retroativo para um item já fechado seria inventar um
   critério depois do fato, que é o que `cycle-acceptance.md § Hard gates` chama de graduar um alvo movido.
+
+## B-081 — Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar   [ ]
+
+domain: governanca
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: medido em 2026-08-20 rodando `scripts/run_slice_tests.sh`, a invocação suportada. **Três defeitos,
+duas classes.**
+**(1) Resolução de caminho cega ao layout de plugin.** `check_evidence_pointers.py:_resolve_code_pointer` fazia
+`project_root / rel_path` e mais nada. `_find_project_root` sobe até achar `.claude` ou `.git`, o que num
+consumidor devolve a raiz do PROJETO — mas `rules/` e `skills/` vivem um nível abaixo, sob `.claude/`. Efeito
+medido: a fixture `good-opportunity.md` **da própria skill** pontuou `INVALID` com
+`hard_caps_triggered: ['fabricated_evidence']`, `evidence_pointers_score: 0.0`, os quatro pointers reportados
+`missing_file`. No kit passa, porque lá `rules/` está na raiz. Ou seja: **em qualquer consumidor, uma
+oportunidade que cite um arquivo do ecossistema é acusada de evidência fabricada.**
+**(2) A mesma cegueira no irmão, e metade do acordo já estava escrita.**
+`check_measurement_targets.py:53-54` já carregava as duas candidatas (`rules/…` e `.claude/rules/…`) para o
+`live-target.txt`, e a linha 86 — onde os targets do plano são resolvidos — não. Mesma forma do #343 que o kit
+documenta: o produtor concordou, o consumidor não foi atualizado.
+**(3) Um portão que QUEBRA em vez de reprovar.** `run_structural` levanta
+`ValueError: No '## Coverage Matrix' section found in plan` para `b015-b018-b019-plan.md`, em vez de emitir
+`INVALID` com `coverage_lt_100` — que é o hard cap que o `plan-confidence-golden-rule.md` define para
+exatamente essa condição. Quem chama não distingue "plano inválido" de "ferramenta quebrada"
+(`rules/error-handling.md § 2`: erro explícito e tipado, nunca exceção crua atravessando a fronteira).
+why_now: (1) e (2) foram consertados hoje localmente e os dois estão verdes, mas o conserto vive **só nesta
+máquina** — todo outro consumidor do kit segue acusando evidência fabricada em oportunidade legítima, e é o
+tipo de falso positivo que ensina a ignorar o portão. (3) **não** foi consertado: mexer no contrato de erro do
+`run_structural` é decisão de superfície pública, não conserto de borda, e o plano afetado ficou em
+`skipped_known` com a razão escrita em vez de ter a exceção pinada como se fosse contrato.
+status: triaged
+dod:
+  - a resolução de caminho ciente de layout é UMA implementação, não uma cópia por checador — hoje são três
+    lugares com a mesma condição (`_layout.py`, os dois resolvedores), e o `_layout.py` já registrava que a
+    regra de três pedia extração
+  - `run_structural` emite `INVALID` com `coverage_lt_100` para plano sem `## Coverage Matrix`, e o
+    `b015-b018-b019-plan.md` sai de `skipped_known` com banda pinada
+  - existe teste que roda um checador de pointers a partir de um layout de plugin e prova que um caminho do
+    ecossistema resolve
+  - os consertos chegam ao kit, ou está registrado por escrito que não chegam e qual consumidor fica exposto
+

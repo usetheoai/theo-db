@@ -157,8 +157,29 @@ def _count_placeholder_hits(text: str) -> int:
 
 
 def _count_glossary_entries(text: str) -> int:
+    """Count term/definition pairs, in EITHER shape the plans actually use.
+
+    B-101 — this counted bullets only, and measured across the 64 plans of one consumer,
+    47 were written as bullets and 17 as a table. The 17 were told "'### Domain glossary' has
+    no entries", which fired `soft_floor_baseline_context_incomplete` and capped a plan whose
+    glossary was on screen. A gate reporting ABSENCE where the evidence is present is worse
+    than a silent one: it is actionable, in the wrong direction.
+
+    Both spellings are sanctioned — the template writes the FILE table as a table — so the fix
+    widens the counter rather than migrating 17 historical records to satisfy a tool.
+    `audit-trail-rotation.md` keeps plans indefinitely as the record of what was agreed; editing
+    the record to make the meter read correctly is backwards.
+
+    A table contributes `rows - 2`: the header and the `|---|---|` separator are not entries.
+    Counting them would accept an EMPTY table (2 > 0), trading a false zero for a false pass on
+    exactly the placeholder case this section exists to catch.
+    """
     # Markdown bullets of the form: - **term** — definition
-    return len(re.findall(r"^\s*[-*]\s+\*\*[^*]+\*\*\s+[—–-]\s+\S", text, re.MULTILINE))
+    bullets = len(re.findall(r"^\s*[-*]\s+\*\*[^*]+\*\*\s+[—–-]\s+\S", text, re.MULTILINE))
+    # Markdown table rows. TABLE_ROW_RE is the module's existing pattern, reused rather than
+    # respelled — B-055 is what happens when one shape acquires a second definition.
+    table_rows = len(TABLE_ROW_RE.findall(text))
+    return bullets + max(0, table_rows - 2)
 
 
 def check_baseline_context(plan_path: Path) -> BaselineContextReport:

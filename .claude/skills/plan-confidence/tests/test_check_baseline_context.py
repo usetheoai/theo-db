@@ -173,3 +173,92 @@ None.
     assert r.is_complete is True
     assert r.file_table_placeholder_hits == 0
     p.unlink()
+
+
+# ---------------------------------------------------------------------------
+# B-101 — a glossary written as a table is still a glossary.
+#
+# MEASURED BEFORE THESE WERE WRITTEN, over the 64 plans in theokit-tui's knowledge-base:
+#
+#     bullets   47 plans   counted
+#     table     17 plans   counted as ZERO
+#     absent     0
+#
+# A quarter of the corpus carried a real glossary and was told "'### Domain glossary' has no
+# entries and no '(none)' marker", firing soft_floor_baseline_context_incomplete and capping the
+# verdict at 89. Reproduced both ways on one file: the same three terms as a table capped it;
+# as bullets, SHIPPABLE with zero caps, with nothing about the content changed.
+#
+# DETECTION POWER, measured after the fix rather than predicted: reverting
+# _count_glossary_entries to the bullets-only pattern gives 2 failed, 283 passed across the whole
+# plan-confidence slice; restored, 285 passed. (I had written 3 before measuring — the empty-table
+# and bullets-only cases survive the mutant by construction, since neither exercises the widening.)
+
+
+_TABLE_PLAN = """# Plan
+## Baseline Context
+### Files that will be touched
+| File | LoC | SHA |
+|---|---|---|
+| src/a.ts | 10 | abc1234 |
+### Current callers / dependents
+- **Symbol:** foo
+- **Callers (production):** src/b.ts
+### Domain glossary
+| term | meaning here |
+|---|---|
+| OSC | an escape sequence |
+| pillar (a) | a production caller exists |
+| soft floor | a cap limiting the verdict to 89 |
+### Architecture boundaries affected
+none
+## Goal
+x
+"""
+
+
+def test_a_glossary_written_as_a_table_is_counted():
+    p = _write(_TABLE_PLAN)
+    r = check_baseline_context(p)
+    assert r.glossary_entries == 3
+    assert not any("glossary" in reason.lower() for reason in r.reasons)
+    p.unlink()
+
+
+def test_an_empty_table_counts_zero():
+    """Header + separator are not entries — counting them would accept a placeholder."""
+    p = _write(_TABLE_PLAN.replace(
+        "| OSC | an escape sequence |\n"
+        "| pillar (a) | a production caller exists |\n"
+        "| soft floor | a cap limiting the verdict to 89 |\n",
+        "",
+    ))
+    r = check_baseline_context(p)
+    assert r.glossary_entries == 0
+    p.unlink()
+
+
+def test_a_glossary_written_as_bullets_still_counts():
+    """Widening a counter must not swap one accepted shape for another."""
+    p = _write(_TABLE_PLAN.replace(
+        "| term | meaning here |\n"
+        "|---|---|\n"
+        "| OSC | an escape sequence |\n"
+        "| pillar (a) | a production caller exists |\n"
+        "| soft floor | a cap limiting the verdict to 89 |\n",
+        "- **OSC** — an escape sequence\n"
+        "- **pillar (a)** — a production caller exists\n",
+    ))
+    r = check_baseline_context(p)
+    assert r.glossary_entries == 2
+    p.unlink()
+
+
+def test_a_glossary_mixing_a_table_and_bullets_counts_both():
+    p = _write(_TABLE_PLAN.replace(
+        "| soft floor | a cap limiting the verdict to 89 |\n",
+        "| soft floor | a cap limiting the verdict to 89 |\n\n- **entry** — one term and its definition\n",
+    ))
+    r = check_baseline_context(p)
+    assert r.glossary_entries == 4
+    p.unlink()

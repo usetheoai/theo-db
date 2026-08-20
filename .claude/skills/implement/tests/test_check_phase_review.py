@@ -102,3 +102,111 @@ def test_progress_as_json_string_is_tolerated(tmp_path: Path) -> None:
     report = check_phase_review(_plan(tmp_path), json.loads("{}"), "demo", [reviews])
     assert report.status == "PASS"
     assert report.phases_closed == []
+
+
+# B-039 — three mini reviews were written AFTER the commits they claim to gate, and nothing could
+# tell. Measured 2026-08-18 by mtime against `git log`:
+#
+#     last commit of the chain   14:30
+#     b020 phase-1 review        14:54
+#     b033 phase-1 review        14:54     <- 41 minutes after phase 2 was already committed
+#     b033 phase-2 review        14:54
+#     b034 phase-1 review        14:54
+#
+# `cycle-implement.md` says the mini review runs BEFORE the halt-loop accepts the next task. The
+# contrast proves the ordering is observable when real: b025's three carry 12:32/12:44/12:48,
+# interleaved with its commits.
+#
+# The signal is the git HEAD, not a timestamp. A timestamp is whatever the writer says it is; a sha
+# is checkable against the repository, and `git merge-base --is-ancestor` decides whether the review
+# ran at or before the phase closed.
+
+import subprocess
+import sys
+
+_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t", "PATH": "/usr/bin:/bin"}
+
+
+def _repo_with_two_commits(tmp_path: Path) -> tuple[Path, str, str]:
+    """A repo whose phase closes at commit A, and which then moves on to commit B."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    env = {**_ENV, "HOME": str(root)}
+    run = lambda *a: subprocess.run(["git", "-C", str(root), *a], check=True,
+                                    capture_output=True, text=True, env=env)
+    run("init", "-q")
+    (root / "a.txt").write_text("one\n", encoding="utf-8")
+    run("add", "-A"); run("-c", "commit.gpgsign=false", "commit", "-q", "-m", "phase 1 last")
+    first = run("rev-parse", "HEAD").stdout.strip()
+    (root / "b.txt").write_text("two\n", encoding="utf-8")
+    run("add", "-A"); run("-c", "commit.gpgsign=false", "commit", "-q", "-m", "later work")
+    second = run("rev-parse", "HEAD").stdout.strip()
+    return root, first, second
+
+
+def _report(root: Path, slug: str, phase: str, head: str | None) -> Path:
+    d = root / "reviews"
+    d.mkdir(exist_ok=True)
+    p = d / f"{slug}-phase{phase}-review-2026-08-19.md"
+    body = f"# Mini review — {slug} — Phase {phase}\n\n**Verdict:** `PHASE_REVIEW_PASS`\n"
+    if head is not None:
+        body += f"\n**Reviewed at head:** `{head}`\n"
+    p.write_text(body, encoding="utf-8")
+    return d
+
+
+def _progress_at(sha: str) -> dict:
+    return {"slug": "s", "tasks": [
+        {"id": "T1.1", "phase": "1", "status": "committed", "commit_sha": sha},
+        {"id": "T1.2", "phase": "1", "status": "committed", "commit_sha": sha},
+    ]}
+
+
+PLAN_ONE_PHASE = "# Plan\n\n## Phase 1 — foundation\n\n### T1.1 — first\n#### TDD\nRED\n\n### T1.2 — second\n#### TDD\nRED\n"
+
+
+def test_a_report_recorded_after_the_phase_closed_fails(tmp_path: Path) -> None:
+    root, first, second = _repo_with_two_commits(tmp_path)
+    plan = root / "plan.md"; plan.write_text(PLAN_ONE_PHASE, encoding="utf-8")
+    reviews = _report(root, "s", "1", second)   # recorded AFTER the phase's last commit
+
+    report = check_phase_review(plan, _progress_at(first), "s", [reviews], repo_root=root)
+
+    assert any(f.code == "retroactive_review" for f in report.findings), report.findings
+    assert report.status == "FAIL"
+
+
+def test_a_report_recorded_at_the_phase_close_passes(tmp_path: Path) -> None:
+    root, first, _second = _repo_with_two_commits(tmp_path)
+    plan = root / "plan.md"; plan.write_text(PLAN_ONE_PHASE, encoding="utf-8")
+    reviews = _report(root, "s", "1", first)
+
+    report = check_phase_review(plan, _progress_at(first), "s", [reviews], repo_root=root)
+
+    assert not any(f.code == "retroactive_review" for f in report.findings)
+
+
+def test_a_report_recorded_mid_phase_passes(tmp_path: Path) -> None:
+    # An ANCESTOR is early, not late. Failing it would push people to re-run reviews for no reason.
+    root, first, second = _repo_with_two_commits(tmp_path)
+    plan = root / "plan.md"; plan.write_text(PLAN_ONE_PHASE, encoding="utf-8")
+    reviews = _report(root, "s", "1", first)
+
+    report = check_phase_review(plan, _progress_at(second), "s", [reviews], repo_root=root)
+
+    assert not any(f.code == "retroactive_review" for f in report.findings)
+
+
+def test_a_report_without_a_recorded_head_is_info(tmp_path: Path) -> None:
+    # Every report written before this change lacks the field. Failing them would turn the whole
+    # existing audit trail red in one step, which is how a gate gets disabled.
+    root, first, _second = _repo_with_two_commits(tmp_path)
+    plan = root / "plan.md"; plan.write_text(PLAN_ONE_PHASE, encoding="utf-8")
+    reviews = _report(root, "s", "1", None)
+
+    report = check_phase_review(plan, _progress_at(first), "s", [reviews], repo_root=root)
+
+    finding = next(f for f in report.findings if f.code == "no_recorded_head")
+    assert finding.severity == "INFO"
+    assert report.status != "FAIL"

@@ -298,7 +298,7 @@ def test_checkpoint_gate_catches_a_skipped_task_in_the_standalone_layout(tmp_pat
     root = _standalone_project(tmp_path, tasks=[{"id": "T1.1", "phase": 1, "status": "committed"}])
     result = check_checkpoint_consistency_gate(root, "s")
     assert result["status"] == "FAIL"
-    assert [f["code"] for f in result["findings"]] == ["plan_task_absent_from_progress"]
+    assert [f["code"] for f in result["findings"] if f.get("severity") != "INFO"] == ["plan_task_absent_from_progress"]
 
 
 # ---------------------------------------------------------------------------

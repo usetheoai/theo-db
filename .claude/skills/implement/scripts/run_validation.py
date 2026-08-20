@@ -140,6 +140,46 @@ def check_npm_lint(project_root: Path) -> dict[str, Any]:
     }
 
 
+def check_project_gates(project_root: Path) -> dict[str, Any]:
+    """Run the REPOSITORY's own definition of ready, rather than a subset chosen here.
+
+    B-051. This gate used to run `eslint` and `tsc --noEmit` directly and never the project's own
+    `gates` script, so two definitions of "ready" drifted apart and only the weaker one was
+    enforced. That is not hypothetical: `pnpm gates` was red from v0.54.0 through v0.62.0 — ten
+    releases, none of which reached npm — while every slice in between passed this validation.
+    Three of the files that made it red were written by slices that ran this script and passed.
+
+    A missing `gates` script SKIPs with the reason. It must never PASS: reporting success for a
+    standard that was never checked is the defect B-019 and B-048 record elsewhere in this
+    repository, and this function exists because of it.
+
+    The timeout is generous because `gates` runs the whole suite. A timeout is reported as FAIL
+    with the reason rather than swallowed — a gate that times out has not passed.
+    """
+    if not _has_package_json(project_root):
+        return {
+            "name": "project gates",
+            "status": "SKIP",
+            "reason": "package.json absent — pre-code phase",
+        }
+    if not _has_npm_script(project_root, "gates"):
+        return {
+            "name": "project gates",
+            "status": "SKIP",
+            "reason": "no 'gates' script in package.json — this project declares no composite gate, "
+                      "so the checks above are all that ran",
+        }
+    result = _run_command(["npm", "run", "gates", "--silent"], project_root, timeout=1800)
+    if result.get("exit_code") == 0:
+        return {"name": "project gates", "status": "PASS"}
+    return {
+        "name": "project gates",
+        "status": "FAIL",
+        "exit_code": result.get("exit_code"),
+        "stderr_tail": result.get("stderr_tail", result.get("error", "")),
+    }
+
+
 def check_coverage(project_root: Path) -> dict[str, Any]:
     """Run the coverage command when there is one, then READ the report.
 
@@ -598,6 +638,7 @@ def main() -> int:
         check_test_execution(project_root, suite_checks),
         check_npm_typecheck(project_root),
         check_npm_lint(project_root),
+        check_project_gates(project_root),
         check_coverage(project_root),
         wiring_summary(project_root, args.slug),
         check_tdd_shape_gate(project_root, args.slug),

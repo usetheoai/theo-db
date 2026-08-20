@@ -83,7 +83,9 @@ def check_measurement_targets(plan_path: Path) -> dict[str, Any]:
         if _is_explicitly_blocked(raw, match.end()):
             blocked.add(target)
             continue
-        if (project_root / target).exists():
+        # Two candidates, for the same reason the `live-target.txt` lookup above already
+        # has them: in a plugin install the ecosystem sits under `.claude/`.
+        if (project_root / target).exists() or (project_root / ".claude" / target).exists():
             verified.add(target)
         else:
             fabricated[target] = "path_not_found"
