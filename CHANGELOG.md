@@ -14,6 +14,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **O primeiro comando do README apontava para uma conta que não hospeda o pacote.** A seção de
+  instalação mandava `docker pull ghcr.io/usetheodev/theo-db:latest`; `usetheodev` existe como
+  **usuário**, não como a organização (`usetheoai`) que hospeda os repositórios. A mesma grafia já
+  havia sido corrigida no workflow em 2026-08-10 e ninguém olhou para o README (#B-082)
+- **O README passa a dizer que a imagem não está publicada**, em vez de deixar o leitor descobrir
+  sozinho: as oito execuções do workflow de publicação desde 2026-07-29 falharam — inclusive a do
+  release `v0.158.0` — e o manifesto responde `403`. Enquanto isso, a instrução é construir a partir
+  do fonte (#B-082)
 - **O corte de release volta a ser possível.** O portão de lint reprovava por formatação em quatro
   arquivos do crate, e com ele vermelho nenhuma versão saía: duas já estavam escritas no changelog
   (0.159.0 e 0.160.0) e nenhuma chegou a `main`, que segue em 0.158.0 desde julho. Sem mudança de
