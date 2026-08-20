@@ -82,7 +82,7 @@ If the rule cannot pick deterministically, the chain pauses and the human choose
 - **No direct commits to `main`** — even from this skill. Every change reaches `main` via the PR opened above.
 - **Tag must be annotated** (`git tag -a`) and pushed only after merge to `main` — never on `develop` or `workspace`.
 - **CHANGELOG must have content** — refuse if `[Unreleased]` is empty after stripping headers.
-- **Single-flip invariant** — at most ONE ROADMAP.md checkbox flipped per `RELEASED` verdict. Per `cycle-roadmap § Hard gates`.
+- **Single-flip invariant** — owned by [`cycle-acceptance § Hard gates`](cycle-acceptance.md), which is where the flip moved (see § Post-merge ROADMAP.md checkbox flip). This cycle no longer flips anything; the clause stays as a pointer so nobody re-adds a flip here.
 - **No silent flip** — the roadmap-runs file MUST be appended with the flip commit SHA. A flip without a run-file entry is forbidden.
 
 ## Stop conditions

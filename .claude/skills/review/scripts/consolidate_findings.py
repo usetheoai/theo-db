@@ -18,11 +18,20 @@ Severity classification (canonical — aligned with rules/cycle-review.md):
 
 Verdict bands:
   - READY_TO_MERGE: zero BLOCKER, ≤ 2 HIGH findings with documented mitigation
-  - NEEDS_FIXES:    ≥ 1 BLOCKER OR > 2 HIGH findings
+  - READY_TO_MERGE_WITH_FOLLOWUPS: zero BLOCKER, > 2 HIGH, and EVERY HIGH is a
+    registered followup — named in the plan's `## Followups` section (via
+    --plan) or carrying an issue reference (#NNN) in its recommended_action.
+    Fail-closed: no --plan means nothing was proven registered.
+  - NEEDS_FIXES:    ≥ 1 BLOCKER OR > 2 HIGH with any HIGH unregistered
   - NEEDS_DEEPER:   coverage of edge cases < 80% (declared via --edge-case-coverage-ratio) OR systemic issues exceeding targeted fixes
 
+Why EVERY HIGH and not just "every HIGH above the cap" (the wording in
+rules/cycle-review.md): with 5 HIGH findings, "above the cap" names 3 of them
+and nothing says which 3 — any subset satisfies it, which is not a gate. The
+implementation is the strict reading, and the rule was tightened to match.
+
 Exit codes:
-  0 — READY_TO_MERGE
+  0 — READY_TO_MERGE or READY_TO_MERGE_WITH_FOLLOWUPS
   1 — NEEDS_FIXES
   3 — NEEDS_DEEPER
 """
@@ -30,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -114,13 +124,59 @@ def _dedupe_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(seen.values())
 
 
-def _classify_verdict(findings: list[dict[str, Any]], coverage_ratio: float | None) -> str:
-    """Determine final verdict from findings + coverage."""
+FOLLOWUPS_SECTION_RE = re.compile(
+    r"^##\s+Followups\s*$(.*?)(?=^##\s+|\Z)", re.MULTILINE | re.DOTALL
+)
+ISSUE_REF_RE = re.compile(r"#\d+")
+
+
+def _registered_followup_ids(plan_path: Path | None) -> set[str]:
+    """Finding ids named under the plan's `## Followups` section."""
+    if plan_path is None or not plan_path.exists():
+        return set()
+    match = FOLLOWUPS_SECTION_RE.search(plan_path.read_text(encoding="utf-8-sig"))
+    if not match:
+        return set()
+    body = match.group(1)
+    return {token for token in re.findall(r"\b[A-Za-z]+-\d+\b", body)}
+
+
+def _unregistered_high(findings: list[dict[str, Any]], registered: set[str]) -> list[str]:
+    """HIGH findings that nobody owns.
+
+    A finding is owned when the plan's `## Followups` names its id, or when it
+    carries an issue reference in `recommended_action`. A finding with no id at
+    all can never be owned — fail-closed, deliberately.
+    """
+    unowned: list[str] = []
+    for f in findings:
+        if f["severity"] != "HIGH":
+            continue
+        fid = f.get("id", "")
+        if fid and fid in registered:
+            continue
+        if ISSUE_REF_RE.search(f.get("recommended_action", "")):
+            continue
+        unowned.append(fid or f.get("summary", "<unidentified finding>"))
+    return unowned
+
+
+def _classify_verdict(
+    findings: list[dict[str, Any]],
+    coverage_ratio: float | None,
+    unregistered_high: list[str] | None = None,
+) -> str:
+    """Determine final verdict from findings + coverage + followup registration."""
     blocker_count = sum(1 for f in findings if f["severity"] == "BLOCKER")
     high_count = sum(1 for f in findings if f["severity"] == "HIGH")
 
-    if blocker_count > 0 or high_count > 2:
+    if blocker_count > 0:
         return "NEEDS_FIXES"
+    if high_count > 2:
+        # The debt is real; the only question is whether it is named and owned.
+        if unregistered_high:
+            return "NEEDS_FIXES"
+        return "READY_TO_MERGE_WITH_FOLLOWUPS"
     if coverage_ratio is not None and coverage_ratio < 0.80:
         return "NEEDS_DEEPER"
     return "READY_TO_MERGE"
@@ -188,6 +244,11 @@ def _render_markdown(
     md.append("")
     if verdict == "READY_TO_MERGE":
         md.append("Implementation passes all gates. Ready for merge.")
+    elif verdict == "READY_TO_MERGE_WITH_FOLLOWUPS":
+        md.append(
+            "No BLOCKER, and more than 2 HIGH — every one of them registered as a followup. "
+            "The blocking work is closed and provable; the debt is real, named and owned."
+        )
     elif verdict == "NEEDS_FIXES":
         md.append("Implementation has BLOCKER and/or > 2 HIGH findings. Loop back to `/implement` to address.")
     else:
@@ -210,6 +271,13 @@ def main() -> int:
     parser.add_argument("--findings-dir", type=Path, required=True, help="Directory with YAML findings files")
     parser.add_argument("--output", type=Path, required=True, help="Output markdown report path")
     parser.add_argument("--slug", default=None, help="Plan slug (default: derived from findings-dir path)")
+    parser.add_argument(
+        "--plan",
+        type=Path,
+        default=None,
+        help="Plan file whose `## Followups` section registers accepted HIGH debt. "
+             "Without it, > 2 HIGH is fail-closed to NEEDS_FIXES.",
+    )
     parser.add_argument(
         "--edge-case-coverage-ratio",
         type=float,
@@ -265,7 +333,9 @@ def main() -> int:
         findings_by_severity[f["severity"]].append(f)
 
     # Determine verdict
-    verdict = _classify_verdict(deduped, args.edge_case_coverage_ratio)
+    registered = _registered_followup_ids(args.plan)
+    unregistered_high = _unregistered_high(deduped, registered)
+    verdict = _classify_verdict(deduped, args.edge_case_coverage_ratio, unregistered_high)
 
     # Write the markdown report
     md_content = _render_markdown(
@@ -289,6 +359,8 @@ def main() -> int:
         "total_findings": len(deduped),
         "findings_by_severity": {sev: len(items) for sev, items in findings_by_severity.items()},
         "edge_case_coverage_ratio": args.edge_case_coverage_ratio,
+        "unregistered_high": unregistered_high,
+        "registered_followups": sorted(registered),
     }
     print(json.dumps(summary, indent=2))
 

@@ -36,7 +36,9 @@ Re-validate quality gates with stricter thresholds before merge. Catches issues 
 ## Verdicts
 
 - `READY_TO_MERGE` — no BLOCKER, ≤ 2 HIGH findings with documented mitigation.
-- `READY_TO_MERGE_WITH_FOLLOWUPS` — no BLOCKER, but MORE than 2 HIGH. The blocking work is closed and provable; the debt is real and named. **Hard gate:** every HIGH above the cap is a *registered* followup — an entry in the plan's `## Followups` or a filed issue — never a mention in prose. A caveat nobody owns is a defect with better manners.
+- `READY_TO_MERGE_WITH_FOLLOWUPS` — no BLOCKER, but MORE than 2 HIGH. The blocking work is closed and provable; the debt is real and named. **Hard gate:** every HIGH is a *registered* followup — an entry in the plan's `## Followups` (matched by finding id) or a filed issue reference (`#NNN`) on the finding — never a mention in prose. A caveat nobody owns is a defect with better manners. Enforced by `consolidate_findings.py --plan`, which fails closed to `NEEDS_FIXES` when the plan is absent.
+
+  The wording used to read *every HIGH **above the cap***. With 5 HIGH findings that names 3 of them and nothing says which 3 — any subset satisfies it, which is not a gate. `every HIGH` is the strict reading and the one implemented.
 
   Use it instead of stretching `READY_TO_MERGE` (which would call acknowledged debt a clean green) and instead of `NEEDS_FIXES` (which would claim the blocking work is unfinished when it is demonstrably closed). The milestone is still gated by `cycle-acceptance`, so this verdict never softens what a `[x]` claims — it only stops forcing a false binary at the review boundary.
 - `NEEDS_FIXES` — BLOCKER or > 2 HIGH findings. Return to `/implement` (or open targeted fix tasks).

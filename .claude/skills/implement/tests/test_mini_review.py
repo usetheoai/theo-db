@@ -261,3 +261,59 @@ def test_report_filename_format(tmp_path: Path) -> None:
     assert report_path.name.startswith("alpha-phase1-review-")
     assert report_path.name.endswith(".md")
     assert report_path.parent == output_dir
+
+
+# ---------- delta audit coverage (Step 4.7) -----------------------------
+# `_invoke_code_quality_on_delta` was an unconditional SKIP: cq_invoke scores a
+# whole plan, not a file subset. The honest half was admitting it; the dishonest
+# half was the report line reading like a check that ran. It is replaced by the
+# question the SKIP left open — will Step 5's audit actually cover these files?
+
+from mini_review import _check_delta_audit_coverage  # noqa: E402
+
+
+def _languages_rule(root: Path, body: str) -> Path:
+    rules = root / "rules"
+    rules.mkdir(parents=True, exist_ok=True)
+    path = rules / "code-quality-languages.txt"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_delta_file_in_an_enabled_language_is_covered(tmp_path: Path) -> None:
+    _languages_rule(tmp_path, "python | pyproject.toml | ENABLED |\n")
+    result = _check_delta_audit_coverage(("src/a.py", "src/b.py"), tmp_path)
+    assert result["status"] == "PASS"
+    assert result["uncovered_files"] == []
+
+
+def test_delta_file_in_a_disabled_language_is_reported(tmp_path: Path) -> None:
+    """An auditor that will never look at this file is the vacuous gate the kit
+    already hunts elsewhere — it just had no detector on the phase boundary."""
+    _languages_rule(tmp_path, "python | pyproject.toml | ENABLED |\ngo | go.mod | DISABLED |\n")
+    result = _check_delta_audit_coverage(("src/a.py", "cmd/main.go"), tmp_path)
+    assert result["status"] == "WARN"
+    assert result["uncovered_files"] == ["cmd/main.go"]
+    assert result["findings"][0]["severity"] == "MEDIUM"
+    assert result["findings"][0]["code"] == "delta_language_not_audited"
+
+
+def test_non_source_files_are_not_charged(tmp_path: Path) -> None:
+    _languages_rule(tmp_path, "python | pyproject.toml | ENABLED |\n")
+    result = _check_delta_audit_coverage(("README.md", "docs/x.json", "src/a.py"), tmp_path)
+    assert result["status"] == "PASS"
+
+
+def test_missing_languages_rule_skips_instead_of_guessing(tmp_path: Path) -> None:
+    result = _check_delta_audit_coverage(("src/a.py",), tmp_path)
+    assert result["status"] == "SKIP"
+    assert "code-quality-languages.txt" in result["reason"]
+
+
+def test_empty_languages_rule_means_nothing_is_audited(tmp_path: Path) -> None:
+    """Empty file = no language-specific check runs (the file says so itself).
+    Every source file in the delta is then uncovered, and saying so is the point."""
+    _languages_rule(tmp_path, "# nothing enabled\n")
+    result = _check_delta_audit_coverage(("src/a.py",), tmp_path)
+    assert result["status"] == "WARN"
+    assert result["uncovered_files"] == ["src/a.py"]

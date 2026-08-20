@@ -147,7 +147,7 @@ Skill(/plan-confidence {topic-slug})         # re-score
 
 `inject_must_fix.py` parses the `## MUST FIX` section of the edge-case report and appends each item as a sub-task (or ADR-deferred note) into the plan. The user does NOT have to absorb them manually. `/plan-confidence` is re-run after injection to validate the augmented plan.
 
-`inject_milestone_id.py` writes the `milestone_id: M<N>` field into the plan's YAML frontmatter (per `cycle-roadmap § Plan metadata contract`). In ad-hoc mode this script is skipped — the plan frontmatter carries no `milestone_id` and `cycle-release` will skip the checkbox flip with WARN.
+`inject_milestone_id.py` writes the `milestone_id: M<N>` field into the plan's YAML frontmatter (the field `cycle-acceptance`'s flip phase reads — consumed by `skills/release/scripts/flip_milestone_checkbox.py`). In ad-hoc mode this script is skipped — the plan frontmatter carries no `milestone_id` and `cycle-release` will skip the checkbox flip with WARN.
 
 #### Phase A — Attest (always, post-plan)
 
@@ -175,6 +175,7 @@ Skill(/review {topic-slug})
 ```
 
 - review verdict = `READY_TO_MERGE` → proceed to Phase Rel (unless `--no-release`).
+- review verdict = `READY_TO_MERGE_WITH_FOLLOWUPS` → proceed to Phase Rel, and carry the registered followups into the release PR description. The verdict already proves every HIGH is owned (`consolidate_findings.py` fails closed otherwise), so re-litigating it here would only re-open a question the gate answered.
 - review verdict = `NEEDS_FIXES` → loop once back to `/implement` for targeted fixes, then re-run `/review`. After 1 loop attempt, halt with `BLOCKED`.
 - review verdict = `NEEDS_DEEPER` → halt; loop back to `/to-plan` requires fresh human decision.
 

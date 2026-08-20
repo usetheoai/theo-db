@@ -68,21 +68,29 @@ Take `{item-slug}`. If absent, ask for a one-sentence description and derive a k
 
 Prefix the slug with the repo when the same problem shape recurs across repos (`theo-lens-…`, `theo-rag-…`). The registry spans 21 repos; a bare `latency` slug is unsearchable.
 
-### Step 2 — Dedup search (MANDATORY — gate G2)
+### Step 2 — Gates G1 + G2, executados (MANDATORY)
 
 ```bash
-# significant nouns from the description, plus the repo name
-grep -in -e "{noun1}" -e "{noun2}" -e "{repo}" BACKLOG.md
+ECO=$([ -d .claude/skills ] && echo .claude || echo .)   # plugin vs standalone
+python3 "$ECO/skills/backlog-item/scripts/check_intake_gates.py" \
+  --backlog BACKLOG.md \
+  --repo {repo} \
+  --term "{noun1}" --term "{noun2}"
 ```
 
-Then read every `B-NNN` block the grep touched — a keyword hit is a candidate, not a verdict.
+One script, both mechanizable gates:
+
+- **G1** delegates to `scripts/route_domain.py` — the routing table is parsed from `rules/cycle-backlog.md`, so there is one table and one truth. Exit `1` = the repo is not in it, verdict `ITEM_REJECTED`.
+- **G2** searches `BACKLOG.md` for every term **plus the repo name** (always added — the repo is the term that collides most across a registry spanning 21 of them) and returns each matching block with its status and the action the rule prescribes for it. Exit `3` = candidates found.
+
+Running it IS the evidence that G2 happened; the old instruction was a `grep` whose execution nobody could verify afterwards. Then read every `B-NNN` block it returned — a keyword hit is a candidate, not a verdict.
 
 - **Open item, same problem** → verdict `ITEM_MERGED`. Do NOT allocate a new id. Append the new context to the existing block's body and record the merge in the intake log. Report which id absorbed it.
 - **`killed` item, same problem** → allocate a new id, and add `supersedes: B-NNN` plus what changed since the kill. A hypothesis killed for lack of evidence in April can be legitimately re-filed in August; silently re-filing it without the link is what the gate prevents.
 - **`shipped` item, problem is back** → new id with `regression_of: B-NNN`. This is a regression, and naming it as one matters more than the item itself.
 - **No hit** → proceed.
 
-Skipping this step is a G2 violation. The single-registry decision only holds if intake actually looks.
+Skipping this step is a G2 violation. The single-registry decision only holds if intake actually looks — and a gate whose execution depends on the agent remembering is an intention, not a gate.
 
 ### Step 3 — Detect next id
 

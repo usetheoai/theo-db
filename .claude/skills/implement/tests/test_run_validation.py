@@ -299,3 +299,252 @@ def test_checkpoint_gate_catches_a_skipped_task_in_the_standalone_layout(tmp_pat
     result = check_checkpoint_consistency_gate(root, "s")
     assert result["status"] == "FAIL"
     assert [f["code"] for f in result["findings"]] == ["plan_task_absent_from_progress"]
+
+
+# ---------------------------------------------------------------------------
+# Test-execution gate (multi-language). The npm-only checks answered SKIP on a
+# Python/Go/Rust repo, overall became PARTIAL and PARTIAL exits 0 — so
+# VALIDATION_GATE_PASSED could be emitted without a single test having run.
+# ---------------------------------------------------------------------------
+
+def _check(data: dict, name: str) -> dict:
+    return next(c for c in data["checks"] if c.get("name") == name)
+
+
+def test_python_manifest_with_passing_tests_runs_the_suite(fake_project: Path) -> None:
+    """A Python project's tests actually execute — not SKIP for lack of package.json."""
+    (fake_project / "pyproject.toml").write_text("[project]\nname='fake'\n", encoding="utf-8")
+    (fake_project / "tests" / "test_ok.py").write_text(
+        "def test_ok():\n    assert True\n", encoding="utf-8"
+    )
+    rc, data = _run_validation("test-slug", fake_project)
+    suite = _check(data, "python tests")
+    assert suite["status"] == "PASS", suite
+    assert _check(data, "test_execution")["status"] == "PASS"
+
+
+def test_python_failing_tests_fail_the_validation(fake_project: Path) -> None:
+    """A red Python suite blocks the gate exactly like a red npm suite does."""
+    (fake_project / "pyproject.toml").write_text("[project]\nname='fake'\n", encoding="utf-8")
+    (fake_project / "tests" / "test_red.py").write_text(
+        "def test_red():\n    assert False\n", encoding="utf-8"
+    )
+    rc, data = _run_validation("test-slug", fake_project)
+    assert rc == 1
+    assert data["overall_status"] == "FAIL"
+    assert _check(data, "python tests")["status"] == "FAIL"
+
+
+def test_manifest_present_but_no_suite_ran_is_a_fail(fake_project: Path) -> None:
+    """The load-bearing case: a language manifest exists and nothing executed.
+
+    SKIP here is indistinguishable from 'legitimately nothing to check', which is
+    how a green validation could mean no test ever ran. It must FAIL instead.
+    """
+    (fake_project / "pyproject.toml").write_text("[project]\nname='fake'\n", encoding="utf-8")
+    rc, data = _run_validation("test-slug", fake_project)
+    assert rc == 1
+    gate = _check(data, "test_execution")
+    assert gate["status"] == "FAIL"
+    assert "python" in gate["languages_detected"]
+
+
+def test_package_json_without_test_script_is_a_fail(fake_project: Path) -> None:
+    """A JS project that cannot run tests at all is not a pass."""
+    (fake_project / "package.json").write_text(
+        json.dumps({"name": "fake", "scripts": {"lint": "true"}}), encoding="utf-8"
+    )
+    rc, data = _run_validation("test-slug", fake_project)
+    assert rc == 1
+    assert _check(data, "test_execution")["status"] == "FAIL"
+
+
+def test_no_manifest_at_all_still_skips_gracefully(fake_project: Path) -> None:
+    """Pre-code phase is a legitimate SKIP — the gate must not punish an empty repo."""
+    rc, data = _run_validation("test-slug", fake_project)
+    gate = _check(data, "test_execution")
+    assert gate["status"] == "SKIP"
+    assert rc == 0
+
+
+# ---------------------------------------------------------------------------
+# Coverage gate. It used to run `npm run test:coverage` and call exit 0 a PASS
+# without ever reading a coverage report — a gate named after a number it never
+# looked at.
+# ---------------------------------------------------------------------------
+
+def _coverage_project(root: Path, script: str = "true") -> None:
+    (root / "package.json").write_text(
+        json.dumps({"name": "fake", "scripts": {"test:coverage": script}}), encoding="utf-8"
+    )
+
+
+def test_coverage_reads_the_json_summary_and_passes_above_threshold(fake_project: Path) -> None:
+    _coverage_project(fake_project)
+    summary = fake_project / "coverage" / "coverage-summary.json"
+    summary.parent.mkdir(parents=True, exist_ok=True)
+    summary.write_text(json.dumps({"total": {"lines": {"pct": 95.5}}}), encoding="utf-8")
+    rc, data = _run_validation("test-slug", fake_project)
+    check = _check(data, "coverage")
+    assert check["status"] == "PASS"
+    assert check["coverage_pct"] == 95.5
+
+
+def test_coverage_below_threshold_fails(fake_project: Path) -> None:
+    """The whole point of the gate: a measured number under the floor blocks."""
+    _coverage_project(fake_project)
+    summary = fake_project / "coverage" / "coverage-summary.json"
+    summary.parent.mkdir(parents=True, exist_ok=True)
+    summary.write_text(json.dumps({"total": {"lines": {"pct": 41.0}}}), encoding="utf-8")
+    rc, data = _run_validation("test-slug", fake_project)
+    assert rc == 1
+    check = _check(data, "coverage")
+    assert check["status"] == "FAIL"
+    assert check["coverage_pct"] == 41.0
+
+
+def test_coverage_without_a_parseable_report_is_not_a_pass(fake_project: Path) -> None:
+    """Exit 0 with no report means the threshold was never verified — WARN, not PASS."""
+    _coverage_project(fake_project)
+    rc, data = _run_validation("test-slug", fake_project)
+    check = _check(data, "coverage")
+    assert check["status"] == "WARN"
+    assert "not verified" in check["reason"].lower()
+
+
+def test_coverage_reads_cobertura_xml(fake_project: Path) -> None:
+    """coverage.py / Cobertura XML is the Python-side artifact."""
+    _coverage_project(fake_project)
+    (fake_project / "coverage.xml").write_text(
+        '<?xml version="1.0" ?><coverage line-rate="0.873"></coverage>', encoding="utf-8"
+    )
+    rc, data = _run_validation("test-slug", fake_project)
+    check = _check(data, "coverage")
+    assert check["status"] == "PASS"
+    assert check["coverage_pct"] == 87.3
+
+
+def test_coverage_threshold_comes_from_the_project_rules_file(fake_project: Path) -> None:
+    """A project may raise the floor; the report says where the number came from."""
+    _coverage_project(fake_project)
+    rules_dir = fake_project / "rules"
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    (rules_dir / "code-quality-thresholds.txt").write_text(
+        "coverage.min_percent = 90\n", encoding="utf-8"
+    )
+    summary = fake_project / "coverage" / "coverage-summary.json"
+    summary.parent.mkdir(parents=True, exist_ok=True)
+    summary.write_text(json.dumps({"total": {"lines": {"pct": 85.0}}}), encoding="utf-8")
+    rc, data = _run_validation("test-slug", fake_project)
+    check = _check(data, "coverage")
+    assert check["status"] == "FAIL"
+    assert check["threshold"] == 90
+    assert check["threshold_source"] == "project"
+
+
+# ---------------------------------------------------------------------------
+# Gates the agent ran on its own honour. check_tdd_shape.py and mini_review.py
+# were invoked from SKILL.md prose only; the final gate never asked whether
+# either had run, so skipping them left no trace.
+# ---------------------------------------------------------------------------
+
+_PHASED_PLAN = """# Plan
+
+## Phase 1 — foundation
+
+### T1.1 — first
+#### TDD
+assert add(1, 2) == 3
+"""
+
+
+def _write_plan(project_root: Path, slug: str, body: str) -> None:
+    plans = project_root / "knowledge-base" / "plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / f"{slug}-plan.md").write_text(body, encoding="utf-8")
+
+
+def _write_standalone_progress(project_root: Path, slug: str, tasks: list[dict]) -> None:
+    impl = project_root / "knowledge-base" / "implementations"
+    impl.mkdir(parents=True, exist_ok=True)
+    (impl / f".progress-{slug}.json").write_text(
+        json.dumps({"slug": slug, "tasks": tasks}), encoding="utf-8"
+    )
+
+
+def test_skipped_phase_boundary_review_is_caught_by_the_final_gate(fake_project: Path) -> None:
+    """A fully committed phase with no mini-review report must FAIL the validation."""
+    _write_plan(fake_project, "phased", _PHASED_PLAN)
+    _write_standalone_progress(fake_project, "phased", [
+        {"id": "T1.1", "phase": "1", "status": "committed", "commit_sha": "abc", "files": ["src/a.py"]},
+    ])
+    rc, data = _run_validation("phased", fake_project)
+    gate = _check(data, "phase_review")
+    assert gate["status"] == "FAIL"
+    assert gate["phases_closed"] == ["1"]
+
+
+def test_phase_boundary_review_present_passes(fake_project: Path) -> None:
+    _write_plan(fake_project, "phased", _PHASED_PLAN)
+    _write_standalone_progress(fake_project, "phased", [
+        {"id": "T1.1", "phase": "1", "status": "committed", "commit_sha": "abc", "files": ["src/a.py"]},
+    ])
+    reviews = fake_project / "knowledge-base" / "mini-reviews"
+    reviews.mkdir(parents=True, exist_ok=True)
+    (reviews / "phased-phase1-review-2026-08-18.md").write_text("ok", encoding="utf-8")
+    rc, data = _run_validation("phased", fake_project)
+    assert _check(data, "phase_review")["status"] == "PASS"
+
+
+def test_plan_task_without_an_executable_tdd_shape_fails(fake_project: Path) -> None:
+    """The Step 2 pre-loop gate is re-asserted at the end: a prose-only TDD block
+    means the halt-loop should never have started."""
+    _write_plan(fake_project, "vague", """# Plan
+
+### T1.1 — do the thing
+#### TDD
+We should test that it works well.
+""")
+    _write_standalone_progress(fake_project, "vague", [
+        {"id": "T1.1", "phase": "1", "status": "committed", "commit_sha": "abc", "files": ["src/a.py"]},
+    ])
+    rc, data = _run_validation("vague", fake_project)
+    assert rc == 1
+    gate = _check(data, "tdd_shape")
+    assert gate["status"] == "FAIL"
+    assert gate["tasks_without_shape"] == ["T1.1"]
+
+
+def test_executable_tdd_shape_passes(fake_project: Path) -> None:
+    _write_plan(fake_project, "sharp", _PHASED_PLAN)
+    _write_standalone_progress(fake_project, "sharp", [
+        {"id": "T1.1", "phase": "1", "status": "committed", "commit_sha": "abc", "files": ["src/a.py"]},
+    ])
+    rc, data = _run_validation("sharp", fake_project)
+    assert _check(data, "tdd_shape")["status"] == "PASS"
+
+
+def test_go_workspace_is_detected_as_go(fake_project: Path) -> None:
+    """A Go workspace has `go.work` and no root `go.mod`.
+
+    Measured on `theo` while updating its install: the repo is Go, and
+    detect_languages returned [] — so test_execution would have SKIPped the
+    biggest Go repo in the ecosystem. The same silence the gate exists to break,
+    reintroduced by a manifest list that only knew `go.mod`.
+    """
+    from suite_runners import detect_languages
+    (fake_project / "go.work").write_text("go 1.22\n\nuse (\n\t./svc\n)\n", encoding="utf-8")
+    assert "go" in detect_languages(fake_project)
+
+
+def test_go_workspace_runs_each_module_not_the_root(fake_project: Path) -> None:
+    """`go test ./...` at a workspace root fails with 'directory prefix . does not
+    contain modules listed in go.work' — the kit already hit this in /arch-check."""
+    from suite_runners import go_workspace_modules
+    (fake_project / "go.work").write_text(
+        "go 1.22\n\nuse (\n\t./svc\n\t./tools\n\t../sibling-repo\n)\n", encoding="utf-8"
+    )
+    (fake_project / "svc").mkdir()
+    (fake_project / "tools").mkdir()
+    modules = go_workspace_modules(fake_project)
+    assert modules == ["svc", "tools"], modules  # '../sibling-repo' is another repo's problem

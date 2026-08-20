@@ -16,7 +16,7 @@ argument-hint: "[plan-slug] (optional — bind analysis to a plan's architecture
 > SEMPRE QUE PRECISAR DE UMA DECISÃO DO USUÁRIO, APRESENTE
 > OPÇÕES PARA ELE ESCOLHER.
 >
-> Ver `/home/paulo/.claude/CLAUDE.md` § 1 (95% Confidence).
+> Ver `~/.claude/CLAUDE.md` § 1 (95% Confidence).
 
 Single entry-point for [`cycle-analysis`](../../rules/cycle-analysis.md). Validates whether a project is on the correct trajectory using the scientific method: hypotheses → measurements → evidence → verdict.
 
@@ -24,7 +24,7 @@ Single entry-point for [`cycle-analysis`](../../rules/cycle-analysis.md). Valida
 - `.claude/rules/analysis-golden-rule.md` — locked unbreakable contract.
 - `.claude/rules/analysis-config.txt` — opt-in enablement + profile + paths.
 - `.claude/rules/code-quality-languages.txt` — which languages are enabled (reused).
-- Unbreakable Rule 9 (`/home/paulo/.claude/CLAUDE.md § 9`) — use existing benchmark/profiling tools, never reimplement.
+- Unbreakable Rule 9 (`~/.claude/CLAUDE.md § 9`) — use existing benchmark/profiling tools, never reimplement.
 
 ---
 
@@ -376,10 +376,10 @@ The verdict is not advisory — it prescribes a concrete next step in the cycle 
 
 | Verdict | `feedback_action` | What Claude Code does next |
 |---|---|---|
-| `ON_TRACK` | `proceed` | Report archived as baseline. Next milestone proceeds normally via `cycle-roadmap`. |
+| `ON_TRACK` | `proceed` | Report archived as baseline. Next milestone proceeds normally via `cycle-maintenance`. |
 | `ON_TRACK_WITH_RISKS` | `inject_risk_tasks` | Report includes specific risk mitigation tasks. These MUST be injected as requirements in the next `/to-plan`. The report is cited as prior art (same as a `/discover` blueprint). |
 | `COURSE_CORRECTION_NEEDED` | `corrective_plan` | Before any new feature work: run `/to-plan` scoped to the falsified hypotheses. The analysis report becomes the "problem statement" input. Then `/implement` the corrections, re-release, re-run `/analysis`. |
-| `FUNDAMENTAL_RETHINK` | `redesign` | Run `/discover-plan` to investigate alternatives. Write ADR documenting empirical evidence of why the current approach fails. Then `/to-plan` for the redesigned architecture. `cycle-roadmap` pauses until the human decides. |
+| `FUNDAMENTAL_RETHINK` | `redesign` | Run `/discover-plan` to investigate alternatives. Write ADR documenting empirical evidence of why the current approach fails. Then `/to-plan` for the redesigned architecture. `cycle-maintenance` pauses until the human decides. |
 | `INVALID` | `stop` | Surface to human. Fix config/golden-rule before proceeding. |
 
 The analysis report at `knowledge-base/audits/` is referenced by the next iteration's `/to-plan` as **prior art** — the same way `/discover` blueprints feed planning.

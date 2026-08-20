@@ -119,3 +119,96 @@ def test_report_markdown_written(tmp_path: Path) -> None:
     content = output.read_text(encoding="utf-8")
     assert "LOW" in content
     assert "F-1" in content
+
+
+# ---------------------------------------------------------------------------
+# READY_TO_MERGE_WITH_FOLLOWUPS. The verdict was defined in rules/cycle-review.md
+# and rules/cycle-rule-schema.md and implemented nowhere: the classifier could
+# not emit it, /review's SKILL did not know it, and /auto-plan had no transition
+# for it. Its stated hard gate — every HIGH registered as a followup — had no
+# detector at all.
+# ---------------------------------------------------------------------------
+
+def _run_with_plan(findings_dir: Path, output: Path, plan: Path | None) -> tuple[int, dict]:
+    args = [
+        sys.executable, str(SCRIPT),
+        "--findings-dir", str(findings_dir),
+        "--output", str(output),
+    ]
+    if plan is not None:
+        args.extend(["--plan", str(plan)])
+    result = subprocess.run(args, capture_output=True, text=True)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        data = {"raw": result.stdout, "stderr": result.stderr}
+    return result.returncode, data
+
+
+_THREE_HIGH = [
+    {"id": "H-01", "severity": "HIGH", "summary": "one", "file": "a.py", "line": 1},
+    {"id": "H-02", "severity": "HIGH", "summary": "two", "file": "b.py", "line": 2},
+    {"id": "H-03", "severity": "HIGH", "summary": "three", "file": "c.py", "line": 3},
+]
+
+
+def test_three_high_all_registered_is_ready_with_followups(tmp_path: Path) -> None:
+    findings_dir = tmp_path / "findings"
+    _write_findings(findings_dir, "test-arch", _THREE_HIGH)
+    plan = tmp_path / "demo-plan.md"
+    plan.write_text(
+        "# Plan\n\n## Followups\n\n- H-01 — extract the client\n- H-02 — index the table\n"
+        "- H-03 — split the handler\n",
+        encoding="utf-8",
+    )
+    rc, data = _run_with_plan(findings_dir, tmp_path / "r.md", plan)
+    assert data["verdict"] == "READY_TO_MERGE_WITH_FOLLOWUPS"
+    assert rc == 0
+    assert data["unregistered_high"] == []
+
+
+def test_three_high_with_one_unregistered_stays_needs_fixes(tmp_path: Path) -> None:
+    """A caveat nobody owns is a defect with better manners — it does not merge."""
+    findings_dir = tmp_path / "findings"
+    _write_findings(findings_dir, "test-arch", _THREE_HIGH)
+    plan = tmp_path / "demo-plan.md"
+    plan.write_text("# Plan\n\n## Followups\n\n- H-01 — extract\n- H-02 — index\n", encoding="utf-8")
+    rc, data = _run_with_plan(findings_dir, tmp_path / "r.md", plan)
+    assert data["verdict"] == "NEEDS_FIXES"
+    assert rc == 1
+    assert data["unregistered_high"] == ["H-03"]
+
+
+def test_three_high_without_a_plan_is_fail_closed(tmp_path: Path) -> None:
+    """No plan to check against means nothing was proven registered."""
+    findings_dir = tmp_path / "findings"
+    _write_findings(findings_dir, "test-arch", _THREE_HIGH)
+    rc, data = _run_with_plan(findings_dir, tmp_path / "r.md", None)
+    assert data["verdict"] == "NEEDS_FIXES"
+    assert rc == 1
+
+
+def test_issue_reference_counts_as_registration(tmp_path: Path) -> None:
+    """`## Followups` or a filed issue — the rule accepts either owner."""
+    findings_dir = tmp_path / "findings"
+    findings = [dict(f) for f in _THREE_HIGH]
+    findings[2]["recommended_action"] = "tracked in #412"
+    _write_findings(findings_dir, "test-arch", findings)
+    plan = tmp_path / "demo-plan.md"
+    plan.write_text("# Plan\n\n## Followups\n\n- H-01 — extract\n- H-02 — index\n", encoding="utf-8")
+    rc, data = _run_with_plan(findings_dir, tmp_path / "r.md", plan)
+    assert data["verdict"] == "READY_TO_MERGE_WITH_FOLLOWUPS"
+
+
+def test_a_blocker_is_never_softened_by_followups(tmp_path: Path) -> None:
+    findings_dir = tmp_path / "findings"
+    _write_findings(findings_dir, "test-arch", _THREE_HIGH + [
+        {"id": "B-01", "severity": "BLOCKER", "summary": "boom", "file": "d.py", "line": 4},
+    ])
+    plan = tmp_path / "demo-plan.md"
+    plan.write_text(
+        "# Plan\n\n## Followups\n\n- H-01\n- H-02\n- H-03\n- B-01\n", encoding="utf-8"
+    )
+    rc, data = _run_with_plan(findings_dir, tmp_path / "r.md", plan)
+    assert data["verdict"] == "NEEDS_FIXES"
+    assert rc == 1

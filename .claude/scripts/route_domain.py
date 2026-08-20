@@ -42,7 +42,10 @@ ROW_RE = re.compile(r"^\|\s*`([a-z0-9-]+)`\s*\|(.+?)\|(.+?)\|\s*$", re.MULTILINE
 # domain became silently unreachable — every other check still passed.
 REPO_RE = re.compile(r"`([A-Za-z0-9_./-]+)`")
 AGENT_RE = re.compile(r"`(agents/[a-z0-9-]+\.md)`")
-ITEM_REPO_RE = re.compile(r"^repo:\s*`?([A-Za-z0-9_.-]+)`?", re.MULTILINE)
+# `/` aceito pela mesma razão que em REPO_RE: um monorepo é endereçado por caminho
+# (`packages/sdk`, `theo-cloud/dashboard`). Sem ele o extrator parava na barra e
+# devolvia `packages`, roteando por um repo que ninguém escreveu.
+ITEM_REPO_RE = re.compile(r"^repo:\s*`?([A-Za-z0-9_./-]+)`?", re.MULTILINE)
 
 
 def _find_project_root(start: Path) -> Path:

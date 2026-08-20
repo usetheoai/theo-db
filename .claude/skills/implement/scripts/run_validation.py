@@ -2,7 +2,12 @@
 """Final validation gate for /implement halt-loop.
 
 Runs (and gates on):
-  - npm test         (skip if package.json absent — pre-code phase)
+  - the test suite of every language whose manifest is at the repo root:
+    npm test (package.json), pytest/unittest (pyproject.toml/setup.py),
+    go test (go.mod), cargo test (Cargo.toml) — see suite_runners.py
+  - test_execution — FAILs when a manifest exists and NO suite executed. Before
+    this gate, a non-npm repo skipped every executive check, landed on PARTIAL,
+    and PARTIAL exits 0: the completion promise could be emitted with no test run.
   - npm run typecheck
   - npm run lint
   - npm run test:coverage (≥ 90% on changed files; 100% on critical paths)
@@ -33,6 +38,15 @@ from pathlib import Path
 from typing import Any
 
 from diff_symbols import added_symbols_from_shas, shas_from_progress
+from coverage_gate import evaluate as coverage_evaluate
+from suite_runners import (
+    check_go_tests,
+    check_python_tests,
+    check_rust_tests,
+    check_test_execution,
+    detect_languages,
+    run_command,
+)
 from wiring_recheck import recheck_pillar_a
 
 
@@ -63,23 +77,8 @@ def _has_npm_script(project_root: Path, script: str) -> bool:
 
 
 def _run_command(cmd: list[str], cwd: Path, timeout: int = 300) -> dict[str, Any]:
-    try:
-        result = subprocess.run(
-            cmd,
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        return {
-            "exit_code": result.returncode,
-            "stdout_tail": result.stdout[-500:] if result.stdout else "",
-            "stderr_tail": result.stderr[-500:] if result.stderr else "",
-        }
-    except subprocess.TimeoutExpired:
-        return {"exit_code": -1, "error": f"timeout after {timeout}s"}
-    except FileNotFoundError as exc:
-        return {"exit_code": -1, "error": f"command not found: {exc}"}
+    """Kept as the in-module name; the single implementation lives in suite_runners."""
+    return run_command(cmd, cwd, timeout)
 
 
 def check_npm_test(project_root: Path) -> dict[str, Any]:
@@ -142,37 +141,23 @@ def check_npm_lint(project_root: Path) -> dict[str, Any]:
 
 
 def check_coverage(project_root: Path) -> dict[str, Any]:
-    """Run `npm run test:coverage` and gate on exit code.
+    """Run the coverage command when there is one, then READ the report.
 
-    IMPORTANT HONESTY NOTE: this gate ONLY enforces that the coverage command
-    exits successfully. It does NOT parse coverage reports (lcov, json-summary)
-    to verify the ≥ 90% changed-files / 100% critical-paths thresholds promised
-    in SKILL.md. The threshold parsing depends on:
-      - the project shipping a coverage reporter (lcov-reporter, json-summary)
-      - knowing which files are "changed" vs "critical path" (requires plan metadata)
-    Both deferred until the project has a working `src/` to instrument.
-    Until then, the threshold claim is honored by the test runner's own
-    `--coverage --coverage-threshold` flag (if configured); this gate only
-    asserts the command ran. Cycle-implement.md soft gate "Coverage < 100% on
-    critical path" is currently advisory, not enforced here.
+    The verdict lives in coverage_gate.py; this function only decides whether a
+    coverage command exists and runs it. Before that split, the check returned
+    PASS on the command's exit code and never opened a report — see that
+    module's docstring.
     """
-    if not _has_package_json(project_root):
-        return {"name": "coverage", "status": "SKIP", "reason": "package.json absent — pre-code phase"}
-    if not _has_npm_script(project_root, "test:coverage"):
-        return {"name": "coverage", "status": "SKIP", "reason": "no 'test:coverage' script in package.json"}
-    result = _run_command(["npm", "run", "test:coverage", "--silent"], project_root, timeout=600)
-    if result.get("exit_code") == 0:
-        return {
-            "name": "npm run test:coverage",
-            "status": "PASS",
-            "note": "Exit-code gate only — coverage thresholds NOT parsed by this script (see docstring).",
-        }
-    return {
-        "name": "npm run test:coverage",
-        "status": "FAIL",
-        "exit_code": result.get("exit_code"),
-        "stderr_tail": result.get("stderr_tail", result.get("error", "")),
-    }
+    command_ran = False
+    command_failed = False
+    if _has_package_json(project_root) and _has_npm_script(project_root, "test:coverage"):
+        result = _run_command(["npm", "run", "test:coverage", "--silent"], project_root, timeout=600)
+        command_ran = True
+        command_failed = result.get("exit_code") != 0
+
+    return coverage_evaluate(
+        project_root, command_ran=command_ran, command_failed=command_failed
+    )
 
 
 def _read_progress(project_root: Path, slug: str) -> dict[str, Any] | None:
@@ -478,6 +463,68 @@ def check_checkpoint_consistency_gate(project_root: Path, slug: str) -> dict[str
     }
 
 
+def check_tdd_shape_gate(project_root: Path, slug: str) -> dict[str, Any]:
+    """Re-assert the Step 2 pre-loop gate at the end of the run.
+
+    `check_tdd_shape.py` was invoked from SKILL.md prose only. Nothing downstream
+    ever asked whether it had run, so a halt-loop driven from a prose-only plan
+    left no trace — the exact gap `rules/cycle-implement.md § Hard gates
+    (pre-loop, at Step 2)` describes as blocking.
+    """
+    plan = _find_plan(project_root, slug)
+    if plan is None:
+        return {"name": "tdd_shape", "status": "SKIP",
+                "reason": f"plan not found for slug '{slug}' — cannot audit TDD shapes"}
+    from check_tdd_shape import check_tdd_shape
+
+    report = check_tdd_shape(plan)
+    if report.total_tasks == 0:
+        return {"name": "tdd_shape", "status": "SKIP",
+                "reason": "the plan declares no `### T{n}.{m}` task blocks"}
+    without = [t.task_id for t in report.tasks if not t.has_executable_shape]
+    return {
+        "name": "tdd_shape",
+        "status": "FAIL" if without else "PASS",
+        "total_tasks": report.total_tasks,
+        "tasks_with_shape": report.tasks_with_shape,
+        "tasks_without_shape": without,
+        "findings": [
+            {"severity": "HIGH", "code": "tdd_shape_missing",
+             "message": f"{tid}: no executable RED-test shape (assertion / GWT / test_fn) "
+                        "— the halt-loop should have been BLOCKED at Step 2."}
+            for tid in without
+        ],
+    }
+
+
+def check_phase_review_gate(project_root: Path, slug: str) -> dict[str, Any]:
+    """Did the Step 4.7 mini review actually run at every phase boundary it closed?"""
+    plan = _find_plan(project_root, slug)
+    if plan is None:
+        return {"name": "phase_review", "status": "SKIP",
+                "reason": f"plan not found for slug '{slug}' — cannot audit phase boundaries"}
+    progress = _read_progress(project_root, slug)
+    if progress is None:
+        return {"name": "phase_review", "status": "SKIP",
+                "reason": "no progress checkpoint — implement may not have run"}
+    from check_phase_review import check_phase_review
+
+    review_dirs = [
+        project_root / ".claude" / "knowledge-base" / "mini-reviews",
+        project_root / "knowledge-base" / "mini-reviews",
+    ]
+    report = check_phase_review(plan, progress, slug, review_dirs)
+    return {
+        "name": "phase_review",
+        "status": report.status,
+        "phases_declared": report.phases_declared,
+        "phases_closed": report.phases_closed,
+        "phases_reviewed": report.phases_reviewed,
+        "findings": [{"severity": f.severity, "code": f.code, "message": f.message}
+                     for f in report.findings],
+    }
+
+
 def check_acceptance_criteria_gate(project_root: Path, slug: str) -> dict[str, Any]:
     """Enforce the plan's AC/DoD obligations that run_validation does not otherwise
     cover (file-size budget, CHANGELOG-updated) and surface the non-mechanizable
@@ -534,14 +581,27 @@ def main() -> int:
 
     project_root = args.project_root if args.project_root else _find_project_root(Path.cwd())
 
+    # Every language whose suite the gate knows how to run. The npm check stays
+    # first for report stability; test_execution consolidates all of them and is
+    # what turns "nothing ran" into a FAIL instead of a silent PARTIAL.
+    suite_checks = [
+        check_npm_test(project_root),
+        check_python_tests(project_root),
+        check_go_tests(project_root),
+        check_rust_tests(project_root),
+    ]
+
     checks = [
         check_progress_schema_gate(project_root, args.slug),
         check_checkpoint_consistency_gate(project_root, args.slug),
-        check_npm_test(project_root),
+        *suite_checks,
+        check_test_execution(project_root, suite_checks),
         check_npm_typecheck(project_root),
         check_npm_lint(project_root),
         check_coverage(project_root),
         wiring_summary(project_root, args.slug),
+        check_tdd_shape_gate(project_root, args.slug),
+        check_phase_review_gate(project_root, args.slug),
         check_acceptance_criteria_gate(project_root, args.slug),
         check_test_obligations_gate(project_root, args.slug),
         check_patterns_advisory(project_root, args.slug),
