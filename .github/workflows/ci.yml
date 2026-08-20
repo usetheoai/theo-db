@@ -97,13 +97,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build da imagem de CI (uma vez, para todos)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           tags: theo-db:ci
@@ -125,7 +125,7 @@ jobs:
       - name: Salvar a imagem
         run: docker save theo-db:ci | zstd -T0 -3 -o /tmp/theodb-ci.tar.zst
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: theodb-ci-image
           path: /tmp/theodb-ci.tar.zst
@@ -148,10 +148,10 @@ jobs:
     # declaravam timeout (pg-regression 25, hybrid-search 20).
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -228,10 +228,10 @@ jobs:
     # é ~2x o observado — folga para variação de download do dataset sem virar refém de um hang.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -316,10 +316,10 @@ jobs:
     # do `pg-regression` (25), que também sobe container e roda suíte externa.
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -362,13 +362,13 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -405,10 +405,10 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -455,10 +455,10 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -515,13 +515,13 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -573,9 +573,9 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -628,7 +628,7 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: License sweep — columnar candidates permissive verdict (reproducible)
         run: bash packaging/license-sweep.sh || true   # § (a)/(b) need the theo-db image; § (c)/(e) curl-only verdicts always print
       - name: Build throwaway columnar image (canonical pg_mooncake distribution, MIT)

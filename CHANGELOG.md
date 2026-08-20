@@ -13,7 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- **As 39 referências a actions de terceiros passaram a ser fixadas por SHA imutável**, com a tag
+  legível ao lado em comentário. Uma tag é um ponteiro mutável: quem controla o repositório da
+  action pode reapontá-la, e o consumidor executa código novo sem um diff em lugar nenhum — nem no
+  PR, nem no histórico, nem na revisão. `actions/*` e `docker/*` incluídas, porque pertencer ao
+  GitHub não torna uma tag imutável. O dependabot já em vigor reescreve SHA e comentário juntos, e
+  a política ficou em `.github/CONTRIBUTING-workflows.md`. (#B-083)
+
 ### Added
+- **`SET ivfflat.probes` tem efeito medido, e agora há prova disso.** O alias pgvector tinha teste
+  de propagação de valor — que o GUC devolve o que foi setado —, o que é diferente de ter efeito:
+  um alias pode propagar certo e nunca alcançar o scan. O teste novo mede recall@200 contra
+  verdade-terreno por seqscan em `probes=1` e `probes=64`, e a diferença é forçada por contagem
+  (uma célula de Voronoi não cabe 200 vizinhos), não por amostragem. (#B-037)
 - **O registro de manutenção passou a se contradizer em voz alta.** `BACKLOG.md` tinha dois campos por
   bloco — o checkbox e o `status` — e nada os comparava: cada um está correto isolado, e só a comparação
   revela a divergência. Ao ligar o portão, **30 dos 39 itens lançados** estavam com o checkbox para trás.

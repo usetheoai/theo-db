@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-85 items — **Open** 36 · **In flight** 3 · **Closed** 46
+85 items — **Open** 32 · **In flight** 6 · **Closed** 47
 
-### Open (36)
+### Open (32)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -93,33 +93,32 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-046`](#b-046--paridade-de-qps-com-o-pgvector-a-recall-casado-hoje-o-déficit-medido-é-163----) | Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3% | `triaged` | — |
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `triaged` | — |
 | [`B-050`](#b-050--o-conserto-do-cliente-opensearch-é-do-upstream-e-o-fork-tem-saída-declarada----) | O conserto do cliente OpenSearch é do upstream, e o fork tem saída declarada | `triaged` | — |
-| [`B-051`](#b-051--nada-compara-o-checkbox-com-o-status-e-a-divergência-sobreviveu-meses----) | Nada compara o checkbox com o `status`, e a divergência sobreviveu meses | `triaged` | — |
 | [`B-052`](#b-052--workspace-não-tem-portão-73-commits-e-13-arquivos-rust-sem-um-gate-olhar----) | `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar | `triaged` | — |
 | [`B-054`](#b-054--toda-iteração-em-rust-custa-8-minutos-e-2m34s-deles-eram-um-cp--r----) | Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r` | `triaged` | — |
 | [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança----) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `triaged` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `triaged` | — |
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
-| [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado----) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `triaged` | — |
 | [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela----) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `triaged` | — |
 | [`B-066`](#b-066--a-contenção-escritascan-não-é-medível-não-existe-arnês-concorrente----) | A contenção escrita×scan não é medível: não existe arnês concorrente | `triaged` | — |
 | [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala----) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
-| [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `triaged` | — |
-| [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem----) | Dois flags de perfil prometem gates que não existem | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 | [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar----) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `triaged` | — |
 | [`B-083`](#b-083--42-actions-de-terceiros-fixadas-por-tag-e-nenhuma-por-sha----) | 42 actions de terceiros fixadas por TAG, e nenhuma por SHA | `triaged` | — |
 
-### In flight (3)
+### In flight (6)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
+| [`B-051`](#b-051--nada-compara-o-checkbox-com-o-status-e-a-divergência-sobreviveu-meses----) | Nada compara o checkbox com o `status`, e a divergência sobreviveu meses | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
+| [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado----) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `planned` | — |
+| [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 
-### Closed (46)
+### Closed (47)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -161,6 +160,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-064`](#b-064--o-eixo-theodb-do-próprio-arnês-não-constrói-índice-ele-emite-a-sintaxe-do-pgvector-contra-os-ams-do-theodb---x) | O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB | `shipped` | — |
 | [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada---x) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `shipped` | — |
 | [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala---x) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `shipped` | — |
+| [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem---x) | Dois flags de perfil prometem gates que não existem | `shipped` | — |
 | [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina---x) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `shipped` | — |
 | [`B-077`](#b-077--a-tabela-de-roteamento-é-a-do-ecossistema-inteiro-e-os-dois-repos-que-existem-não-roteiam---x) | A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam | `shipped` | — |
 | [`B-078`](#b-078--seis-módulos-de-teste-do-kit-não-coletam-um-símbolo-removido-levou-as-suítes-junto----) | Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto | `killed` | — |
@@ -2133,7 +2133,9 @@ why_now: o próprio saneamento de hoje **produziu** uma segunda divergência ant
 mesma semana, num arquivo de 50 blocos, é frequência que não se resolve com atenção. E o custo já foi pago:
 li os 9 itens `planned` corretos como registro podre e propus "avançá-los", raciocínio que só se sustentava
 porque eu não sabia distinguir um status errado de um status que eu não tinha entendido.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — implementado no commit `cf7633a` (workspace), aguardando release. Os quatro
+  bullets fecharam; ao ligar o portão, 30 dos 39 `shipped` estavam com o checkbox para trás.
 dod:
   - um validador recusa `[x]` com `status` ∈ {raw, triaged, planned}, e `[ ]` com `status: shipped` — provado
     por teste que hoje falharia contra o `BACKLOG.md` de `842347c`
@@ -2706,7 +2708,14 @@ why_now: o próprio [[B-060]] deste ecossistema abriu citando este método como 
 *"disciplina exata"*, e construiu o portão do knob por analogia a ele. A analogia estava certa e o exemplar
 estava morto — de modo que o portão que o B-060 entregou é hoje o **único** apply-then-verify que roda no arnês.
 Registrar isto é o que impede a citação de continuar a circular como se o mecanismo existisse.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — implementado no `theodb-bench` commit `5d97e22` (workspace), aguardando
+  release. Os quatro bullets fecharam. O binding foi consertado extraindo `_query_parameters` (três
+  cópias do mesmo ternário e uma ausência); o chamador entrou como hook `verify_access_path` na base,
+  não como chamada direta ao método do Postgres; o I5 foi reescrito para "verifica e NÃO força",
+  porque `SET enable_seqscan = off` continua não sendo emitido; e o vulture entrou em confiança 60,
+  decidido por simulação — em 80 o portão passaria limpo sobre a própria classe do defeito.
+  **Não exercitado contra servidor vivo** (droplet destruído, [[B-073]]/[[B-075]]).
 dod:
   - `assert_index_used` tem chamador no caminho de medição do `bench/vector.py`, e um teste falha se o chamador
     for removido
@@ -2956,7 +2965,12 @@ maioria dos benchmarks vetoriais públicos declara — e ela não está no camin
 instância do mesmo padrão no mesmo dia: o [[B-063]] registrou o `assert_index_used` implementado, citado como
 exemplar e sem chamador. **O padrão é o item**: este repositório constrói componentes excelentes e nem sempre
 os liga.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — os bullets 1-3 estão em `v0.1.0` (`compare` pareado com recusa,
+  Pareto emitido por corrida, regressão consultada pelos perfis). O bullet 4 entrou agora no commit
+  `6ccaa14` (workspace), aguardando release: portão de módulo órfão por AST, com os TRÊS que restam
+  (`bench.graph`, `bench.operations`, `bench.retrieval`) nomeados num baseline que o teste obriga a
+  encolher. Verificado que não são alcançados por registro dinâmico antes de chamá-los órfãos.
 dod:
   - `theodb-bench compare` produz teste pareado, IC e tamanho de efeito quando há repetições suficientes, e
     **recusa** comparar médias quando não há
@@ -2964,7 +2978,7 @@ dod:
   - a detecção de regressão roda nos perfis que a declaram (ver [[B-072]])
   - existe teste ou gate que reprova quando um módulo de `analysis/` ou `bench/` fica sem chamador em `src/` —
     o padrão não pode reaparecer em silêncio
-## B-072 — Dois flags de perfil prometem gates que não existem   [ ]
+## B-072 — Dois flags de perfil prometem gates que não existem   [x]
 
 domain: arnes
 repo: theodb-bench
@@ -2985,7 +2999,12 @@ why_now: um perfil é o contrato de rigor que separa "validação local" de "nú
 leitor externo vai consultar para saber o que aquele número vale. Um flag decorativo nesse contrato é a mesma
 classe do `assert_index_used` ([[B-063]]) e do I5 declarado-e-morto: **o documento afirma um gate que o código
 não executa**.
-status: triaged
+status: shipped
+status_nota: 2026-08-20 — os três bullets fecharam e estão em `v0.1.0` do theodb-bench:
+  `validation.py:302` consulta `regression_gate` e `:304` consulta `frozen_methodology`, e
+  `tests/test_profiles.py::test_every_profile_flag_steers_something` enumera os campos booleanos de
+  `Profile` e exige consumidor fora de `profiles.py` — por AST, distinguindo "decide" de "imprime",
+  que era a distinção que deixava os dois flags passarem. Commit `5855499`, contido em `v0.1.0`.
 dod:
   - `regression_gate = True` faz a corrida comparar contra baseline e reprovar na ausência de baseline
     comparável (fail-closed, como o I22 exige), ou o flag sai do perfil
