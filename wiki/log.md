@@ -209,7 +209,9 @@ comunicada ao owner e baseou a redação inicial do item de backlog.
 * **A entity pass é fechada sobre os nomes que os conceitos ligam.** Nomes que aparecem apenas dentro dos conceitos de entidade (por exemplo, bibliotecas citadas dentro de `technologies/`) permaneceram como prosa, conforme a regra de recursão de um anel.
 * **O acervo de referências primárias do projeto não foi convertido.** O catálogo de papers e repositórios clonados citado no `CLAUDE.md` está fora do versionamento e fora do escopo desta conversão.
 
-## 2026-08-13 — B-036: `m` e `ef_construction` deixam de ser constantes de compilação
+## 2026-08-13
+
+**B-036 — `m` e `ef_construction` deixam de ser constantes de compilação.**
 
 `features/02-indice-hnsw.md` **atualizado** (não duplicado): a seção "A armadilha dos parâmetros de build"
 descrevia como verdade permanente algo que era estado — `WITH (m = …)` falhava com `unrecognized parameter`.
@@ -220,3 +222,143 @@ Acrescentado à seção de qualidade do grafo o honest-negative que o knob torna
 maior não é sempre melhor** — o M57 mediu 64→200 *piorando* o recall a 100k–500k, e `m` 16→32 idem (0,952).
 O knob existe para ser varrido por medição, não subido no escuro; sem essa linha ao lado da tabela, a tabela
 convida exatamente ao erro que o projeto já pagou.
+
+## 2026-08-16
+
+**O veredito vetorial mediu a biblioteca; o concorrente é um índice do PostgreSQL.**
+`decisions/0035-m73-northstar-vector-verdict.md` recebeu acréscimo — nunca sobrescrita — registrando que o gap
+de ~25× foi medido contra o **ScaNN OSS**, e que o produto expõe `CREATE INDEX ... USING scann`, um access
+method que paga o mesmo imposto de MVCC/WAL que nós. Como o próprio ADR atribui o gap a "AH-LUT **+ não pagar o
+imposto**", metade da causa não se aplica ao AM.
+
+O veredito **não** foi invalidado: a vantagem do AH-LUT é real e medida. O que mudou é o que se pode afirmar
+sobre o *produto* — e o AlloyDB Omni, que traz o ScaNN e o colunar sem GCP, tornou a comparação do ADR-0061
+possível. Virou [[B-057]] (vetorial) e [[B-058]] (colunar).
+
+Gatilho: avaliação independente publicada em 2026-08-15, que mediu o índice ScaNN 30× menor que o ivfflat com
+build 7–9× mais rápido, e **não conseguiu estabelecer a recall** — 0,15 obtido, com a causa identificada
+(`scann.num_leaves_to_search` sem efeito sem `LOAD`, e sem aviso). Registramos a **não-reprodução**, não uma
+refutação: o avaliador declara não confiar no número e não o publica.
+
+---
+
+## 2026-08-17
+
+**A comparação do ADR-0061 foi feita, e três configurações erradas vieram antes da certa.**
+
+**O gap contra o access method foi medido, e ele colapsa.** `benchmarks/b057-scann-am-headtohead.md`:
+a recall casado no SIFT-128 a 100k, na mesma máquina e no mesmo arnês, o `scann` AM é **1,2–1,6×** o
+`theodb_hnsw` — não os ~25× que o ADR-0035 registrou contra a biblioteca. A entrada de 2026-08-16 acima
+previu exatamente isto; a medição a confirmou.
+
+**Duas correções ao que eu mesmo escrevi, ambas por acréscimo no ADR-0035.** A primeira comparou
+`theodb_hnsw` — grafo puro, sem quantizador — contra o `scann` com AH e rescore: nosso grafo contra o
+IVF-quantizado deles, comparação real e pergunta errada. O TheoDB **tem** a receita, e o arco no código
+chama-se `pg_scann` (`ann/ivf_aqah.rs` no M75, `am/scan.rs::scan_ivf_aq` no M77): `pq_subspaces` é o
+quantizador anisotrópico, `pq_bits=4` a largura LUT16, `aq_threshold` o T, `soar_lambda` o SOAR,
+`separate_storage=1, refine=1` o rescore exato. A recall casado ≈ 0,957, o `pg_scann` faz **476,5 QPS**
+contra **438,8** do `scann` — um ponto, não uma fronteira.
+
+A segunda: `benchmarks/b061-columnar-crossover.md` preserva a retratação de que o `theodb_columnar` seria
+14–20× mais lento que o heap sem crossover. Medi no default, e `theodb.enable_columnar_agg` vem **`off`** —
+1407 ms com `Seq Scan` contra 108 ms com `Custom Scan (theodb_columnar_agg)`, mesma tabela, mesma query.
+Com o pushdown ligado o crossover existe entre 10 mil e 100 mil linhas.
+
+**A classe que atravessa tudo virou guia.** `guides/instrumento-reporta-o-pedido.md`: quatro instrumentos
+respondem o que foi *pedido* em vez do que está *em vigor* — `current_setting` contra `pg_settings`,
+`g_columnar_columns` contra `Memory Used`, residência contra o plano (e por query), e o default contra o
+flag verificado. Nenhum falha; três produziram bundle `VALID` com fronteira plausível.
+
+A assimetria é o que torna isto sério e está escrita lá: medir-nos num default aleijado custa um número;
+**medir o concorrente num default aleijado produz alegação falsa que nos favorece**. O resultado que estava
+na mão era "o scann teto em 0,66 de recall enquanto o nosso chega a 0,9956" — e o teto era o rescore
+desligado, não o índice.
+
+**`technologies/alloydb.md` e `technologies/scann.md` deixaram de ser escritos por documentação.** O Omni
+foi executado: query layer sem storage desagregado, imagem em PostgreSQL 17.9, nada instalado por default,
+opclasses `cosine`/`dot_product`/`l2`, e um engine colunar com quatro estados dos quais três caem para heap
+em silêncio.
+
+**Limite honesto:** três destas medições saíram de script direto contra os adapters, não de bundle do arnês —
+corretas e **não reproduzíveis por terceiros**. Virou [[B-069]], e a regra de que toda medição publicável sai
+do `theodb-bench` passou a ser invariante do repositório do arnês.
+
+**Teto de escala do arnês, medido.** `benchmarks/harness-scale-ceiling.md` registra 10 000 000 de vetores
+carregados em 155 s com **1,16 GB de RSS** contra 5,1 GB de corpus — o corpus nunca residente. A escada até
+lá: `executemany` **122 s** → COPY texto **75 s** → COPY binário **16,8 s** por milhão, e o degrau do meio é
+o que justificou o terceiro (dos 75 s, **72 eram `repr()` em Python**, 128 milhões deles).
+
+**O bilhão está quantificado e não alcançado:** 520 GB de tabela, ~780 GB com HNSW, 4,3 h de carga — contra
+**284 GB livres** no host medido. A capacidade está entregue e verificada a 10M; a corrida exige outra máquina,
+e construir HNSW sobre 1B é trabalho de dias. Registrado porque um benchmark cujas alegações de escala
+ultrapassam suas medições é pior que um que declara seus limites, e este vai ser publicado.
+
+**A escala de referência passou a ser 20M, escolhida por medição e não por ambição.** `1,27 GB por milhão`
+medido no host (558 MB de heap + 724 MB de `theodb_hnsw` para 1M × 128, m=16) põe 20M em **25,4 GB — 9% do
+disco**. 100M cabe e transforma o build em horas; **~200M é o teto físico** e não deixa margem para
+`maintenance_work_mem` nem para spill de ordenação. Um bilhão são 1,27 TB e **não cabe** — o que
+`benchmarks/harness-scale-ceiling.md` já registrava por outra conta.
+
+O corpus é **real**: os primeiros 20 000 000 registros do BIGANN (`bvecs`, SIFT uint8 do TEXMEX), verificados
+por checksum. Repetir o SIFT1M vinte vezes exercitaria os mesmos bytes e produziria recall sem sentido — a
+ressalva que a medição de 10M carrega e que esta remove.
+
+Três peças tiveram que existir. Um **leitor** de `bvecs` que checa a dimensão declarada por registro (ela se
+repete; ler plano reinterpretaria todo vetor seguinte no deslocamento errado). Um **oráculo em streaming**,
+exato porque a ordem `(distância, id ascendente)` é total e o top-k de uma ordem total se recupera fundindo
+top-k por partição — um top-k corrente que guardasse "os k menores por valor" **não** seria, porque num chunk
+com mais empates que k a escolha é arbitrária e os ids menores morrem antes da fusão. E **uma abstração no
+lugar de dois `isinstance`**: o benchmark faz exatamente duas coisas com o corpus, e nenhuma delas tem
+interesse em qual forma ele tem.
+
+**A verdade fundamental (`ground truth`) é computada, nunca lida.** O BIGANN publica ids de vizinhos para o
+bilhão inteiro; contra um prefixo de 20M eles nomeiam linhas que não existem. O arnês **recusa**, em vez de
+descartar — descartar **aumentaria** o recall, removendo exatamente os vizinhos que o sistema não achou.
+
+**E a carga de 20M abortou, por defeito nosso.** `guides/orcamento-que-limita-a-coisa-errada.md` registra:
+`COPY bench_vectors, line 4569000`, cancelado pelo `statement_timeout` de **consulta** aplicado a uma
+**carga**. O arnês classificou certo — `budget_exceeded`, com a frase *"the system under test did not
+fail"* — e essa distinção é o valor inteiro: colapsá-la publicaria *"o TheoDB não aguentou 20M"* quando o
+que não aguentou foi um timeout que nós escrevemos. Build e carga agora compartilham um mecanismo só, porque
+são a mesma classe de trabalho: não medido, em massa, duração proporcional ao tamanho.
+
+
+**E a escala de 20M produziu o achado que corrige a própria recomendação que a escolheu.** O
+`CREATE INDEX … USING theodb_hnsw` sobre 20M foi **morto pelo OOM killer** — `anon-rss:10033724kB`, com o
+`DETAIL` do PostgreSQL nomeando exatamente esse comando. `benchmarks/build-hnsw-teto-de-ram.md` registra a
+curva medida isoladamente: **250k → 606 MB**, **1M → 1871 MB**, ou **~1687 MB por milhão** — e
+`maintenance_work_mem` estava em 64 MB o tempo todo.
+
+**O dimensionamento que eu publiquei horas antes olhava o disco.** 1,27 GB/milhão dizia que ~200M cabiam;
+pela RAM, o host de 16 GB comporta **~5,8M**. As duas contas estão certas sobre o que mediram, e escolher
+20M com base só na primeira foi a omissão. A correção entrou **por acréscimo** em
+`benchmarks/harness-scale-ceiling.md`, não por reescrita.
+
+Causa-raiz localizada e filada como **#230**: `am/build.rs:403` chama `collect_corpus` incondicionalmente
+no `ambuild_hnsw`, enquanto a rota de memória limitada do M96 (`should_stream`, que já lê o GUC certo) fica
+atrás de um gate de opções do **IVFFlat**. E a **#221** registra a mesma classe no colunar — dois
+componentes ignorando o mesmo orçamento é ausência de contrato de memória, não dois bugs.
+
+**O que a escala de 20M de fato entrega, dito inteiro:** carrega (20 000 000 de linhas, 11 GB) e consulta
+por varredura exata; **não** constrói índice de grafo neste host. Reportar só a primeira metade seria a
+omissão que o acervo existe para impedir.
+**E a projeção que eu tinha acabado de publicar foi contradita pela medição direta, por 2,6×.** Rodei o
+build de 20M numa máquina de 64 GB em vez de extrapolar: o consumo privado real é **~13,0 GB**
+(`RssAnon`), ou **0,65 GB por milhão**, contra os 1,73 GB/milhão que o ajuste de 250k–2M dava. **O consumo
+é sublinear.**
+
+O detalhe que vale guardar é que **o ajuste era bom** — o terceiro ponto (2M) foi previsto pelos dois
+primeiros com 2% de erro. Ele era bom **onde foi ajustado**, e eu o usei uma década de escala adiante.
+Confirmar um modelo dentro da faixa medida não licencia extrapolá-lo para fora dela, e o intervalo de
+confiança de uma extrapolação não é o do ajuste.
+
+As grandezas foram verificadas antes de afirmar a contradição: o host antigo tinha `shared_buffers` de
+128 MB, então o `VmRSS` de lá é essencialmente `RssAnon`; os dois têm `max_parallel_maintenance_workers=2`
+e o build corre com um backend só. A diferença é real, não de instrumento.
+
+**O defeito não muda** — 13 GB privados para indexar 11 GB de corpus continua sendo o corpus
+materializado, continua ignorando `maintenance_work_mem`, e o OOM veio com `anon-rss:10033724kB`, **logo
+abaixo** dos 13 GB necessários. Muda só o teto: ~13M num host de 16 GB, não os ~4,7M projetados.
+
+A correção entrou na issue #230 e no conceito **por acréscimo**, com o número errado riscado e não
+apagado, porque ele foi publicado e citado.

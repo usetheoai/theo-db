@@ -136,7 +136,8 @@ Each agent runs its review independently and returns findings in a structured fo
 ```bash
 python3 .claude/skills/review/scripts/consolidate_findings.py \
   --findings-dir .claude/agents/review-{slug}-{date}/findings/ \
-  --output .claude/knowledge-base/reviews/{slug}-review-{date}.md
+  --output .claude/knowledge-base/reviews/{slug}-review-{date}.md \
+  --plan .claude/knowledge-base/plans/{slug}-plan.md
 ```
 
 The script:
@@ -177,7 +178,7 @@ The script:
 After all findings consolidate, decide (per `rules/cycle-review.md § Verdicts`):
 
 - Any BLOCKER → **HALT**. Merge cannot proceed. Loop back to `/implement` to fix.
-- More than 2 HIGH → **HALT** unless every HIGH is explicitly dismissed with ADR-style rationale in the report; up to 2 HIGH with documented mitigation MAY emit READY_TO_MERGE.
+- More than 2 HIGH → `READY_TO_MERGE_WITH_FOLLOWUPS` **only when every HIGH is a registered followup** — named by id under the plan's `## Followups` section (that is what `--plan` is read for) or carrying an issue reference `#NNN` in `recommended_action`. Any unregistered HIGH → **HALT** with `NEEDS_FIXES`. A rationale written in the report's prose is not registration: a caveat nobody owns is a defect with better manners. Up to 2 HIGH with documented mitigation MAY emit `READY_TO_MERGE`.
 - Any MEDIUM → surface to human; accept WITH_CAVEATS in PR description OR fix.
 - LOW/INFO → log; merge can proceed.
 
@@ -197,7 +198,7 @@ Report format (see `consolidate_findings.py`):
 **Date:** {date}
 **Reviewers (spawned agents):** 5-7 (list)
 **Findings:** N total (BLOCKER: N, HIGH: N, MEDIUM: N, LOW: N, INFO: N)
-**Verdict:** READY_TO_MERGE / NEEDS_FIXES / NEEDS_DEEPER
+**Verdict:** READY_TO_MERGE / READY_TO_MERGE_WITH_FOLLOWUPS / NEEDS_FIXES / NEEDS_DEEPER
 
 ## BLOCKER findings (must fix before merge)
 ### F1: {description}
@@ -240,7 +241,7 @@ Report format (see `consolidate_findings.py`):
 - .claude/agents/review-{slug}-{date}/domain-pgvector-schema.md
 
 ## Handoff decision
-{READY_TO_MERGE: open PR / NEEDS_FIXES: loop /implement / NEEDS_DEEPER: re-spawn with broader scope}
+{READY_TO_MERGE or READY_TO_MERGE_WITH_FOLLOWUPS: open PR / NEEDS_FIXES: loop /implement / NEEDS_DEEPER: re-spawn with broader scope}
 ```
 
 ## Findings format (each agent emits)

@@ -638,27 +638,38 @@ mod tests {
     #[pg_test]
     fn pgvector_ef_search_alias_has_effect() {
         Spi::run("SET hnsw.ef_search = 200").unwrap();
-        let ef = Spi::get_one::<i32>("SELECT current_setting('hnsw.ef_search')::int")
-            .unwrap()
-            .unwrap();
+        let ef =
+            Spi::get_one::<i32>("SELECT current_setting('hnsw.ef_search')::int").unwrap().unwrap();
         assert_eq!(ef, 200, "o alias deveria estar registrado como GUC de verdade");
 
         // O efetivo: com o nome próprio no default, o alias manda.
-        assert_eq!(super::ef_search(), 200, "o alias pgvector não teve efeito no valor efetivo do scan");
+        assert_eq!(
+            super::ef_search(),
+            200,
+            "o alias pgvector não teve efeito no valor efetivo do scan"
+        );
     }
 
     /// T1.2 — `SET ivfflat.probes` tem efeito.
     #[pg_test]
     fn pgvector_probes_alias_has_effect() {
         Spi::run("SET ivfflat.probes = 42").unwrap();
-        assert_eq!(super::probes(), 42, "o alias pgvector não teve efeito no valor efetivo do scan");
+        assert_eq!(
+            super::probes(),
+            42,
+            "o alias pgvector não teve efeito no valor efetivo do scan"
+        );
     }
 
     /// T1.3 — precedência: o nome específico vence quando está fora do default.
     #[pg_test]
     fn alias_precedence_specific_wins() {
         Spi::run("SET theodb_hnsw.ef_search = 300; SET hnsw.ef_search = 7;").unwrap();
-        assert_eq!(super::ef_search(), 300, "o nome próprio, setado fora do default, deveria vencer o alias");
+        assert_eq!(
+            super::ef_search(),
+            300,
+            "o nome próprio, setado fora do default, deveria vencer o alias"
+        );
 
         Spi::run("SET theodb_ivfflat.probes = 99; SET ivfflat.probes = 3;").unwrap();
         assert_eq!(super::probes(), 99, "o nome próprio deveria vencer o alias também para probes");

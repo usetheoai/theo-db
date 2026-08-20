@@ -14,7 +14,7 @@ A backlog item is a **hypothesis with an owner and a closing criterion**. It is 
 
 Invoke `/backlog-item {slug}` when ALL of:
 
-- `BACKLOG.md` exists at the umbrella root (created once by `/backlog-init`).
+- `BACKLOG.md` exists at the root of the governed scope — the umbrella when repos live below it, the repository itself when it is autonomous (created once by `/backlog-init`).
 - There is one concrete thing to improve, fix, verify, or evolve in a repo that exists in the umbrella inventory.
 - It maps to exactly one registered domain (see § Domain routing). Work spanning two domains is two items.
 
@@ -57,6 +57,10 @@ One file, one schema, two entry paths. A sweep finding skips intake because it a
 
 Every item is one `## B-NNN` block. Ids are monotonic, never reused, never renumbered — a killed item keeps its number so the audit trail survives.
 
+**"Monotonic" governs ALLOCATION, not position in the file.** The next item takes the next unused number; an id is never handed out twice and never renamed. Where its block physically sits is a readability matter — inserting a new block next to the items it relates to is normal and breaks nothing, because every `[[B-NNN]]` reference resolves by id.
+
+This needed saying because it was read the other way. `check_backlog_structure.py` emitted a deterministic BLOCKER named `renumbered` whenever ids did not ascend in file order, with the message *"a reused id makes every earlier reference ambiguous"*. Measured on this registry on 2026-08-20: no id was reused, three pairs merely sat out of order, and every reference still resolved. Reuse is already caught by `duplicate_id`, which is deterministic and actually counts — so position had nothing of its own to prove. The check is now `ids_out_of_order`: heuristic, minor, and its message says what is true (ascending ids read more easily) instead of a harm that did not occur.
+
 ```markdown
 ## B-014 — Reduce the theo-lens trace explorer p95   [ ]
 
@@ -97,30 +101,64 @@ raw ──/discover measures──┬──> triaged ──/to-plan──> plann
 
 ## Domain routing
 
-`domain` is what assigns the item to a specialist. The registered set:
+`domain` is what assigns the item to a specialist. **This table is this project's own**, written by hand on
+2026-08-20 per the decisions in `knowledge-base/grills/registry-ownership-model-grill.md`. It replaced the
+ecosystem-wide table the kit ships, which named 16 repos of which this machine has two — the exact failure the
+paragraph below records for `theokit-sdk`.
 
-Verified on disk 2026-08-05 (`find -maxdepth 2 -name .git` + `git -C <repo> rev-list --count HEAD`), not copied from any inventory table.
+`skills/backlog-init/scripts/detect_domains.py` emits a table from the directory layout, and the header it
+generates says to edit it by hand when ownership does not follow that layout. **Here it does not**: the unit of
+ownership in this project is the **pillar** (vector, lexical, columnar, …), not the repository. Two repos hold
+eight pillars between them, so a repo-shaped table would send 66 of 80 items to one generic owner.
 
-| Domain | Repos (present on disk) | Specialist |
+A consumer that keeps a table it did not write inherits a map of repos it does not have, and gate G1 then
+refuses every item it files — correctly, since it genuinely cannot tell who owns the work. Measured on
+`theokit-sdk` (2026-08-18): 88 items with measured `file:line` evidence, all `BLOCKER/unroutable_repo`. Measured
+here on 2026-08-20 before this rewrite: `theodb-bench` `UNROUTED` (13 items) and `theo-db` `BROKEN ROUTE` to a
+specialist that was never written.
+
+**Read the `Repos` column as "which repo routes here by DEFAULT" — not "which repos this pillar touches".**
+The distinction is load-bearing and is the reason this table needs no change to `route_domain.py`. Every repo
+appears in exactly one row, so resolution by repo is deterministic; a pillar with an empty cell is reached
+through the item's own `domain:` field, never by repo. Listing a repo under every pillar it touches would make
+`route()` return whichever row comes first — it takes the first match and does not object — which is the
+ambiguity this shape avoids by construction rather than by code.
+
+| Domain | Repos (default route) | Specialist |
 |---|---|---|
-| `engine-go` | `theo` | `agents/engine-go.md` |
-| `control-plane` | `theo-cloud`, `theo-traefik-mcp` | `agents/control-plane.md` |
-| `data-plane-ts` | `theo-memory`, `theo-rag`, `theo-lens`, `theo-trust`, `theo-skills`, `theo-promptly` | `agents/data-plane-ts.md` |
-| `theo-db` | `theo-db` | `agents/theo-db.md` |
-| `infra-terraform` | `theo-infra-modules`, `theo-infra-live` | `agents/infra-terraform.md` |
-| `contracts-auth` | `theo-contracts` | `agents/contracts-auth.md` |
-| `frontend-dashboard` | `theo-cloud/dashboard` | `agents/frontend-dashboard.md` |
-| `platform-cli` | `theo-cli`, `theo-storage` | `agents/platform-cli.md` |
+| `engine-pgrx` | `theo-db` | `agents/theo-pgrx.md` |
+| `arnes` | `theodb-bench` | `agents/arnes.md` |
+| `vetorial` | — | `agents/theo-recall.md` |
+| `lexical` | — | `agents/theo-lexical.md` |
+| `colunar` | — | `agents/theo-columnar.md` |
+| `hot-path` | — | `agents/theo-hotpath.md` |
+| `ai-surface` | — | `agents/theo-ai-surface.md` |
+| `acervo` | — | `agents/theo-wiki.md` |
+| `metodo` | — | `agents/theo-auditor.md` |
+| `governanca` | — | `agents/governanca.md` |
 
-**One repo, two domains — resolved by path, not by judgement.** `theo-cloud` holds both the Go control plane and the TypeScript dashboard (`theo-cloud/dashboard/package.json`, verified on disk). The `repo` field therefore takes `theo-cloud` for the Go half and `theo-cloud/dashboard` for the UI half. Listing the bare repo under both domains would make routing depend on iteration order — the same item routing differently on different runs, which works until it does not and nothing changed. `scripts/route_domain.py` enforces the one-repo-one-domain invariant, and `tests/test_route_domain.py::test_no_repo_belongs_to_two_domains` is what caught the ambiguity.
+**Why `theo-db` defaults to `engine-pgrx`.** It is the pillar holding the most items filed against that repo
+(25 of the 60). The default is a starting point, not a verdict: `/backlog-item` asks for the `domain:` in the
+grill, and a governance or vector item filed against `theo-db` takes its own pillar there. The default only
+decides what `route_domain theo-db` answers when nobody said otherwise.
 
-### Repos an inventory names but disk does not
+**`theo-concurrency.md` deliberately has no domain.** No item has been filed against it, and inventing a domain
+so an existing agent has a row would put a routing target where the registry has no work — the same emptiness
+gate G1 exists to refuse. The agent stays directly invocable.
 
-`theo-contextify`, `theo-gateway`, `theo-sandboox`, `theokit-app` and `theo-itself` appear in the umbrella's `CLAUDE.md` and have **no checkout** as of 2026-08-05. They are listed here rather than deleted so that the divergence stays visible: an item filed against one of them routes nowhere until the repo is actually cloned, and `/backlog-item` gate G1 refuses it.
+### Repos this scope governs, and the ones it does not
 
-This is exactly why `skills/backlog-init/SKILL.md` mandates reading the inventory from disk. The umbrella's table claims it was "verified 2026-07-28" and states that a repo absent from it does not exist in the folder; a week later, five of its entries had no checkout. Documentation drifts, and a routing table that names a repo nobody has cloned sends work to a specialist who cannot open the code.
+Two, both in the table above and both verified on disk on 2026-08-20 (`git -C <repo> rev-parse HEAD`):
+`theo-db` (the extension and engine) and `theodb-bench` (the measurement harness, a sibling checkout at
+`../theodb-bench`). No item may name anything else — the table is the whole inventory.
 
-`theo-workspace` (a nested clone of the umbrella itself) takes no items.
+The kit's shipped version of this section listed `theo-contextify`, `theo-gateway`, `theo-sandboox`,
+`theokit-app` and `theo-itself` as named-but-not-cloned. **None of them belongs to this project**, and the
+paragraph survived here only because the ecosystem-wide table did. It is removed rather than kept, because a
+routing document that lists repos nobody here will ever file against teaches the reader to skim it.
+
+What the removed paragraph got right, and this project just paid for, is worth keeping: **a routing table
+describes disk, and disk drifts.** Re-verify before trusting it, rather than trusting the date on it.
 
 ## Verdicts
 
@@ -136,11 +174,13 @@ There is no "with caveats" band: an item is either in the registry or it is not.
 
 | # | Gate | Blocks on |
 |---|---|---|
-| G1 | **Domain + repo resolve** | `domain` not in the registered set, or `repo` not in the umbrella inventory. An item nobody owns is an item nobody does. |
-| G2 | **Dedup search ran** | No search of `BACKLOG.md` performed before writing. A collision on an open item forces `ITEM_MERGED`. |
+| G1 | **Domain + repo resolve** (executado por `skills/backlog-item/scripts/check_intake_gates.py`, que delega a `scripts/route_domain.py`) | `domain` not in the registered set, or `repo` not in the umbrella inventory. An item nobody owns is an item nobody does. |
+| G2 | **Dedup search ran** (mesmo script; rodá-lo É a evidência) | No search of `BACKLOG.md` performed before writing. A collision on an open item forces `ITEM_MERGED`. |
 | G3 | **Single domain** | The description spans two domains. Split it; one item, one specialist. |
 | G4 | **Verifiable DoD** | Zero `dod` bullets, or every bullet unfalsifiable ("melhorar a performance"). Without a closing criterion the item never closes. |
 | G5 | **No prior-art justification** | `why_now` justifies the item by what another project does rather than by something that changed in our system. This is the Squad signature rule (Unbreakable Rule: evidence is ours or it is not evidence). Reject and ask for the local reason. |
+
+G1 e G2 são mecanizáveis e passaram a ser mecanizados; G3, G4 e G5 são julgamento e seguem conversacionais, cobertos pela bateria de evals da skill — automatizá-los produziria vereditos sobre linguagem que nenhuma medição sustenta.
 
 G5 does not forbid *knowing* how others solved a problem — it forbids that knowledge from being the **justification** for the work. "We need caching because project X has it" is rejected. "We need caching because the endpoint makes 4 round-trips per request" is accepted, whether or not project X inspired the look.
 
@@ -156,12 +196,41 @@ Intake deliberately has **no evidence gate**. Requiring evidence here would coll
 - **`dod` that restates the title.** "DoD: the trace explorer being faster" is the title again, not a criterion.
 - **Treating `suggested_mode` as binding.** It is the filer's guess. Locking DISCOVER to it defeats the purpose of measuring.
 
+## The index that opens the registry
+
+`BACKLOG.md` MUST carry an `## Index` section immediately before the item blocks, listing **every**
+item — one row each, linked to its own detail block — grouped into three buckets:
+
+| Bucket | Statuses | The question it answers |
+|---|---|---|
+| **Open** | `raw`, `triaged` | registered, measured or not, but nothing is being built |
+| **In flight** | `planned` | a plan exists; work is under way |
+| **Closed** | `shipped`, `killed` | the chain ended — and `killed` is a *successful* ending |
+
+`triaged` sits under **Open** deliberately. Measurement has run, but no plan exists, so nothing is
+in flight; folding it into the in-flight count would make that number answer a different question
+than the one people ask of it.
+
+**The index is generated, never written.** `skills/backlog-review/scripts/backlog_index.py --write`
+derives it from the blocks; `--check` exits 1 when it has drifted. `check_backlog_structure.py`
+reports `index_stale` (major) when the file's index does not match the one the generator would
+produce, and treats **absent as stale** — otherwise a registry opts out of the check by never
+having the section, which is how the four registries in this ecosystem reached 592 items with
+zero index rows.
+
+This is not ceremony. A summary that disagrees with the items below it is worse than no summary:
+a reader stops at the summary, so a wrong one reports absence where evidence exists — the same
+failure `rules/knowledge-base-location.md` records for a split knowledge-base. Nothing forces the
+index and the items to move together, so the gate is what keeps them honest.
+
 ## Output
 
 - `BACKLOG.md` at the umbrella root — the single registry, spanning all repos in the inventory.
 - `knowledge-base/backlog/{slug}-intake.md` — the intake grill log (one entry per answered question, with the G5 decision recorded).
 
-The registry lives at the umbrella root and not per-repo because a maintenance team asking "what is pending?" must have exactly one place to look. Per-repo backlogs re-create the orphaned-findings problem the single-registry rule exists to solve.
+The registry lives at the root of the governed SCOPE and not scattered below it, because a maintenance team asking "what is pending?" must have exactly one place to look. Per-directory backlogs inside one scope re-create the orphaned-findings problem the single-registry rule exists to solve.
+
+What this never meant is "an umbrella is required". An autonomous repository is its own scope and keeps its own registry — `theokit-sdk` holds 88 items about `theokit-sdk`, and asking it to file them in a parent directory that is nobody's repository would put the registry outside the thing it governs.
 
 ## Rollback
 

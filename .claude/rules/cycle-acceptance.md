@@ -77,7 +77,7 @@ When a criterion cannot be exercised with any available instrument, its status i
 | exercise | criteria + target | one result per criterion, each with evidence | every criterion has a recorded status; `passed` requires at least one evidence artifact |
 | record | results + defects | `knowledge-base/acceptance/{milestone}-{date}.md` + `evidence/` | evidence files exist at the cited paths |
 | verdict | `criteria.json` + `evidence.json` | verdict token | computed by `compute_acceptance_verdict.py`; never asserted by the agent |
-| flip | verdict ∈ {`ACCEPTED`, `ACCEPTED_WITH_CAVEATS`} | `ROADMAP.md` `[ ]` → `[x]` + roadmap-runs updated | single-flip invariant (`cycle-roadmap § Hard gates`); no flip on `REJECTED` or `NOT_VALIDATED` |
+| flip | verdict ∈ {`ACCEPTED`, `ACCEPTED_WITH_CAVEATS`} | `ROADMAP.md` `[ ]` → `[x]` + roadmap-runs updated | single-flip invariant (§ Hard gates, abaixo); no flip on `REJECTED` or `NOT_VALIDATED` |
 
 ## Verdicts
 
@@ -92,7 +92,11 @@ When a criterion cannot be exercised with any available instrument, its status i
 
 - **A `passed` without evidence is not a pass.** `compute_acceptance_verdict.py` refuses it as `NOT_VALIDATED`. This is the gate the whole cycle rests on: with the human sign-off deliberately out of scope, recorded evidence is the only thing standing between a real validation and a confident sentence.
 - **The verdict is computed, never asserted.** The agent that ran the journeys does not get to name the outcome — it records results, and the script derives the verdict. Reporting a verdict the script did not emit is a review BLOCKER.
-- **No flip without a green verdict.** `[x]` claims a user-visible promise was met; only `ACCEPTED` / `ACCEPTED_WITH_CAVEATS` may flip it. Enforced by the single-flip invariant it inherits from `cycle-roadmap § Hard gates`.
+- **No flip without a green verdict.** `[x]` claims a user-visible promise was met; only `ACCEPTED` / `ACCEPTED_WITH_CAVEATS` may flip it.
+
+- **Single-flip invariant (SoT).** At most ONE `ROADMAP.md` checkbox flips per accepted milestone. Implemented once, in `skills/release/scripts/flip_milestone_checkbox.py` — the script stayed in the release slice when the flip moved here, because one implementation of an invariant is the invariant.
+
+  This clause used to point at the Hard gates section of the retired cycle-roadmap rule (unbackticked here on purpose: it is history, not a reference). That file was replaced by `cycle-maintenance` and the section stopped existing, while `cycle-release` and six scripts kept citing it — a normative anchor aimed at nothing. It lives here now because this is the cycle that performs the flip.
 - **The target is the released artifact.** Validating a local build, a staging clone, or a mock reproduces exactly the blind spot this cycle exists to remove.
 - **Criteria come from the milestone.** They are read from `ROADMAP.md` before the run. A criterion invented or edited after seeing the result is grading a moved target — and per Unbreakable Rule 4's spirit on evidence, is fabrication.
 - **Every caveat is filed.** `ACCEPTED_WITH_CAVEATS` without an issue per defect turns a known problem into an unowned one.

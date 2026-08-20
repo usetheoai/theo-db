@@ -37,7 +37,7 @@ Default roadmap-driven (`/auto-plan` or `/auto-plan M<N>`):
      ↓ IMPLEMENT    (halt-loop until IMPLEMENTATION_COMPLETE)
      ↓ CODE-QUALITY (audit; gate proceeds only when PASS / PASS_WITH_CAVEATS)
      ↓ REVIEW       (5-7 specialist agents)
-     ↓ gate:         only proceed if /review = READY_TO_MERGE
+     ↓ gate:         only proceed if /review ∈ {READY_TO_MERGE, READY_TO_MERGE_WITH_FOLLOWUPS}
      ↓ RELEASE      (opens develop→main PR with semver tag; PAUSES for human approval)
      ↓                — post-merge: cycle-release flips ROADMAP.md M<N> [ ] → [x]
      ↓ verdict:      RELEASED OR PR_OPEN_AWAITING_APPROVAL
@@ -68,7 +68,7 @@ Ad-hoc (`/auto-plan {topic-slug}` with arbitrary slug):
 - Before IMPLEMENT starts: plan-confidence verdict ≥ SHIPPABLE_WITH_CAVEATS.
 - Before CODE-QUALITY starts: implementation emitted `IMPLEMENTATION_COMPLETE`.
 - Before REVIEW starts: code-quality verdict ∈ {`PASS`, `PASS_WITH_CAVEATS`}.
-- Before RELEASE starts: review verdict = `READY_TO_MERGE`.
+- Before RELEASE starts: review verdict ∈ {`READY_TO_MERGE`, `READY_TO_MERGE_WITH_FOLLOWUPS`}. The second is not a softening: it is only reachable when zero BLOCKER remain and every HIGH is a *registered* followup, which `consolidate_findings.py` verifies against the plan's `## Followups` before emitting it.
 - Final manual gate: human approves the release PR. Auto-merge is forbidden (Unbreakable Rule 4).
 
 Any gate failure → pause + surface the blocking finding. The orchestrator does NOT loop indefinitely; after 1 fix-and-retry attempt at the same gate, it halts with `BLOCKED` and asks the human.

@@ -63,8 +63,18 @@ def _is_explicitly_blocked(raw: str, match_end: int) -> bool:
 
 def _resolve_code_pointer(project_root: Path, rel_path: str, line: int) -> tuple[bool, str]:
     """Return (ok, reason). Reason is '' when ok."""
-    path = project_root / rel_path
-    if not path.is_file():
+    # Plugin layout: in a consumer the ecosystem lives under `.claude/`, so a pointer
+    # written as `rules/cycle-discover.md:150` resolves from the project root in the
+    # STANDALONE layout and nowhere else. Measured 2026-08-20 in `theo-db`: the skill's own
+    # `good-opportunity.md` fixture scored INVALID by `fabricated_evidence` — every pointer
+    # into the ecosystem read as fabricated. Same failure `skills/implement/scripts/_layout.py`
+    # records for the knowledge-base, and the sibling `check_measurement_targets.py` already
+    # carried the two-candidate branch for `live-target.txt` while its target loop did not.
+    for candidate in (project_root / rel_path, project_root / ".claude" / rel_path):
+        if candidate.is_file():
+            path = candidate
+            break
+    else:
         return False, "missing_file"
     try:
         total_lines = sum(1 for _ in path.open("r", encoding="utf-8", errors="replace"))

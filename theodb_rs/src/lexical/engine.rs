@@ -44,13 +44,11 @@ fn build_schema() -> (Schema, Field, Field) {
     let id = sb.add_i64_field("id", STORED | FAST | INDEXED);
     let body = sb.add_text_field(
         "body",
-        TextOptions::default()
-            .set_stored()
-            .set_indexing_options(
-                TextFieldIndexing::default()
-                    .set_tokenizer(super::analyzer::ANALYZER_NAME)
-                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
-            ),
+        TextOptions::default().set_stored().set_indexing_options(
+            TextFieldIndexing::default()
+                .set_tokenizer(super::analyzer::ANALYZER_NAME)
+                .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+        ),
     );
     let schema = sb.build();
     (schema, id, body)
@@ -366,7 +364,8 @@ mod tests {
 
         // schema legado: `TEXT` puro => tokenizer "default", como antes do B-044
         let mut sb = Schema::builder();
-        let id_f = sb.add_i64_field("id", tantivy::schema::FAST | tantivy::schema::INDEXED | STORED);
+        let id_f =
+            sb.add_i64_field("id", tantivy::schema::FAST | tantivy::schema::INDEXED | STORED);
         let body_f = sb.add_text_field("body", TEXT | STORED);
         let store = Arc::new(crate::lexical::MemStore::default());
         let index = Index::create(
@@ -453,7 +452,6 @@ mod tests {
     // diz: `search_on_never_built_index_raises_typed_error` e
     // `search_on_built_but_empty_index_returns_zero_rows_without_error`.
 
-
     #[pg_test]
     fn test_bm25_search_empty_query_returns_no_rows() {
         setup_docs();
@@ -489,8 +487,10 @@ mod tests {
     /// B-041 — buscar num `index_id` que nunca passou por `bm25_build` levanta erro tipado, em vez de devolver
     /// zero linhas. Medido antes do conserto contra `theodb:b036`: `bm25_search(999,'lazy dog',5)` devolvia
     /// **0 linhas, sem erro nem aviso**.
-    #[pg_test(error = "bm25_search: index_id 999 nunca foi construído (sem linha em theodb.lexical_index_meta) — \
-uma busca sobre índice inexistente devolveria zero linhas, indistinguível de \'nada casou\'")]
+    #[pg_test(
+        error = "bm25_search: index_id 999 nunca foi construído (sem linha em theodb.lexical_index_meta) — \
+uma busca sobre índice inexistente devolveria zero linhas, indistinguível de \'nada casou\'"
+    )]
     fn search_on_never_built_index_raises_typed_error() {
         let _ = pgrx::Spi::get_one::<i64>("SELECT count(*) FROM bm25_search(999, 'lazy dog', 5)");
     }
@@ -512,8 +512,13 @@ uma busca sobre índice inexistente devolveria zero linhas, indistinguível de \
             "SELECT count(*) FROM theodb.lexical_index_meta WHERE index_id = 4242",
         )
         .unwrap();
-        assert_eq!(registrado, Some(1), "o build vazio TEM de registrar — é o que distingue dos nunca-construídos");
-        let n = pgrx::Spi::get_one::<i64>("SELECT count(*) FROM bm25_search(4242, 'qualquer', 5)").unwrap();
+        assert_eq!(
+            registrado,
+            Some(1),
+            "o build vazio TEM de registrar — é o que distingue dos nunca-construídos"
+        );
+        let n = pgrx::Spi::get_one::<i64>("SELECT count(*) FROM bm25_search(4242, 'qualquer', 5)")
+            .unwrap();
         assert_eq!(n, Some(0), "corpus vazio é resultado legítimo, não erro");
     }
 
@@ -527,13 +532,13 @@ uma busca sobre índice inexistente devolveria zero linhas, indistinguível de \
     fn build_counts_only_findable_documents() {
         pgrx::Spi::run("CREATE TABLE b048_d(id bigint PRIMARY KEY, body text)").unwrap();
         pgrx::Spi::run("INSERT INTO b048_d VALUES (1,'alpha'),(2,NULL),(3,'beta')").unwrap();
-        let n = pgrx::Spi::get_one::<i64>(
-            "SELECT bm25_build(4243::bigint, 'b048_d', 'id', 'body')",
-        )
-        .unwrap();
+        let n =
+            pgrx::Spi::get_one::<i64>("SELECT bm25_build(4243::bigint, 'b048_d', 'id', 'body')")
+                .unwrap();
         assert_eq!(n, Some(2), "o NULL não é achável e não deve ser contado");
         let achaveis =
-            pgrx::Spi::get_one::<i64>("SELECT count(*) FROM bm25_search(4243, 'alpha beta', 10)").unwrap();
+            pgrx::Spi::get_one::<i64>("SELECT count(*) FROM bm25_search(4243, 'alpha beta', 10)")
+                .unwrap();
         assert_eq!(achaveis, Some(2), "o retorno do build tem de bater com o que a busca encontra");
     }
 
@@ -553,7 +558,12 @@ uma busca sobre índice inexistente devolveria zero linhas, indistinguível de \
         )
         .unwrap();
         assert_eq!(registrado, Some(1), "build válido registra, mesmo sem documento achável");
-        let n2 = pgrx::Spi::get_one::<i64>("SELECT count(*) FROM bm25_search(4244, 'x', 5)").unwrap();
-        assert_eq!(n2, Some(0), "zero linhas SEM erro — o índice existe, o corpus é que não tem termo");
+        let n2 =
+            pgrx::Spi::get_one::<i64>("SELECT count(*) FROM bm25_search(4244, 'x', 5)").unwrap();
+        assert_eq!(
+            n2,
+            Some(0),
+            "zero linhas SEM erro — o índice existe, o corpus é que não tem termo"
+        );
     }
 }
