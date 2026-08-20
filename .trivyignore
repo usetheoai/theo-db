@@ -1,16 +1,18 @@
-# Trivy CVE allowlist for the shipped TheoDB image (ghcr.io/usetheodev/theo-db).
+# Trivy CVE allowlist for the shipped TheoDB image (ghcr.io/usetheoai/theo-db).
 #
 # WHY THIS FILE MUST EXIST AT ALL:
-# The reusable publish workflow (usetheodev/theo/.github/workflows/build-publish.yml) passes
-# `trivyignores: .trivyignore` to aquasecurity/trivy-action. When the file is ABSENT, Trivy does not
-# fall back to "no ignores" — it aborts before scanning:
+# HISTÓRICO, e o workflow citado não existe mais (2026-08-20): a esteira delegava a
+# `usetheodev/theo/.github/workflows/build-publish.yml` — org que nem existe, corrigida para
+# `usetheoai` no B-010 — e hoje o `publish-image.yml` é NATIVO, porque um repositório público não
+# pode consumir workflow reutilizável de um privado (B-082). O raciocínio abaixo continua valendo:
+# quando o arquivo está AUSENTE, o Trivy não cai para "sem ignores" — ele aborta antes de escanear:
 #
 #     ERROR: cannot find ignorefile '.trivyignore'.
 #     ##[error]Process completed with exit code 1.
 #
 # The job then fails in ~2 seconds, which looks like a CVE gate doing its job but is the exact
 # opposite: nothing was ever scanned. Every `publish` run died there, so the image was never pushed —
-# the root cause of #187 (`docker pull ghcr.io/usetheodev/theo-db:latest` -> `manifest unknown`, the
+# the root cause of #187 (`docker pull ghcr.io/usetheoai/theo-db:latest` -> `manifest unknown`, the
 # first command in the README). An EMPTY-but-present file is what makes the gate actually run.
 #
 # Format (mirrors .claude/rules/deps-audit-allowlist.txt):
@@ -28,3 +30,44 @@
 # `[Unreleased] § Changed` and — for HIGH/CRITICAL — an ADR, per the deps-audit golden rule.
 # If the gate now fails with real CRITICAL/HIGH findings, that is a genuine security result on an
 # image that has never been scanned; triage the CVEs, do not pad this file.
+
+# =====================================================================================
+# gosu — o binário Go do entrypoint da imagem oficial do PostgreSQL. MEDIDO 2026-08-20.
+#
+# O QUE SÃO. 22 achados (21 HIGH + 1 CRITICAL) na `stdlib` do Go 1.24.6, todos em
+# `usr/local/bin/gosu`, que vem de `postgres:18-bookworm`. Não compilamos Go neste projeto;
+# são inteiramente herdados e não há versão nossa a corrigir.
+#
+# ALCANÇABILIDADE, medida e não suposta. O `gosu` é invocado UMA vez, em
+# `/usr/local/bin/docker-entrypoint.sh:343` (`exec gosu postgres "$BASH_SOURCE" "$@"`), para largar
+# privilégio — e o `exec` o substitui em seguida. E `strings /usr/local/bin/gosu | grep -cE
+# 'crypto/tls|net/http|x509'` devolve **0**: o código vulnerável **não está sequer ligado** ao
+# binário. O CRITICAL é `crypto/tls: incorrect certificate validation`, num programa que não fala
+# TLS e não abre rede.
+#
+# COMO SAI DAQUI. Não por ação nossa: sai quando a imagem oficial do PostgreSQL reconstruir com um
+# `gosu` compilado em Go >= 1.24.13. O sunset abaixo é a data em que isto volta à mesa, não uma
+# promessa de conserto — e se o upstream não tiver movido, a decisão é revista com número novo.
+
+CVE-2025-68121   # sunset: 2026-09-19 — CRITICAL, 30 dias (deps-audit-golden-rule § 4). crypto/tls em binário sem TLS ligado
+CVE-2025-61726   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2025-61729   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-25679   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-27145   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-32280   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-32281   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-32283   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-33811   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-33814   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-33818   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-39820   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-39821   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-39822   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-39836   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-42499   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-42504   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-56853   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-56858   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-56859   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-56860   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base
+CVE-2026-56862   # sunset: 2026-10-19 — HIGH, 60 dias. stdlib Go em `gosu` (entrypoint), herdado da imagem base

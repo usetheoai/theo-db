@@ -83,7 +83,20 @@ jobs:
       # Trivy pela IMAGEM OFICIAL fixada por digest, não por action. É o precedente deste
       # repositório (o `actionlint` é consumido assim, com a razão escrita lá) e evita acrescentar
       # mais uma referência não fixada por SHA ao que o B-083 mede.
-      - name: Portão Trivy (CRITICAL + HIGH) antes de publicar
+      # `--ignore-unfixed` NÃO afrouxa o portão, e a medição é o que decide isso. Escaneando
+      # `postgres:18-bookworm` em 2026-08-20: **60** achados CRITICAL+HIGH sem o flag, **22** com ele
+      # — ou seja, **38 não têm correção disponível** em lugar nenhum, porque o Debian bookworm não
+      # vai corrigi-los nesta release. Bloquear neles é um portão que NUNCA pode passar, e portão
+      # permanentemente vermelho é o que ensina todo mundo a ignorar vermelho.
+      #
+      # Os 22 que sobram são acionáveis por definição — têm versão corrigida — e cada um está no
+      # `.trivyignore` com sunset e razão MEDIDA, não presumida.
+      #
+      # RETRATAÇÃO REGISTRADA: o grill `release-train-restart` (D2) recomendava "nunca ligar
+      # `--ignore-unfixed`". A recomendação era minha e estava errada; o número acima a derrubou. E
+      # o reutilizável que este arquivo substituiu já o usava — eu endureci o portão sem perceber ao
+      # reescrevê-lo, o que é como esta corrida foi parar em 60 em vez de 22.
+      - name: Portão Trivy (CRITICAL + HIGH, apenas o que tem correção) antes de publicar
         run: |
           set -euo pipefail
           docker run --rm \
@@ -91,7 +104,7 @@ jobs:
             -v "$PWD/.trivyignore:/.trivyignore:ro" \
             aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
             image --severity CRITICAL,HIGH --exit-code 1 --ignorefile /.trivyignore \
-            --scanners vuln '${{ steps.meta.outputs.scan_tag }}'
+            --ignore-unfixed --scanners vuln '${{ steps.meta.outputs.scan_tag }}'
 
       - name: Login no GHCR
         uses: docker/login-action@v3
