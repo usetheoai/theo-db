@@ -55,13 +55,50 @@ concurrency:
 
 jobs:
   lint:
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: runner padrão é grátis e ilimitado, enquanto
+    # o `theodb-do` é pago, único e SERIAL. Medido: este workflow levou de 66 a 120 minutos para um
+    # `cargo fmt --check`, quase tudo fila atrás dos outros nove.
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
       run:
         working-directory: theodb_rs
     steps:
       - uses: actions/checkout@v4
+
+      # 2026-08-20 — runner efêmero não tem o toolchain quente que a máquina paga tinha.
+      # O Dockerfile já ensina o caminho barato: `cargo pgrx init --pg18 "$(which pg_config)"`
+      # usa o pg_config do SISTEMA em vez de compilar PostgreSQL. Reproduzido aqui.
+      - name: PostgreSQL 18 do PGDG (o `pg_config` que o pgrx vai usar)
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+            https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-18 postgresql-server-dev-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+
+      # `~/.cargo/bin` e `~/.pgrx` cacheados juntos: sem isso, cada corrida reinstala o
+      # `cargo-pgrx` (compilação longa) para rodar um `cargo fmt` de segundos.
+      - name: Cache do cargo-pgrx e do pgrx init
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.pgrx
+          key: pgrx-${{ runner.os }}-0.19.0-pg18-${{ hashFiles('theodb_rs/Cargo.lock') }}
+          restore-keys: pgrx-${{ runner.os }}-0.19.0-pg18-
+
+      - name: cargo-pgrx + init (no-op quando o cache acertou)
+        run: |
+          set -euo pipefail
+          command -v cargo-pgrx >/dev/null || cargo install --locked cargo-pgrx --version 0.19.0
+          [ -d "$HOME/.pgrx" ] || cargo pgrx init --pg18 "$(which pg_config)"
 
       - name: Lockfile drift (cargo metadata --locked)
         run: |

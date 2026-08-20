@@ -82,7 +82,7 @@ jobs:
       # os runners da máquina theo-ci-runner (2 vCPU / 2 GB, que serve theo-cloud/theo-lens/
       # theo-memory) carregam exatamente esses labels genéricos, e um build que compila Rust +
       # PostgreSQL não cabe lá. O label específico prende o build na máquina de 8 vCPU.
-      runner: ${{ vars.CI_RUNNER || '["self-hosted","theodb-do"]' }}
+      runner: ${{ vars.CI_RUNNER || '["ubuntu-latest"]' }}
     # SEM bloco `secrets:` — e sem `secrets: inherit`, que é o que o semgrep barra. O `secrets: {}`
     # anterior expressava a mesma intenção (não repassar nada) mas o actionlint o rejeita como seção
     # vazia; omitir tem efeito idêntico e satisfaz os dois linters. O TheoDB não consome módulo Go

@@ -57,10 +57,42 @@ concurrency:
 
 jobs:
   cassert-and-pgspot:
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — runner GitHub-hosted, como o resto da frota. Este é o job com a migração mais
+    # cara: exige um PostgreSQL compilado com `--enable-cassert`, que os pacotes do PGDG NÃO
+    # trazem. Na máquina paga esse PG foi montado à mão e o repositório nunca registrou como —
+    # então a receita abaixo é reconstruída, não copiada.
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+
+      # O `~/.pgrx` cassert é caro (compila PostgreSQL do fonte) e imutável para uma dada versão:
+      # é exatamente o perfil que cache resolve. Primeira corrida paga; as seguintes, não.
+      - name: Cache do PG cassert do pgrx
+        id: pgrx-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.pgrx
+          key: pgrx-cassert-${{ runner.os }}-0.19.0-pg18
+
+      - name: Compilar o PG cassert (só quando o cache erra)
+        if: steps.pgrx-cache.outputs.cache-hit != 'true'
+        env:
+          # INCERTEZA DECLARADA (2026-08-20): esta é a via do pgrx para repassar flags ao `configure`
+          # do PostgreSQL, e NÃO foi verificada contra a 0.19.0 antes de escrever — o repositório não
+          # guardava a receita usada na máquina paga. Se estiver errada, o guard do passo seguinte
+          # (`pg_config --configure | grep --enable-cassert`) REPROVA nomeando a causa, que é o
+          # comportamento certo: o smoke sob Assert() seria vacuoso sem cassert, e vacuidade
+          # silenciosa é pior que falha barulhenta.
+          CONFIGURE_FLAGS: --enable-cassert
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bison flex libreadline-dev zlib1g-dev libssl-dev pkg-config
+          command -v cargo-pgrx >/dev/null || cargo install --locked cargo-pgrx --version 0.19.0
+          cargo pgrx init --pg18 download
 
       - name: Instalar a extensão no PG cassert do pgrx
         run: |
