@@ -14,12 +14,36 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Os portões de confiança deixam de acusar evidência legítima de ser fabricada.** Numa instalação
+  como plugin — que é o caso deste repositório — o ecossistema vive sob `.claude/`, e os dois
+  resolvedores de pointer procuravam apenas a partir da raiz do projeto. Consequência medida: a
+  fixture de exemplo da própria skill pontuava `INVALID` por `fabricated_evidence`, com todos os
+  pointers lidos como arquivo inexistente. Qualquer oportunidade que citasse um arquivo do
+  ecossistema era reprovada pelo mesmo motivo (#B-081)
+- **A revisão do backlog deixa de emitir um bloqueio que afirmava um dano inexistente.** O achado
+  `renumbered` dizia que "um id reusado torna ambígua toda referência anterior" sempre que os ids não
+  subiam na ordem do arquivo — sem que houvesse id reusado, e com todas as referências resolvendo.
+  Reuso já era detectado por outro achado. Virou aviso de menor severidade, com a mensagem correta
+  (#B-080)
+- **Item já fechado deixa de ser cobrado por critério de fechamento.** `thin_dod` disparava em item
+  `killed` dizendo que ele "nunca fecha", sobre item que já fechou (#B-080)
+- **Achados de arquitetura voltam a poder ser dispensados via allowlist.** Eles gravavam `architecture`
+  na chave e a tabela de tipos válidos nunca foi atualizada, então todo achado dessa classe resolvia
+  para tipo vazio, não casava nenhuma entrada e era estruturalmente indispensável (#B-079)
+- **A configuração de linguagens do audit de qualidade deixa de descrever um formato que o leitor não
+  aceita.** O cabeçalho do arquivo era do formato antigo; a configuração real (`rust`, apontando para
+  `theodb_rs/Cargo.toml`) já estava correta, então nenhum audit deixou de rodar (#B-078)
 - Corrigida a projeção de memória do build de `theodb_hnsw`: a medição direta a 20M dá ~13,0 GB de
   memória privada (0,65 GB/milhão), e não os ~34,7 GB que a extrapolação linear previa (#230)
 - Documentado que o build de `theodb_hnsw` mantém ~1,7 GB por milhão de vetores em memória do
   backend e é morto pelo OOM killer a 20M — o teto de escala do build é RAM, não disco (#230)
 
 ### Added
+- **Os 14 planos de implementação deste projeto passam a ser medidos contra o avaliador de planos**, e
+  o resultado vira teste de regressão: doze pontuam entre 98,0 e 100,0 sem nenhuma reprovação
+  estrutural, um pontua 89,0 por não declarar teste de concorrência, e um não pontua porque o
+  avaliador **quebra** em vez de reprovar quando o plano não tem matriz de cobertura — registrado como
+  defeito em vez de aceito como contrato (#B-081)
 - Escala de referência de 20 000 000 de vetores registrada no backlog (B-075) e documentada na wiki:
   corpus BIGANN real verificado por checksum, oráculo em streaming e a razão de 20M e não 100M (#B-075)
 - **`m` e `ef_construction` viram opções de índice de verdade** (B-036): `CREATE INDEX … USING theodb_hnsw (e) WITH (m = 32, ef_construction = 200)` passa a ser aceito **e honrado** — até aqui devolvia `unrecognized parameter "m"`, e o build era fixo em 16/64. É a sintaxe de build do pgvector, que o ADR-0029 § D2 promete como drop-in
@@ -36,6 +60,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Primeira medição comparativa publicada em `wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md`: **a recall casado (~0,983) o pgvector faz +16% de QPS**, e constrói o índice **3,6× mais rápido** (a inserção está em paridade — 18,8 s contra 19,7 s; a diferença é toda da construção do grafo). A leitura ingênua da mesma corrida — `ef_search` igual dos dois lados — diria o oposto, porque ali o TheoDB entrega recall 0,96 contra 0,9835 (B-035)
 
 ### Changed
+- **A tabela de roteamento de manutenção passa a ser deste projeto**, em vez da do ecossistema inteiro
+  (16 repositórios, dos quais esta máquina tem dois). A unidade de propriedade aqui é o **pilar** —
+  vetorial, lexical, colunar, motor, caminho crítico, superfície de IA, acervo, método, arnês,
+  governança — porque dois repositórios carregam oito pilares entre si, e uma tabela em forma de
+  repositório mandaria 66 de 80 itens para um dono genérico. Dois especialistas novos escritos, e o
+  registro de manutenção passa a fechar sem nenhum achado (#B-077)
 - O `README.md` **qualifica** a afirmação de compatibilidade (B-055). Ela dizia "100% compatível com PostgreSQL. Seus drivers, ferramentas e aplicações funcionam sem mudança" — absoluta, e um pooler é uma ferramenta. Compatibilidade de **protocolo** é dedutível (o TheoDB *é* PostgreSQL 18); compatibilidade de **ecossistema** não é: o ajuste de busca é GUC de sessão (`SET theodb_hnsw.ef_search`), então sob *transaction pooling* ele precisa de `SET LOCAL`. A matriz PgBouncer nos três modos **não foi medida**, e o README passa a dizer isso com o número do item
 - O núcleo numérico de distância vetorial virou um módulo **puro** (`theodb_rs/src/vec/kernels.rs`, zero `crate::`), separado da fronteira PostgreSQL que continua em `vec.rs` (B-053). Nenhuma verificação mudou de lugar e nenhum dos 17 call sites foi tocado — o re-export mantém a API. Foi o que permitiu tirar o micro-bench de SIMD da suíte funcional (B-023), onde ele cronometrava parede: o mesmo binário media 0,78× após os outros 439 testes e 0,66× com 3 contêineres ao lado, reportando a térmica do laptop como qualidade do kernel. Velocidade agora é `cargo bench --bench simd_cosine`, com o `criterion` reportando variância; a **correção** do despacho continua na suíte, comparada contra o oráculo escalar em 8 dimensões
 - O cliente do **VectorDBBench** deixa de recusar `m`/`ef_construction` por uma constante espelhada de `build.rs` e passa a **perguntar ao servidor** (B-046): um `CREATE INDEX` com as opções pedidas, numa tabela temporária dentro de um savepoint sempre revertido, antes da carga do dataset. Uma constante descreve o motor contra o qual o cliente foi escrito, não aquele para onde ele aponta — decidir por ela mede o rótulo em vez da capacidade, que é o erro que a corrida lexical do b047 documentou
