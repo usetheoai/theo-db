@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-79 items — **Open** 43 · **In flight** 32 · **Closed** 4
+80 items — **Open** 43 · **In flight** 33 · **Closed** 4
 
 ### Open (43)
 
@@ -88,7 +88,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `raw` | — |
 | [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off----) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `raw` | — |
 | [`B-021`](#b-021--o-diagnóstico-não-enxerga-índice-criado-pela-sintaxe-pgvector-e-o-opclass-default-não-serve-----) | O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>` | `triaged` | — |
-| [`B-022`](#b-022--dois-testes-declaram-fragmento-em-pg_testerror---e-o-pgrx-compara-a-mensagem-inteira----) | Dois testes declaram FRAGMENTO em `#[pg_test(error = …)]`, e o pgrx compara a mensagem INTEIRA | `raw` | — |
 | [`B-026`](#b-026--resíduo-do-symqg-função-morta-com-null-deref-latente-e-o-gate-de-clippy-está-vermelho-por-ela----) | Resíduo do SymQG: função morta com null-deref latente, e o gate de clippy está vermelho por ela | `triaged` | — |
 | [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `raw` | — |
 | [`B-037`](#b-037--o-am-ivfflat-não-existe-metade-do-shim-pgvector-está-ausente----) | O AM `ivfflat` não existe: metade do shim pgvector está ausente | `raw` | — |
@@ -114,11 +113,12 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `raw` | — |
 | [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `raw` | — |
 | [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem----) | Dois flags de perfil prometem gates que não existem | `raw` | — |
-| [`B-077`](#b-077--a-tabela-de-roteamento-é-a-do-ecossistema-inteiro-e-os-dois-repos-que-existem-não-roteiam----) | A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam | `raw` | — |
-| [`B-078`](#b-078--seis-módulos-de-teste-do-kit-não-coletam-um-símbolo-removido-levou-as-suítes-junto----) | Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto | `raw` | — |
-| [`B-079`](#b-079--o-tooling-escrito-em-claude-protege-uma-máquina-até-chegar-ao-repo-do-kit----) | O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit | `raw` | — |
+| [`B-077`](#b-077--a-tabela-de-roteamento-é-a-do-ecossistema-inteiro-e-os-dois-repos-que-existem-não-roteiam----) | A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam | `triaged` | — |
+| [`B-078`](#b-078--seis-módulos-de-teste-do-kit-não-coletam-um-símbolo-removido-levou-as-suítes-junto----) | Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto | `triaged` | — |
+| [`B-079`](#b-079--o-tooling-escrito-em-claude-protege-uma-máquina-até-chegar-ao-repo-do-kit----) | O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit | `triaged` | — |
+| [`B-080`](#b-080--o-renumbered-do-revisor-de-backlog-é-blocker-e-afirma-um-dano-que-a-evidência-não-mostra----) | O `renumbered` do revisor de backlog é BLOCKER e afirma um dano que a evidência não mostra | `triaged` | — |
 
-### In flight (32)
+### In flight (33)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -127,6 +127,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-011`](#b-011--o-vector-join-do-hnsw-perde-exatamente-um-elemento---x) | O vector-join do HNSW perde exatamente um elemento | `planned` | — |
 | [`B-016`](#b-016--os-testes-de-egress-esbarram-na-guarda-ssrf-do-próprio-produto----) | Os testes de egress esbarram na guarda SSRF do próprio produto | `planned` | — |
 | [`B-013`](#b-013--a-suíte-não-roda-no-ci-então-a-próxima-regressão-espera-meses---x) | A suíte não roda no CI, então a próxima regressão espera meses | `planned` | — |
+| [`B-022`](#b-022--dois-testes-declaram-fragmento-em-pg_testerror---e-o-pgrx-compara-a-mensagem-inteira----) | Dois testes declaram FRAGMENTO em `#[pg_test(error = …)]`, e o pgrx compara a mensagem INTEIRA | `planned` | — |
 | [`B-023`](#b-023--um-teste-de-performance-mora-na-suíte-funcional-e-ele-reprovou-com-avx-51-mais-lento----) | Um teste de PERFORMANCE mora na suíte funcional, e ele reprovou com AVX 51% mais lento | `planned` | — |
 | [`B-025`](#b-025--a-imagem-theodb-builder-não-traz-cargo-clippy-então-o-gate-de-lint-não-roda-fora-do-ci----) | A imagem `theodb-builder` não traz `cargo-clippy`, então o gate de lint não roda fora do CI | `planned` | — |
 | [`B-027`](#b-027--run-cancelado-deixa-o-contêiner-suite-órfão-e-o-run-seguinte-reprova-sem-rodar-um-teste----) | Run cancelado deixa o contêiner `suite` órfão, e o run seguinte reprova sem rodar um teste | `planned` | — |
@@ -1038,8 +1039,11 @@ suggested_mode: bug
 source: discover-bug
 evidence: medido em 2026-08-11 contra `ghcr.io/usetheoai/theo-db:0.140.0`. (a) `theodb.explain_scan` sobre uma tabela cujo índice foi criado com `USING hnsw` (o alias do shim, `sql/vector--0.6.0.sql:49`) devolve `(no theodb_hnsw index on this table)` — o alias é uma segunda entrada em `pg_am` (OID `hnsw=19173` vs `theodb_hnsw=16568`) e a resolução casa pelo nome do AM. (b) um índice criado com o opclass **default** do AM (`theodb_hnsw_l2_ops`, `opcdefault=t`) não serve o operador `<=>`: o plano medido cai em `Limit → Sort → Seq Scan`, enquanto `theodb_hnsw_cosine_ops` produz `Index Scan ... Order By`.
 why_now: os dois se somam contra o consumidor real. **Todo** índice que o `theo-rag` cria usa `USING hnsw` — portanto é invisível ao `explain_scan` e ao autotune, justamente nas consultas que o dogfood exercita. E `scan_stats` hardcoda `<=>` (`autotune.rs:210`), então quem cria o índice sem nomear o opclass (aceitando o default L2) nunca é medido e não recebe aviso — o diagnóstico devolve zeros silenciosos em vez de dizer "este índice não responde a este operador".
-status: raw
 status: triaged
+status_nota_dedup: 2026-08-20 — o bloco declarava `status` duas vezes (`raw`, depois `triaged`). Removida a
+  PRIMEIRA — resto de uma edição que acrescentou sem apagar —, mantendo o valor que todo leitor já tomava.
+  **Divergência que permanece e não é minha de resolver:** o `resolvido:` abaixo registra as três partes do
+  DoD entregues, e `triaged` não descreve isso; o estado real está entre `planned` e `shipped`.
 resolvido: 2026-08-12 — as TRÊS partes do DoD, mais o script de upgrade que elas exigiam.
 dod:
   - ~~`explain_scan` resolve índices pelo **handler**, não pelo nome do AM~~ **FEITO** — join por `pg_proc` (não `'…'::regproc`, que dependeria do `search_path`). Medido: `hnsw` OID 17174 e `theodb_hnsw` OID 16568 compartilham `theodb_hnsw_amhandler`, então resolver por handler cobre as duas sintaxes e qualquer alias futuro.
@@ -1075,9 +1079,12 @@ suggested_mode: bug
 source: discover-review
 evidence: suíte completa de 2026-08-11 (`434 passed; 6 failed`). `graph::csr_build_guards_u32_boundary` declara `error = "must fit in u32"` e o produto emite `theodb.graph_build: node ids must fit in u32 (max 4294967295)`; `vectorizer::process_delete_failure_does_not_mark_done` declara `error = "does not exist"` e o produto emite `column "emb" of relation "dst_bad" does not exist`. **A comparação do pgrx é igualdade exata** — lido no fonte da dependência, `pgrx-tests-0.19.0/src/framework.rs:174`: `if Some(received_error_message) == expected_error`.
 status: planned
+status_nota_dedup: 2026-08-20 — o bloco declarava `status` duas vezes, `planned` e depois `raw`. Removida a
+  SEGUNDA, ao contrário do B-021: `raw` é anterior a `planned` na transição, e o `status_nota` deste mesmo
+  bloco registra o conserto entregue em 2026-08-11. A linha que todo leitor tomava era a que contradizia o
+  próprio bloco.
 status_nota: resolvido em 2026-08-11 — os dois passaram a declarar a mensagem INTEIRA. Efeito colateral desejado e registrado: o texto do erro vira contrato, e mudá-lo passa a quebrar o teste (para o do `vectorizer` a mensagem é do ENGINE, `analyze.c`, então o contrato é do PostgreSQL).
 why_now: **o produto está CORRETO nos dois** — cada um emitiu exatamente o erro tipado que o teste existe para provar, e a asserção reprova mesmo assim. É a classe que o m188 chamou de classificação errada de teste, e ela custa duas vagas permanentes no baseline de falhas do CI, protegendo dívida em vez de produto. O conserto é declarar a mensagem inteira; o cuidado é que ela então vira contrato — mudar o texto do erro passa a quebrar o teste, que é o comportamento desejado para um erro tipado.
-status: raw
 dod:
   - os dois testes passam com a mensagem completa declarada, sem afrouxar para `should_panic` genérico
   - ~~verificado se há OUTROS `#[pg_test(error = …)]` declarando fragmento~~ **FEITO 2026-08-12, e a prova é a suíte verde.** São **30** asserções `#[pg_test(error = …)]` no repositório, e a suíte fechou **440/0**. Como o pgrx compara por IGUALDADE (`framework.rs:174`), um fragmento que não casasse reprovaria o teste — logo, as 30 mensagens casam exatamente. A categoria "fragmento ainda verde por coincidência" **não existe** sob comparação exata: ou casa inteiro, ou falha.
@@ -3040,7 +3047,10 @@ essa mesma razão, com a mensagem *"`theo-db` is declared in two domains"*.
 why_now: o `check_intake_gates.py` acabou de mecanizar G1 (2026-08-20, ainda não commitado quando isto foi
 medido). Enquanto a tabela estiver assim, mecanizar o gate **recusa todo item novo deste projeto** — o gate
 passa a funcionar e a resposta dele é errada, que é pior que gate nenhum, porque agora ela é automática.
-status: raw
+status: triaged
+status_nota: 2026-08-20 — filado por engano como `raw` carregando evidência medida. `raw` é hipótese SEM
+  evidência (`cycle-backlog.md § Item schema`); achado com medição nasce `triaged`. Corrigido no mesmo dia,
+  apontado por `check_backlog_structure.py`.
 dod:
   - está decidido por escrito qual é a unidade de propriedade aqui — repo ou pilar — e a razão
   - `route_domain.py` responde `routed: true` para `theo-db` e para `theodb-bench`, com especialista que
@@ -3067,7 +3077,10 @@ para trás foram os testes que importavam o símbolo.
 why_now: um `pytest skills/` no diretório inteiro **aborta na coleta**, então quem rodar a suíte do kit de
 forma ampla não vê 210 verdes — vê seis erros e nenhum resultado. E a quebra é invisível para quem roda só
 os diretórios que mexeu, que foi como ela sobreviveu.
-status: raw
+status: triaged
+status_nota: 2026-08-20 — filado por engano como `raw` carregando evidência medida. `raw` é hipótese SEM
+  evidência (`cycle-backlog.md § Item schema`); achado com medição nasce `triaged`. Corrigido no mesmo dia,
+  apontado por `check_backlog_structure.py`.
 dod:
   - `python3 -m pytest skills/ -q` coleta tudo sem erro
   - cada teste órfão ou foi reescrito contra o contrato que sobreviveu, ou foi removido com a razão no commit
@@ -3091,8 +3104,40 @@ Nada disso está no repositório do kit, e o repositório do kit **não está ne
 existe até chegar ao repositório do kit"*.
 why_now: o trabalho está feito e verde. O custo de portar cresce com cada ciclo que roda por cima dele, e o
 `.claude/` deste repo recebe atualização do instalador — uma reinstalação sobrescreve o que não foi portado.
-status: raw
+status: triaged
+status_nota: 2026-08-20 — filado por engano como `raw` carregando evidência medida. `raw` é hipótese SEM
+  evidência (`cycle-backlog.md § Item schema`); achado com medição nasce `triaged`. Corrigido no mesmo dia,
+  apontado por `check_backlog_structure.py`.
 dod:
   - o repositório do kit está clonado nesta máquina, ou está declarado por escrito onde ele vive
   - os 35 arquivos estão no repo do kit, ou está registrado por escrito quais foram descartados e por quê
   - um `install.sh` a partir do kit reproduz o estado que hoje só existe em `theo-db/.claude/`
+
+## B-080 — O `renumbered` do revisor de backlog é BLOCKER e afirma um dano que a evidência não mostra   [ ]
+
+domain: theo-db
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: medido em 2026-08-20 rodando
+`python3 .claude/skills/backlog-review/scripts/check_backlog_structure.py BACKLOG.md`. O relatório emite
+`[BLOCKER/dete] - renumbered: ids are not monotonic. Ids are never reused and never reordered — a reused id
+makes every earlier reference ambiguous.` Contra-medição no mesmo arquivo:
+`grep -o "^## B-[0-9]*" BACKLOG.md | sort | uniq -d` devolve **vazio** — nenhum id é reusado.
+O que existe são três pares fora de ordem **de posição no arquivo**: `B-016 → B-013`, `B-076 → B-058` e
+`B-075 → B-074`, todos de blocos inseridos perto de itens relacionados em vez de no fim.
+O achado confunde **ordem de aparição** com **reuso de id**, e a mensagem afirma um dano específico
+("makes every earlier reference ambiguous") que não ocorreu: toda referência `[[B-NNN]]` continua resolvendo
+para exatamente um bloco. É severidade `blocker` marcada `kind: deterministic` sobre uma inferência.
+why_now: o `SKILL.md` do `backlog-review` separa `deterministic` ("a máquina tem certeza") de `heuristic`
+("um humano decide") justamente para o leitor saber no que confiar. Um blocker determinístico que é falso
+gasta essa distinção: das duas uma, ou alguém reordena 79 blocos para satisfazer um invariante que a regra
+não pede, ou aprende a ignorar o relatório — e o relatório carrega 17 blockers verdadeiros ([[B-077]]) que
+ninguém pode se dar ao luxo de ignorar junto.
+status: triaged
+dod:
+  - o checador distingue id REUSADO (blocker, e verificável por contagem) de ordem de aparição no arquivo
+  - se ordem de aparição virar achado, ele é `minor`/`heuristic` e a mensagem descreve o que de fato acontece
+  - existe teste com um backlog fora de ordem SEM id repetido que prova a ausência do blocker
+  - `cycle-backlog.md § Item schema` diz explicitamente se "monotonic" governa alocação ou posição no arquivo
+
