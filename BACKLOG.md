@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-85 items — **Open** 43 · **In flight** 3 · **Closed** 39
+85 items — **Open** 36 · **In flight** 3 · **Closed** 46
 
-### Open (43)
+### Open (36)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -82,12 +82,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-008`](#b-008--lakehouse-4-funções-expostas-escala-e-formatos-nunca-medidos----) | Lakehouse: 4 funções expostas, escala e formatos nunca medidos | `raw` | — |
 | [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada----) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `raw` | — |
 | [`B-010`](#b-010--maturidade-zero-uso-real-e-é-o-gargalo-de-todos-os-pilares----) | Maturidade: zero uso real, e é o gargalo de todos os pilares | `raw` | — |
-| [`B-012`](#b-012--as-outras-18-falhas-da-suíte-seguem-sem-causa-capturada---x) | As outras 18 falhas da suíte seguem sem causa capturada | `triaged` | — |
 | [`B-014`](#b-014--bm25_search-aceita-um-termo-por-chamada-consulta-de-usuário-tem-vários----) | `bm25_search` aceita um termo por chamada; consulta de usuário tem vários | `raw` | — |
-| [`B-015`](#b-015--cinco-testes-falham-com-contador-em-zero-instrumentação-ou-o-chunk-skip-não-poda----) | Cinco testes falham com contador em zero: instrumentação ou o chunk-skip não poda? | `triaged` | — |
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
 | [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off----) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `triaged` | — |
-| [`B-026`](#b-026--resíduo-do-symqg-função-morta-com-null-deref-latente-e-o-gate-de-clippy-está-vermelho-por-ela----) | Resíduo do SymQG: função morta com null-deref latente, e o gate de clippy está vermelho por ela | `triaged` | — |
 | [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `triaged` | — |
 | [`B-037`](#b-037--o-am-ivfflat-não-existe-metade-do-shim-pgvector-está-ausente----) | O AM `ivfflat` não existe: metade do shim pgvector está ausente | `triaged` | — |
 | [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta----) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `triaged` | — |
@@ -111,12 +108,8 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `triaged` | — |
 | [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem----) | Dois flags de perfil prometem gates que não existem | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
-| [`B-077`](#b-077--a-tabela-de-roteamento-é-a-do-ecossistema-inteiro-e-os-dois-repos-que-existem-não-roteiam----) | A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam | `triaged` | — |
 | [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar----) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `triaged` | — |
-| [`B-082`](#b-082--o-primeiro-comando-do-readme-aponta-para-uma-org-que-não-é-a-nossa-e-a-imagem-nunca-foi-publicada----) | O primeiro comando do README aponta para uma org que não é a nossa, e a imagem nunca foi publicada | `triaged` | — |
 | [`B-083`](#b-083--42-actions-de-terceiros-fixadas-por-tag-e-nenhuma-por-sha----) | 42 actions de terceiros fixadas por TAG, e nenhuma por SHA | `triaged` | — |
-| [`B-084`](#b-084--a-esteira-do-banco-rodava-o-avaliador-e-três-constantes-fixavam-uma-versão-que-o-upstream-move----) | A esteira do banco rodava o avaliador, e três constantes fixavam uma versão que o upstream move | `triaged` | — |
-| [`B-085`](#b-085--a-imagem-era-construída-onze-vezes-por-corrida-e-nenhum-job-dependia-de-outro----) | A imagem era construída onze vezes por corrida, e nenhum job dependia de outro | `triaged` | — |
 
 ### In flight (3)
 
@@ -126,49 +119,56 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 
-### Closed (39)
+### Closed (46)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
-| [`B-001`](#b-001--cargo-pgrx-test-não-roda-o-binário-de-teste-morre-em-currentmemorycontext----) | `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext` | `shipped` | — |
-| [`B-004`](#b-004--lexical-qualidade-de-recuperação-nunca-foi-medida-contra-um-corpus-público----) | Lexical: qualidade de recuperação nunca foi medida contra um corpus público | `shipped` | — |
+| [`B-001`](#b-001--cargo-pgrx-test-não-roda-o-binário-de-teste-morre-em-currentmemorycontext---x) | `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext` | `shipped` | — |
+| [`B-004`](#b-004--lexical-qualidade-de-recuperação-nunca-foi-medida-contra-um-corpus-público---x) | Lexical: qualidade de recuperação nunca foi medida contra um corpus público | `shipped` | — |
 | [`B-011`](#b-011--o-vector-join-do-hnsw-perde-exatamente-um-elemento---x) | O vector-join do HNSW perde exatamente um elemento | `shipped` | — |
+| [`B-012`](#b-012--as-outras-18-falhas-da-suíte-seguem-sem-causa-capturada---x) | As outras 18 falhas da suíte seguem sem causa capturada | `shipped` | — |
 | [`B-013`](#b-013--a-suíte-não-roda-no-ci-então-a-próxima-regressão-espera-meses---x) | A suíte não roda no CI, então a próxima regressão espera meses | `shipped` | — |
-| [`B-016`](#b-016--os-testes-de-egress-esbarram-na-guarda-ssrf-do-próprio-produto----) | Os testes de egress esbarram na guarda SSRF do próprio produto | `shipped` | — |
+| [`B-015`](#b-015--cinco-testes-falham-com-contador-em-zero-instrumentação-ou-o-chunk-skip-não-poda---x) | Cinco testes falham com contador em zero: instrumentação ou o chunk-skip não poda? | `shipped` | — |
+| [`B-016`](#b-016--os-testes-de-egress-esbarram-na-guarda-ssrf-do-próprio-produto---x) | Os testes de egress esbarram na guarda SSRF do próprio produto | `shipped` | — |
 | [`B-019`](#b-019--create-index-de-hnsw-não-é-idempotente-estoura-em-vez-de-ser-no-op----) | `CREATE INDEX` de HNSW não é idempotente: estoura em vez de ser no-op | `killed` | — |
 | [`B-020`](#b-020--create-index-de-hnsw-é-93-mais-lento-que-inserir-as-mesmas-linhas----) | `CREATE INDEX` de HNSW é 93× mais lento que inserir as mesmas linhas | `killed` | — |
-| [`B-021`](#b-021--o-diagnóstico-não-enxerga-índice-criado-pela-sintaxe-pgvector-e-o-opclass-default-não-serve-----) | O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>` | `shipped` | — |
-| [`B-022`](#b-022--dois-testes-declaram-fragmento-em-pg_testerror---e-o-pgrx-compara-a-mensagem-inteira----) | Dois testes declaram FRAGMENTO em `#[pg_test(error = …)]`, e o pgrx compara a mensagem INTEIRA | `shipped` | — |
-| [`B-023`](#b-023--um-teste-de-performance-mora-na-suíte-funcional-e-ele-reprovou-com-avx-51-mais-lento----) | Um teste de PERFORMANCE mora na suíte funcional, e ele reprovou com AVX 51% mais lento | `shipped` | — |
+| [`B-021`](#b-021--o-diagnóstico-não-enxerga-índice-criado-pela-sintaxe-pgvector-e-o-opclass-default-não-serve----x) | O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>` | `shipped` | — |
+| [`B-022`](#b-022--dois-testes-declaram-fragmento-em-pg_testerror---e-o-pgrx-compara-a-mensagem-inteira---x) | Dois testes declaram FRAGMENTO em `#[pg_test(error = …)]`, e o pgrx compara a mensagem INTEIRA | `shipped` | — |
+| [`B-023`](#b-023--um-teste-de-performance-mora-na-suíte-funcional-e-ele-reprovou-com-avx-51-mais-lento---x) | Um teste de PERFORMANCE mora na suíte funcional, e ele reprovou com AVX 51% mais lento | `shipped` | — |
 | [`B-024`](#b-024--o-autotune-recomendou-ef_search-sobre-contadores-em-zero-e-ninguém-mediu-o-alcance----) | O autotune recomendou `ef_search` sobre contadores em ZERO, e ninguém mediu o alcance | `killed` | — |
-| [`B-025`](#b-025--a-imagem-theodb-builder-não-traz-cargo-clippy-então-o-gate-de-lint-não-roda-fora-do-ci----) | A imagem `theodb-builder` não traz `cargo-clippy`, então o gate de lint não roda fora do CI | `shipped` | — |
-| [`B-027`](#b-027--run-cancelado-deixa-o-contêiner-suite-órfão-e-o-run-seguinte-reprova-sem-rodar-um-teste----) | Run cancelado deixa o contêiner `suite` órfão, e o run seguinte reprova sem rodar um teste | `shipped` | — |
+| [`B-025`](#b-025--a-imagem-theodb-builder-não-traz-cargo-clippy-então-o-gate-de-lint-não-roda-fora-do-ci---x) | A imagem `theodb-builder` não traz `cargo-clippy`, então o gate de lint não roda fora do CI | `shipped` | — |
+| [`B-026`](#b-026--resíduo-do-symqg-função-morta-com-null-deref-latente-e-o-gate-de-clippy-está-vermelho-por-ela---x) | Resíduo do SymQG: função morta com null-deref latente, e o gate de clippy está vermelho por ela | `shipped` | — |
+| [`B-027`](#b-027--run-cancelado-deixa-o-contêiner-suite-órfão-e-o-run-seguinte-reprova-sem-rodar-um-teste---x) | Run cancelado deixa o contêiner `suite` órfão, e o run seguinte reprova sem rodar um teste | `shipped` | — |
 | [`B-028`](#b-028--o-harness-de-upgrade-declarou-todos-os-cenários-passaram-com-um-cenário-pulado---x) | O harness de upgrade declarou "TODOS OS CENÁRIOS PASSARAM" com um cenário PULADO | `killed` | — |
-| [`B-029`](#b-029--a-esteira-invoca-arquivos-que-não-existem-mais-e-o-produto-ficou-sem-nenhum-portão-de-verificação----) | A esteira invoca arquivos que não existem mais, e o produto ficou sem nenhum portão de verificação | `shipped` | — |
-| [`B-030`](#b-030--um-produto-três-extensões-o-umbrella-theodb-é-resíduo-de-uma-migração-que-terminou----) | Um produto, três extensões: o umbrella `theodb` é resíduo de uma migração que terminou | `shipped` | — |
-| [`B-031`](#b-031--10283-linhas-de-cadeia-de-upgrade-duplicada-para-um-gate-que-não-roda-mais-e-instalações-que-não-existem----) | 10.283 linhas de cadeia de upgrade duplicada, para um gate que não roda mais e instalações que não existem | `shipped` | — |
-| [`B-033`](#b-033--o-tipo-vector-own-code-não-tem--e-cinco-padrões-de-app-pgvector-quebram----) | O tipo `vector` own-code não tem `=`, e cinco padrões de app pgvector quebram | `shipped` | — |
-| [`B-034`](#b-034--set-hnswef_search-é-aceito-em-silêncio-e-não-faz-nada-meia-compatibilidade-que-produz-medição-plana----) | `SET hnsw.ef_search` é aceito em silêncio e não faz nada: meia compatibilidade que produz medição plana | `shipped` | — |
-| [`B-035`](#b-035--cliente-theodb-no-vectordbbench-em-fork-para-medir-contra-pgvector-e-alloydb-no-mesmo-arnês----) | Cliente `theodb` no VectorDBBench, em fork, para medir contra pgvector e AlloyDB no mesmo arnês | `shipped` | — |
-| [`B-036`](#b-036--o-hnsw-alias-não-aceita-m-nem-ef_construction-a-sintaxe-de-build-do-pgvector-falha-alto----) | O `hnsw` alias não aceita `m` nem `ef_construction`: a sintaxe de build do pgvector falha alto | `shipped` | — |
-| [`B-039`](#b-039--o-detector-de-cargo-udeps-roda-no-host-onde-o-ambiente-de-build-não-existe----) | O detector de `cargo-udeps` roda no host, onde o ambiente de build não existe | `shipped` | — |
-| [`B-040`](#b-040--cliente-fts-no-vectordbbench-validar-o-pilar-lexical-no-mesmo-arnês-com-a-mesma-disciplina----) | Cliente FTS no VectorDBBench: validar o pilar lexical no mesmo arnês, com a mesma disciplina | `shipped` | — |
-| [`B-041`](#b-041--bm25_search-sobre-índice-nunca-construído-devolve-zero-linhas-sem-erro----) | `bm25_search` sobre índice nunca construído devolve zero linhas, sem erro | `shipped` | — |
-| [`B-044`](#b-044--implementar-stemming-no-analisador-lexical-a-decisão-está-tomada----) | Implementar stemming no analisador lexical (a decisão está tomada) | `shipped` | — |
-| [`B-045`](#b-045--nenhuma-comparação-que-publicamos-tem-teste-de-significância-e-tínhamos-o-instrumento----) | Nenhuma comparação que publicamos tem teste de significância, e tínhamos o instrumento | `shipped` | — |
-| [`B-047`](#b-047--rodar-os-motores-concorrentes-nos-benchmarks-oficiais-na-mesma-máquina-como-prática-recorrente----) | Rodar os motores concorrentes nos benchmarks oficiais, na mesma máquina, como prática recorrente | `shipped` | — |
-| [`B-048`](#b-048--a-superfície-responde-onde-deveria-recusar-três-instâncias-novas-e-a-classe-já-foi-consertada-três-vezes----) | A superfície responde onde deveria recusar: três instâncias novas, e a classe já foi consertada três vezes | `shipped` | — |
-| [`B-053`](#b-053--o-núcleo-de-distância-vetorial-é-puro-por-uma-linha-e-é-ela-que-prende-o-micro-bench-na-suíte----) | O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte | `shipped` | — |
-| [`B-060`](#b-060--o-arnês-verifica-que-o-índice-foi-usado-e-não-verifica-que-o-knob-de-busca-pegou----) | O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou | `shipped` | — |
-| [`B-061`](#b-061--só-duas-suites-registradas-as-duas-vetoriais-o-colunar-não-tem-onde-ser-comparado----) | Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado | `shipped` | — |
-| [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default----) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `shipped` | — |
-| [`B-064`](#b-064--o-eixo-theodb-do-próprio-arnês-não-constrói-índice-ele-emite-a-sintaxe-do-pgvector-contra-os-ams-do-theodb----) | O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB | `shipped` | — |
-| [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada----) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `shipped` | — |
-| [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala----) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `shipped` | — |
-| [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina----) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `shipped` | — |
+| [`B-029`](#b-029--a-esteira-invoca-arquivos-que-não-existem-mais-e-o-produto-ficou-sem-nenhum-portão-de-verificação---x) | A esteira invoca arquivos que não existem mais, e o produto ficou sem nenhum portão de verificação | `shipped` | — |
+| [`B-030`](#b-030--um-produto-três-extensões-o-umbrella-theodb-é-resíduo-de-uma-migração-que-terminou---x) | Um produto, três extensões: o umbrella `theodb` é resíduo de uma migração que terminou | `shipped` | — |
+| [`B-031`](#b-031--10283-linhas-de-cadeia-de-upgrade-duplicada-para-um-gate-que-não-roda-mais-e-instalações-que-não-existem---x) | 10.283 linhas de cadeia de upgrade duplicada, para um gate que não roda mais e instalações que não existem | `shipped` | — |
+| [`B-033`](#b-033--o-tipo-vector-own-code-não-tem--e-cinco-padrões-de-app-pgvector-quebram---x) | O tipo `vector` own-code não tem `=`, e cinco padrões de app pgvector quebram | `shipped` | — |
+| [`B-034`](#b-034--set-hnswef_search-é-aceito-em-silêncio-e-não-faz-nada-meia-compatibilidade-que-produz-medição-plana---x) | `SET hnsw.ef_search` é aceito em silêncio e não faz nada: meia compatibilidade que produz medição plana | `shipped` | — |
+| [`B-035`](#b-035--cliente-theodb-no-vectordbbench-em-fork-para-medir-contra-pgvector-e-alloydb-no-mesmo-arnês---x) | Cliente `theodb` no VectorDBBench, em fork, para medir contra pgvector e AlloyDB no mesmo arnês | `shipped` | — |
+| [`B-036`](#b-036--o-hnsw-alias-não-aceita-m-nem-ef_construction-a-sintaxe-de-build-do-pgvector-falha-alto---x) | O `hnsw` alias não aceita `m` nem `ef_construction`: a sintaxe de build do pgvector falha alto | `shipped` | — |
+| [`B-039`](#b-039--o-detector-de-cargo-udeps-roda-no-host-onde-o-ambiente-de-build-não-existe---x) | O detector de `cargo-udeps` roda no host, onde o ambiente de build não existe | `shipped` | — |
+| [`B-040`](#b-040--cliente-fts-no-vectordbbench-validar-o-pilar-lexical-no-mesmo-arnês-com-a-mesma-disciplina---x) | Cliente FTS no VectorDBBench: validar o pilar lexical no mesmo arnês, com a mesma disciplina | `shipped` | — |
+| [`B-041`](#b-041--bm25_search-sobre-índice-nunca-construído-devolve-zero-linhas-sem-erro---x) | `bm25_search` sobre índice nunca construído devolve zero linhas, sem erro | `shipped` | — |
+| [`B-044`](#b-044--implementar-stemming-no-analisador-lexical-a-decisão-está-tomada---x) | Implementar stemming no analisador lexical (a decisão está tomada) | `shipped` | — |
+| [`B-045`](#b-045--nenhuma-comparação-que-publicamos-tem-teste-de-significância-e-tínhamos-o-instrumento---x) | Nenhuma comparação que publicamos tem teste de significância, e tínhamos o instrumento | `shipped` | — |
+| [`B-047`](#b-047--rodar-os-motores-concorrentes-nos-benchmarks-oficiais-na-mesma-máquina-como-prática-recorrente---x) | Rodar os motores concorrentes nos benchmarks oficiais, na mesma máquina, como prática recorrente | `shipped` | — |
+| [`B-048`](#b-048--a-superfície-responde-onde-deveria-recusar-três-instâncias-novas-e-a-classe-já-foi-consertada-três-vezes---x) | A superfície responde onde deveria recusar: três instâncias novas, e a classe já foi consertada três vezes | `shipped` | — |
+| [`B-053`](#b-053--o-núcleo-de-distância-vetorial-é-puro-por-uma-linha-e-é-ela-que-prende-o-micro-bench-na-suíte---x) | O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte | `shipped` | — |
+| [`B-060`](#b-060--o-arnês-verifica-que-o-índice-foi-usado-e-não-verifica-que-o-knob-de-busca-pegou---x) | O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou | `shipped` | — |
+| [`B-061`](#b-061--só-duas-suites-registradas-as-duas-vetoriais-o-colunar-não-tem-onde-ser-comparado---x) | Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado | `shipped` | — |
+| [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default---x) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `shipped` | — |
+| [`B-064`](#b-064--o-eixo-theodb-do-próprio-arnês-não-constrói-índice-ele-emite-a-sintaxe-do-pgvector-contra-os-ams-do-theodb---x) | O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB | `shipped` | — |
+| [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada---x) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `shipped` | — |
+| [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala---x) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `shipped` | — |
+| [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina---x) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `shipped` | — |
+| [`B-077`](#b-077--a-tabela-de-roteamento-é-a-do-ecossistema-inteiro-e-os-dois-repos-que-existem-não-roteiam---x) | A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam | `shipped` | — |
 | [`B-078`](#b-078--seis-módulos-de-teste-do-kit-não-coletam-um-símbolo-removido-levou-as-suítes-junto----) | Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto | `killed` | — |
 | [`B-079`](#b-079--o-tooling-escrito-em-claude-protege-uma-máquina-até-chegar-ao-repo-do-kit----) | O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit | `killed` | — |
 | [`B-080`](#b-080--o-renumbered-do-revisor-de-backlog-é-blocker-e-afirma-um-dano-que-a-evidência-não-mostra----) | O `renumbered` do revisor de backlog é BLOCKER e afirma um dano que a evidência não mostra | `killed` | — |
+| [`B-082`](#b-082--o-primeiro-comando-do-readme-aponta-para-uma-org-que-não-é-a-nossa-e-a-imagem-nunca-foi-publicada---x) | O primeiro comando do README aponta para uma org que não é a nossa, e a imagem nunca foi publicada | `shipped` | — |
+| [`B-084`](#b-084--a-esteira-do-banco-rodava-o-avaliador-e-três-constantes-fixavam-uma-versão-que-o-upstream-move---x) | A esteira do banco rodava o avaliador, e três constantes fixavam uma versão que o upstream move | `shipped` | — |
+| [`B-085`](#b-085--a-imagem-era-construída-onze-vezes-por-corrida-e-nenhum-job-dependia-de-outro---x) | A imagem era construída onze vezes por corrida, e nenhum job dependia de outro | `shipped` | — |
 
 <!-- BACKLOG-INDEX:END -->
 
@@ -211,7 +211,7 @@ Registro isso porque "nenhum item morreu" é o resultado que mais merece desconf
 lote estava bem escolhido, ou a régua foi aplicada frouxa. Aqui foi o primeiro caso apenas porque cada item
 já nascera atado a uma medição nossa (gate G5) — o que é diferente de estar atado a um eixo.
 
-## B-001 — `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext`   [ ]
+## B-001 — `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext`   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -438,7 +438,7 @@ dod:
   - zero regressão de recall a ≤1M (A/B same-data)
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `vetorial-teto-build-100m`).
-## B-004 — Lexical: qualidade de recuperação nunca foi medida contra um corpus público   [ ]
+## B-004 — Lexical: qualidade de recuperação nunca foi medida contra um corpus público   [x]
 
 domain: lexical
 repo: theo-db
@@ -657,7 +657,11 @@ suggested_mode: review
 source: discover-review
 evidence: 20 falhas na primeira execução da suíte; **2 causas capturadas** (B-011), 18 sem mensagem — o `tail` do script de execução cortou os pânicos.
 why_now: 6 das 18 são do `lexical::engine`, o pilar promovido a binário default em 2026-08-09. Promover superfície pública com teste vermelho é o defeito que o M184 mediu no SymQG e o M176 removeu.
-status: triaged
+status: shipped
+status_nota: 2026-08-20 — o bloco declarava `triaged` com checkbox `[x]` e um `FECHADO 2026-08-10` no
+  corpo, com os três bullets do DoD conferidos um a um. É a divergência que o [[B-051]] registrou como
+  classe: nada compara checkbox com status, e ela sobreviveu dez dias. Encontrada ao puxar este item como
+  topo da fila — eu ia trabalhar no que já estava pronto.
 dod:
   - as 18 causas capturadas e classificadas em defeito de produto vs limitação de ambiente
   - as 6 do lexical resolvidas ou o pilar sai do default até que estejam
@@ -727,7 +731,7 @@ dod:
   - a assinatura antiga permanece ou é migrada por script de upgrade; quebrar quem já usa não é aceitável
 
 > Registered 2026-08-10 by `/backlog-item` (slug: `bm25-multi-termo`).
-## B-015 — Cinco testes falham com contador em zero: instrumentação ou o chunk-skip não poda?   [ ]
+## B-015 — Cinco testes falham com contador em zero: instrumentação ou o chunk-skip não poda?   [x]
 
 domain: colunar
 repo: theo-db
@@ -735,7 +739,13 @@ suggested_mode: bug
 source: discover-review
 evidence: `wiki/benchmarks/m188-suite-18-falhas-classificadas.md` — `explain_scan shows real pages_read (got 0)`, `the table must span >= 2 chunk groups (scanned 0)`, `with the GUC on the selective predicate must prune (got 0)`. Cinco testes, três módulos, **a mesma assinatura**.
 why_now: cinco testes de módulos diferentes falhando com contador em zero sugere causa comum. A distinção decide tudo: se for instrumentação, conserta-se o teste; **se for produto, o chunk-skip não está podando** — um defeito de performance real e silencioso no pilar colunar, exatamente a classe que o m175 revelou no planner.
-status: triaged
+status: shipped
+status_nota: 2026-08-20 — DoD conferido bullet a bullet contra o commit `df78849`, já em `main` e
+  citado duas vezes no CHANGELOG lançado. O DoD exigia **determinar por medição** qual era o caso, e a
+  medição separou duas famílias com causas distintas: a colunar era fixture (`seed_clustered` não
+  clusterizava, e o produto sempre podou — `skipped=4 scanned=5`), a de autotune era produto (o caminho
+  *resume* do M118, default de todo índice V1, nunca reportava métrica). Nenhuma asserção foi afrouxada,
+  que era o terceiro bullet. Encontrado como o B-012: citação no CHANGELOG não é status.
 measured_evidence: `wiki/benchmarks/b015-cinco-contadores-em-zero-duas-causas.md` — medido 2026-08-11. **Não havia causa comum**, e a hipótese de paralelismo do item está refutada. Família A (3 testes colunares) = fixture: o `pg_test` roda em transação e o colunar nunca materializa stripe (0/0 na transação, 4/5 pós-commit, 30/31 com `maintenance_work_mem` baixo) — o produto sempre podou. Família B (2 testes de autotune) = defeito real: o caminho *resume* do M118, default de todo índice V1, nunca reportou as métricas (kill-switch `off` → `pages=112 cand=38`; `on` → `0/0`).
 dod:
   - determinado por medição se os contadores não incrementam ou se o caminho de varredura não é tomado
@@ -815,7 +825,7 @@ dod:
 > **Experimento decisivo, uma linha:** `SET max_parallel_workers_per_gather = 0` antes da consulta do teste.
 > Se os contadores passarem a reportar > 0, a hipótese está confirmada e o pilar colunar não tem defeito. Se
 > continuarem em zero mesmo em serial, aí sim o chunk-skip não está podando — e é defeito de performance real.
-## B-016 — Os testes de egress esbarram na guarda SSRF do próprio produto   [ ]
+## B-016 — Os testes de egress esbarram na guarda SSRF do próprio produto   [x]
 
 domain: ai-surface
 repo: theo-db
@@ -1035,7 +1045,7 @@ dod:
 
 > Registered 2026-08-11 by `/discover --mode bug` (slug: `hnsw-build-em-lote-lento`), como achado
 > colateral da medição do `B-019`.
-## B-021 — O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>`   [ ]
+## B-021 — O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>`   [x]
 
 domain: vetorial
 repo: theo-db
@@ -1090,7 +1100,7 @@ dod:
 > `cargo check --lib`**, que não compila `#[cfg(test)]`. Eu havia escrito isso nesta mesma sessão, ao
 > justificar por que a compilação limpa não cobria um teste novo — e mesmo assim declarei conclusão sobre
 > uma verificação que não alcançava o que eu tinha escrito.
-## B-022 — Dois testes declaram FRAGMENTO em `#[pg_test(error = …)]`, e o pgrx compara a mensagem INTEIRA   [ ]
+## B-022 — Dois testes declaram FRAGMENTO em `#[pg_test(error = …)]`, e o pgrx compara a mensagem INTEIRA   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1125,7 +1135,7 @@ dod:
 >
 > Nenhum foi afrouxado para `should_panic` genérico — o pgrx compara por igualdade, então passar É a prova de
 > que a mensagem declarada casa inteira. Os outros dois bullets já constavam riscados no bloco.
-## B-023 — Um teste de PERFORMANCE mora na suíte funcional, e ele reprovou com AVX 51% mais lento   [ ]
+## B-023 — Um teste de PERFORMANCE mora na suíte funcional, e ele reprovou com AVX 51% mais lento   [x]
 
 domain: hot-path
 repo: theo-db
@@ -1212,7 +1222,7 @@ dod:
 
 > Registered 2026-08-11 by `/review` (slug: `autotune-sobre-zeros`), como followup HIGH obrigatório do
 > verdict `READY_TO_MERGE_WITH_FOLLOWUPS` — `.claude/knowledge-base/reviews/b015-review-2026-08-11.md`.
-## B-025 — A imagem `theodb-builder` não traz `cargo-clippy`, então o gate de lint não roda fora do CI   [ ]
+## B-025 — A imagem `theodb-builder` não traz `cargo-clippy`, então o gate de lint não roda fora do CI   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1269,7 +1279,7 @@ dod:
 > **Medido hoje, dentro da imagem**: `cargo clippy --version` → `clippy 0.1.97`, `cargo fmt --version` →
 > `rustfmt 1.9.0-stable`. Os dois respondem; o falso "está tudo certo" que o bloco documenta (o
 > `grep -c "^Diff in"` imprimindo 0 porque o comando falhou) não se reproduz mais. A última release é a **v0.158.0**; os PRs #227 e #228 seguem aguardando aprovação humana. `shipped` exige `RELEASED` (`rules/cycle-backlog.md § Status transitions`), então o estado correto é `planned`.
-## B-026 — Resíduo do SymQG: função morta com null-deref latente, e o gate de clippy está vermelho por ela   [ ]
+## B-026 — Resíduo do SymQG: função morta com null-deref latente, e o gate de clippy está vermelho por ela   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1277,7 +1287,13 @@ suggested_mode: bug
 source: discover-review
 evidence: gate de lint executado em 2026-08-11 (`cargo clippy --features pg18 --no-deps` com o baseline `.clippy_args`): **4 erros, exit 101**, de dois lints que **não estão no baseline** — `clippy::needless_ifs` em `src/am/options.rs:447` e `clippy::implicit_saturating_sub` em `src/am/df_executor.rs:49`. O primeiro é o defeito: `degree_bound_from_relation` (`options.rs:445`) faz `if rd_options.is_null() { }` com **corpo vazio** e desreferencia o ponteiro na linha seguinte. As duas funções irmãs do mesmo arquivo fazem o certo — `lists_from_relation` tem `return DEFAULT_LISTS;` e `sbq_bits_from_relation` tem `return 0;`. O `return` se perdeu só nesta. Introduzido em `34a49d1` (2026-07-17, `impl(E2 T4.1): theodb_symqg reloption`).
 why_now: **o risco de crash hoje é ZERO e é importante dizer isso** — `grep` confirma que a função tem **zero callers**: ela é resíduo do `theodb_symqg`, aposentado e removido da distribuição no M176. Não é um null-deref alcançável; é dead code carregando um. Duas consequências mesmo assim: (a) o `code-quality-golden-rule` classifica dead code exportado sem caller como `FAIL_HARD`, e (b) o gate de lint do repositório está **vermelho**, o que significa que ele não protege mais nada — o próximo defeito de verdade entra sem ser barrado, porque o vermelho já é o estado normal.
-status: triaged
+status: shipped
+status_nota: 2026-08-20 — os quatro bullets fecharam. Os dois primeiros já estavam marcados FEITO no
+  próprio bloco. O terceiro (`df_executor.rs:49`) foi **resolvido**, não baselined: o `if > 0 { -= 1 }`
+  virou `saturating_sub`, com a razão de TIPO escrita ao lado — sobre inteiro COM sinal a mesma sugestão
+  do lint teria mudado o comportamento, e `InterruptHoldoffCount` é `volatile uint32`. O quarto dependia
+  do [[B-025]] (hoje `shipped`) e foi confirmado por execução: `lint-rust` saiu **success** em `main` no
+  run 32404207400 (5m55s, 2026-08-20T18:37Z), com o `rust-suite` verde na mesma corrida.
 parcialmente_resolvido: 2026-08-11 — as duas causas do gate vermelho foram corrigidas no mesmo ciclo, porque elas **bloqueavam o merge** do release e a parte segura do conserto não tinha o risco que motivou o adiamento. (a) `degree_bound_from_relation` **removida** (zero callers, verificado por grep antes de apagar); (b) `df_executor.rs:49` passou a usar `saturating_sub` — e a checagem do tipo foi o que tornou isso seguro: `InterruptHoldoffCount` é `volatile uint32` (`miscadmin.h:104`), então satura em 0; sobre um inteiro COM sinal a mesma sugestão do lint daria `-1` e mudaria o comportamento. **O que NÃO foi feito**, e é o que mantém o item aberto: o reloption `degree_bound` (`options.rs:97,286-288`) segue registrado, e removê-lo afeta índices já criados que o declarem.
 dod:
   - ~~`degree_bound_from_relation` removida~~ **FEITO** (não "consertada" — preencher o `if` manteria código morto de um pilar aposentado)
@@ -1306,7 +1322,7 @@ dod:
 > **A lição operacional:** um gate que reprova em cascata (um erro por vez) esconde a dimensão do
 > problema. Se o gate estivesse verde antes do M176, o primeiro resíduo teria aparecido sozinho, na hora,
 > em vez de quatro deles emergirem meses depois durante um release não relacionado.
-## B-027 — Run cancelado deixa o contêiner `suite` órfão, e o run seguinte reprova sem rodar um teste   [ ]
+## B-027 — Run cancelado deixa o contêiner `suite` órfão, e o run seguinte reprova sem rodar um teste   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1354,7 +1370,7 @@ kill_reason: corrigido no mesmo ciclo em que foi descoberto. (a) o path passa a 
 > review do B-021. O item nasce e morre no mesmo ciclo, mas fica registrado: o valor está no PADRÃO, não
 > no conserto — é a terceira leitura falsa deste harness, e as três têm a mesma forma (um resumo que
 > afirma mais do que a execução sustenta).
-## B-029 — A esteira invoca arquivos que não existem mais, e o produto ficou sem nenhum portão de verificação   [ ]
+## B-029 — A esteira invoca arquivos que não existem mais, e o produto ficou sem nenhum portão de verificação   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1394,7 +1410,7 @@ dod:
 >
 > **O que o produto NÃO recuperou**, e é consequência do [[B-031]], não deste ciclo: o oráculo do caminho de
 > atualização da própria extensão. A cadeia foi removida por ADR; não há o que testar.
-## B-030 — Um produto, três extensões: o umbrella `theodb` é resíduo de uma migração que terminou   [ ]
+## B-030 — Um produto, três extensões: o umbrella `theodb` é resíduo de uma migração que terminou   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1423,7 +1439,7 @@ dod:
 > `Dockerfile`) foi feita no mesmo ciclo; o colapso em si depende do B-029.
 
 > **2026-08-12 — implementado, não shipped.** Ciclo completo executado (DISCOVER→PLAN→IMPLEMENT→CODE-QUALITY→REVIEW→RELEASE). Review `READY_TO_MERGE`; release `PR_OPEN_AWAITING_APPROVAL` — o merge espera aprovação humana (PR #228 → #227), por diretiva do owner de um merge só quando o banco estiver SOTA level. **`shipped` só depois do merge**, e é por isso que este bloco não diz `shipped`.
-## B-031 — 10.283 linhas de cadeia de upgrade duplicada, para um gate que não roda mais e instalações que não existem   [ ]
+## B-031 — 10.283 linhas de cadeia de upgrade duplicada, para um gate que não roda mais e instalações que não existem   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1480,7 +1496,7 @@ dod:
 > nova:** `cargo-udeps` foi instalado no mesmo dia e mede outra coisa (dependência não usada). Este saiu de
 > ler os 1.460 avisos que toda build já imprimia. Fica registrado separado porque 2.872 ocorrências não são
 > trabalho de um ciclo, e embuti-las neste diluiria as duas coisas.
-## B-033 — O tipo `vector` own-code não tem `=`, e cinco padrões de app pgvector quebram   [ ]
+## B-033 — O tipo `vector` own-code não tem `=`, e cinco padrões de app pgvector quebram   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1505,7 +1521,7 @@ dod:
 > o que o relatório de review daquele ciclo declarou NÃO ter coberto.
 
 > **2026-08-12 — implementado, não shipped.** Ciclo completo executado (DISCOVER→PLAN→IMPLEMENT→CODE-QUALITY→REVIEW→RELEASE). Review `READY_TO_MERGE`; release `PR_OPEN_AWAITING_APPROVAL` — o merge espera aprovação humana (PR #228 → #227), por diretiva do owner de um merge só quando o banco estiver SOTA level. **`shipped` só depois do merge**, e é por isso que este bloco não diz `shipped`.
-## B-034 — `SET hnsw.ef_search` é aceito em silêncio e não faz nada: meia compatibilidade que produz medição plana   [ ]
+## B-034 — `SET hnsw.ef_search` é aceito em silêncio e não faz nada: meia compatibilidade que produz medição plana   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1531,7 +1547,7 @@ dod:
 > de leitura) e ~40 de teste. O caro aqui é a decisão de precedência, não a implementação.
 
 > **2026-08-12 — implementado, não shipped.** Ciclo completo executado (DISCOVER→PLAN→IMPLEMENT→CODE-QUALITY→REVIEW→RELEASE). Review `READY_TO_MERGE`; release `PR_OPEN_AWAITING_APPROVAL` — o merge espera aprovação humana (PR #228 → #227), por diretiva do owner de um merge só quando o banco estiver SOTA level. **`shipped` só depois do merge**, e é por isso que este bloco não diz `shipped`.
-## B-035 — Cliente `theodb` no VectorDBBench, em fork, para medir contra pgvector e AlloyDB no mesmo arnês   [ ]
+## B-035 — Cliente `theodb` no VectorDBBench, em fork, para medir contra pgvector e AlloyDB no mesmo arnês   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1568,7 +1584,7 @@ dod:
 > **2026-08-12 — triaged.** Oportunidade em `.claude/knowledge-base/discoveries/opportunities/b035-vectordbbench-client-opportunity.md`. A medição confirmou que o formato de fio binário do nosso `vector` é compatível com o `pgvector-python` (`COPY FORMAT BINARY` carregou 5.000 linhas) e encontrou **três lacunas do produto**, agora itens próprios: [[B-036]] (`m`/`ef_construction`), [[B-037]] (AM `ivfflat`), [[B-038]] (`halfvec`/`sparsevec`).
 
 > **2026-08-12 — implementado, não shipped.** Ciclo completo (DISCOVER→PLAN→IMPLEMENT→CODE-QUALITY→REVIEW→RELEASE). Cliente em `usetheoai/VectorDBBench@theodb` (3 arquivos upstream tocados, +19 linhas, núcleo intocado, zero dependências novas). Corrida real num droplet `g-16vcpu-64gb` (IP 164.90.141.31, destruído): **a recall casado (~0,983) o pgvector faz +16,3% de QPS e constrói o índice 2,7× mais rápido** — `wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md`. Review `READY_TO_MERGE`; release `PR_OPEN_AWAITING_APPROVAL` (PR #228). `shipped` só depois do merge.
-## B-036 — O `hnsw` alias não aceita `m` nem `ef_construction`: a sintaxe de build do pgvector falha alto   [ ]
+## B-036 — O `hnsw` alias não aceita `m` nem `ef_construction`: a sintaxe de build do pgvector falha alto   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1655,7 +1671,7 @@ dod:
 
 > Registrado 2026-08-12 pela medição do B-035. Escrito com a prioridade relativa dita, não escondida: dos
 > três achados do ciclo, este é o que menos dói e o mais caro.
-## B-039 — O detector de `cargo-udeps` roda no host, onde o ambiente de build não existe   [ ]
+## B-039 — O detector de `cargo-udeps` roda no host, onde o ambiente de build não existe   [x]
 
 domain: governanca
 repo: theo-db
@@ -1698,7 +1714,7 @@ dod:
 >    montada `:ro` (verificado: o contêiner não escreve na árvore do host).
 >
 > 27 testes no detector (era 21), cobrindo os quatro modos de falha distintos.
-## B-040 — Cliente FTS no VectorDBBench: validar o pilar lexical no mesmo arnês, com a mesma disciplina   [ ]
+## B-040 — Cliente FTS no VectorDBBench: validar o pilar lexical no mesmo arnês, com a mesma disciplina   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1755,7 +1771,7 @@ dod:
 > porque `k1`/`b` não são configuráveis) e o cliente recusa alto quem os peça. O que **falta** é a comparação:
 > nenhum outro motor foi rodado, deliberadamente — citar números publicados do leaderboard compararia
 > máquinas e datas diferentes. Rodar Elastic/OpenSearch no mesmo arnês é o trabalho seguinte.
-## B-041 — `bm25_search` sobre índice nunca construído devolve zero linhas, sem erro   [ ]
+## B-041 — `bm25_search` sobre índice nunca construído devolve zero linhas, sem erro   [x]
 
 domain: lexical
 repo: theo-db
@@ -1856,7 +1872,7 @@ dod:
 
 > Registrado 2026-08-13. **A curva é o achado; a causa é a pergunta.** Não afirmo trava — a saturação também
 > é compatível com trabalho genuinamente caro por consulta, e distinguir as duas exige perfil, não leitura.
-## B-044 — Implementar stemming no analisador lexical (a decisão está tomada)   [ ]
+## B-044 — Implementar stemming no analisador lexical (a decisão está tomada)   [x]
 
 domain: lexical
 repo: theo-db
@@ -1896,7 +1912,7 @@ dod:
 >
 > **A lição do ciclo não é o número.** Minha primeira leitura dizia −31,8% de QPS, medida contra uma corrida
 > anterior feita noutro modelo de CPU. Refeita na mesma máquina, é +10,9%.
-## B-045 — Nenhuma comparação que publicamos tem teste de significância, e tínhamos o instrumento   [ ]
+## B-045 — Nenhuma comparação que publicamos tem teste de significância, e tínhamos o instrumento   [x]
 
 domain: metodo
 repo: theo-db
@@ -1964,7 +1980,7 @@ dod:
 > `shared hit=139`, pgvector `182` num corpus de brinquedo), e do nosso lado ainda há `candidates_seen`, que o
 > pgvector não tem; (3) **recall e páginas-por-consulta não dependem da máquina** — só o QPS depende. A
 > decomposição roda no host; o droplet fica para o número final do artefato.
-## B-047 — Rodar os motores concorrentes nos benchmarks oficiais, na mesma máquina, como prática recorrente   [ ]
+## B-047 — Rodar os motores concorrentes nos benchmarks oficiais, na mesma máquina, como prática recorrente   [x]
 
 domain: metodo
 repo: theo-db
@@ -2002,7 +2018,7 @@ dod:
 > upstream), e o `elasticsearch-py` não-pinado contra servidor 8.15 produz um 400 opaco.
 >
 > **2026-08-13 — o conserto do OpenSearch virou item.** O "candidato a PR upstream" citado acima agora é o [[B-050]], com escopo estreito de propósito: é o PR de uma linha do cliente deles, não o do nosso cliente FTS.
-## B-048 — A superfície responde onde deveria recusar: três instâncias novas, e a classe já foi consertada três vezes   [ ]
+## B-048 — A superfície responde onde deveria recusar: três instâncias novas, e a classe já foi consertada três vezes   [x]
 
 domain: lexical
 repo: theo-db
@@ -2162,7 +2178,7 @@ dod:
 > um palpite: nenhum dos cinco itens do Tier 1 nomeava esta janela, e ela é o que faz os outros quatro
 > valerem menos do que parecem — um portão que só olha depois do merge protege `develop` de si mesmo, não o
 > trabalho de quem o produz.
-## B-053 — O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte   [ ]
+## B-053 — O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte   [x]
 
 domain: hot-path
 repo: theo-db
@@ -2486,7 +2502,7 @@ dod:
   - a versão medida é lida do servidor e registrada no bundle, não inferida da tag: o artigo mediu que a imagem
     do Docker Hub ficou em PG 17 enquanto os pacotes Linux já estavam em 18
   - uma corrida vetorial `theodb` × `alloydbomni` × `pgvector` na mesma máquina produz bundle válido
-## B-060 — O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou   [ ]
+## B-060 — O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou   [x]
 
 domain: arnes
 repo: theodb-bench
@@ -2559,7 +2575,7 @@ dod:
 > `workspace` era a branch default — todo push ia direto para a default, sem gate de PR, embora o `ci.yml` já
 > declare `branches: [main, develop, workspace]` e `pull_request`. Criei `develop` a partir de `b6a5bfd` para
 > que o PR tivesse alvo.
-## B-061 — Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado   [ ]
+## B-061 — Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado   [x]
 
 domain: colunar
 repo: theodb-bench
@@ -2616,7 +2632,7 @@ dod:
 > independente de AlloyDB. **O B-060 é o mais valioso dos três e o menos óbvio:** os outros dois acrescentam
 > alcance ao arnês, e ele conserta uma lacuna que faria o arnês publicar número errado com aparência de certo —
 > para qualquer motor, inclusive o nosso.
-## B-062 — O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default   [ ]
+## B-062 — O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default   [x]
 
 domain: arnes
 repo: theodb-bench
@@ -2700,7 +2716,7 @@ dod:
     duas, nunca um docstring afirmando a primeira enquanto o código faz a segunda
   - existe detector de código morto no CI do repositório: o projeto não tem nenhum hoje, e é por isso que um
     método sem chamador sobreviveu sendo citado como exemplar
-## B-064 — O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB   [ ]
+## B-064 — O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB   [x]
 
 domain: arnes
 repo: theodb-bench
@@ -2800,7 +2816,7 @@ dod:
   - os dois regimes são distinguidos no artefato: dado residente em memória e dado que excede o cache
   - o arnês recusa reportar contenção quando a linha de base isolada não foi medida na mesma sessão — comparar
     contra baseline de outra corrida é a classe de erro que o [[B-060]] e o [[B-063]] documentam
-## B-067 — O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada   [ ]
+## B-067 — O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada   [x]
 
 domain: colunar
 repo: theodb-bench
@@ -2887,7 +2903,7 @@ dod:
   - existe um teste ou gate que detecta número citado em documento sem bundle correspondente — a alegação e o
     artefato deixam de poder divergir
   - `docs/` do `theodb-bench` documenta que medição fora do arnês não é publicável, com a razão
-## B-070 — Carga de 1M por `executemany` domina o tempo de toda corrida em escala   [ ]
+## B-070 — Carga de 1M por `executemany` domina o tempo de toda corrida em escala   [x]
 
 domain: arnes
 repo: theodb-bench
@@ -3025,7 +3041,7 @@ dod:
     vocabulário
   - cada pilar que ganhar adapter ganha junto o portão equivalente ao de residência do colunar: a capability
     só é declarada quando o caminho é provado, nunca quando é escrito
-## B-074 — O teste pareado cancela variância de query, e não cancela deriva temporal da máquina   [ ]
+## B-074 — O teste pareado cancela variância de query, e não cancela deriva temporal da máquina   [x]
 
 domain: arnes
 repo: theodb-bench
@@ -3120,7 +3136,7 @@ dod:
   - a curva de memória é re-medida depois do fix nos mesmos 3 pontos, pelo `theodb-bench`
   - a relação com [[B-058]] e a issue #221 é resolvida por escrito: dois componentes ignorando o mesmo
     orçamento é ausência de contrato de memória, não dois bugs isolados
-## B-077 — A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam   [ ]
+## B-077 — A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam   [x]
 
 domain: governanca
 repo: theo-db
@@ -3143,7 +3159,12 @@ essa mesma razão, com a mensagem *"`theo-db` is declared in two domains"*.
 why_now: o `check_intake_gates.py` acabou de mecanizar G1 (2026-08-20, ainda não commitado quando isto foi
 medido). Enquanto a tabela estiver assim, mecanizar o gate **recusa todo item novo deste projeto** — o gate
 passa a funcionar e a resposta dele é errada, que é pior que gate nenhum, porque agora ela é automática.
-status: triaged
+status: shipped
+status_nota: 2026-08-20 — `route_domain.py` responde `routed: true` para `theo-db` (`engine-pgrx`) e para
+  `theodb-bench` (`arnes`), com especialista escrito em cada caso. A unidade de propriedade ficou
+  decidida por escrito na tabela de `cycle-backlog.md`: **repo**, com os pilares como domínios sem repo
+  próprio — o que preserva o invariante um-repo-um-domínio de `route_domain.py` sem tocar nele. Nenhum
+  item ficou órfão: `backlog-review` passou limpo depois da migração.
 grill: `.claude/knowledge-base/grills/registry-ownership-model-grill.md` — 6 decisões resolvidas em
   2026-08-20, veredito READY_FOR_PLAN. A unidade de propriedade é o **pilar**; `route_domain.py` passa a
   resolver por domínio com queda para repo e recusa por ambiguidade; os 26 itens de `domain: theo-db` se
@@ -3381,7 +3402,7 @@ dod:
     ecossistema resolve
   - os consertos chegam ao kit, ou está registrado por escrito que não chegam e qual consumidor fica exposto
 
-## B-082 — O primeiro comando do README aponta para uma org que não é a nossa, e a imagem nunca foi publicada   [ ]
+## B-082 — O primeiro comando do README aponta para uma org que não é a nossa, e a imagem nunca foi publicada   [x]
 
 domain: governanca
 repo: theo-db
@@ -3416,7 +3437,13 @@ TheoDB passa a ser publicada no GitHub Container Registry a cada release"*.
 why_now: é o **primeiro comando** que um usuário executa, na seção `## Instalação`. Ele falhava por dois
 motivos independentes e nenhum dizia isso a quem tentasse. A org foi corrigida em 2026-08-20 e o README passa
 a declarar que a imagem não está publicada, com este número — mas declarar não publica.
-status: triaged
+status: shipped
+status_nota: 2026-08-20 — os quatro bullets fecharam. A causa do não-carregamento foi MEDIDA e não era o
+  arquivo: `usetheoai/theo` é privado e `theo-db` é público, e o GitHub recusa essa combinação em
+  workflow reutilizável. O portão Trivy ficou com `--ignore-unfixed` por medição (60 achados sem o flag
+  contra 22 com — 38 sem correção disponível no bookworm), o que retratou a recomendação D2 do próprio
+  grill. `docker pull ghcr.io/usetheoai/theo-db:latest` foi verificado após `docker logout ghcr.io`,
+  saída 0, e a nota de ressalva saiu do README só depois disso.
 consertado_parcialmente: 2026-08-20 — o `publish-image.yml` deixou de delegar e passou a ser NATIVO:
   build, portão Trivy antes do push (pela imagem oficial fixada por digest, o precedente do
   `actionlint` neste repo, e não por action nova que engordaria o [[B-083]]) e push por tag/branch.
@@ -3493,7 +3520,7 @@ dod:
   - o dependabot mantém os SHAs atualizados (ele reescreve SHA + comentário quando configurado assim)
   - a política fica escrita onde um autor de workflow a encontre, não só neste item
 
-## B-084 — A esteira do banco rodava o avaliador, e três constantes fixavam uma versão que o upstream move   [ ]
+## B-084 — A esteira do banco rodava o avaliador, e três constantes fixavam uma versão que o upstream move   [x]
 
 domain: governanca
 repo: theo-db
@@ -3518,7 +3545,11 @@ instalados à mão no runner próprio e o `rust-toolchain.toml` só fixava o can
 why_now: os três só eram invisíveis porque a máquina guardava o que o repositório não registrava. A
 migração não os criou — ela os revelou, e é por isso que valem item: a mesma classe volta em qualquer
 ambiente novo (máquina de um colaborador, contêiner limpo, outro runner).
-status: triaged
+status: shipped
+status_nota: 2026-08-20 — os quatro bullets fecharam. `scripts/check-workflow-paths.sh` (do [[B-029]]) é a
+  verificação que reprova job que instala requisito de árvore inexistente; as três constantes de patch
+  upstream fixadas em workflow saíram; e a fronteira produto/avaliador ficou declarada no cabeçalho dos
+  workflows, onde um autor a encontra sem ler o backlog.
 consertado: 2026-08-20, no mesmo ciclo. (1) cirurgia por STEP e não por job — 26 steps e o
   `harness-unit` removidos, preservando o que era do PRODUTO: golden top-k do `ai.hybrid_search_rrf`,
   presença de função não-PUBLIC em `ai-sql`/`nl-sql`, varreduras de licença de BM25 e colunar, e o
@@ -3532,7 +3563,7 @@ dod:
   - a fronteira entre produto e avaliador está declarada onde um autor de workflow a encontre
   - existe verificação que reprova quando um job instala requisito de árvore inexistente
 
-## B-085 — A imagem era construída onze vezes por corrida, e nenhum job dependia de outro   [ ]
+## B-085 — A imagem era construída onze vezes por corrida, e nenhum job dependia de outro   [x]
 
 domain: governanca
 repo: theo-db
@@ -3551,7 +3582,12 @@ reprovam e aprovam artefatos diferentes sob o mesmo nome — e nada na esteira d
 why_now: a esteira acabou de migrar para runner GitHub-hosted, onde os jobs rodam em máquinas
 DISTINTAS e a imagem local não atravessa. Manter o padrão anterior ali significa nove máquinas
 compilando a mesma coisa.
-status: triaged
+status: shipped
+status_nota: 2026-08-20 — os três bullets fecharam. A imagem passou de onze builds por corrida para um: o
+  job `build` constrói, salva com zstd e sobe como artifact, e os oito consumidores fazem `docker load`.
+  Nenhum `cache-from` aponta para cache que ninguém escreveu. O terceiro bullet fechou pela via que ele
+  próprio admitia — as imagens de CI **não** vão mais para o GHCR, e a razão está escrita no cabeçalho
+  do `ci.yml` junto com a medição de por que a publicação nunca funcionou ([[B-082]]).
 consertado: 2026-08-20 — job `build` único publica `ghcr.io/usetheoai/theo-db:ci-<sha>` (tag por SHA
   porque duas corridas simultâneas não podem disputar a mesma), e os oito consumidores declaram
   `needs: build` e puxam por digest. **De 11 builds para 4**, e os três que sobraram são imagens

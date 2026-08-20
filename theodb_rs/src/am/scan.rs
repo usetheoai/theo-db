@@ -1229,4 +1229,77 @@ mod tests {
         let mut heap = heapify(Vec::new());
         assert!(heap.pop().is_none());
     }
+
+    /// B-037 — `SET ivfflat.probes` (o alias pgvector) ALTERA O RESULTADO MEDIDO, não apenas o valor lido.
+    ///
+    /// Por que este teste existe separado de `pgvector_probes_alias_has_effect` (`am/guc.rs`): aquele afirma
+    /// que `super::probes()` devolve o que foi setado — propagação do valor. O DoD do B-037 pede outra coisa,
+    /// e a distinção é a que separa "o parâmetro foi aceito" de "o parâmetro teve efeito": **recall diferente
+    /// entre dois valores**. Um alias pode propagar corretamente e mesmo assim nunca chegar ao scan.
+    ///
+    /// POR QUE NÃO É FLAKY, e isso é escolha de projeto e não sorte: o `k` é maior que qualquer célula de
+    /// Voronoi plausível. São 2000 linhas em `lists=64` → ~31 pontos por célula na média. Com `k=200`,
+    /// `probes=1` lê UMA célula, e por contagem ela não pode conter os 200 vizinhos exatos — precisaria ser
+    /// 6× maior que a média. O recall em `probes=1` é portanto limitado ACIMA por (tamanho da célula)/200 < 1,
+    /// enquanto `probes=64` varre todas as listas. A desigualdade é forçada por pigeonhole, não por amostragem.
+    ///
+    /// A DDL é a que o shim instala (`vector/vector--0.7.0.sql`) — access method `ivfflat` com o handler
+    /// próprio e `vector_l2_ops` escopada a ele — porque é essa a superfície que uma app pgvector escreve.
+    #[pgrx::pg_test]
+    fn b037_pgvector_probes_alias_changes_measured_recall() {
+        use std::collections::HashSet;
+
+        // A superfície do shim, criada aqui como o `vector--0.7.0.sql` a cria.
+        Spi::run("CREATE ACCESS METHOD ivfflat TYPE INDEX HANDLER theodb_ivfflat_amhandler").unwrap();
+        Spi::run(
+            "CREATE OPERATOR CLASS vector_l2_ops DEFAULT FOR TYPE vector USING ivfflat AS \
+             OPERATOR 1 <-> (vector, vector) FOR ORDER BY float_ops",
+        )
+        .unwrap();
+
+        Spi::run("CREATE TABLE ivfp (id int PRIMARY KEY, e vector(8))").unwrap();
+        // Nuvem determinística: cada dimensão é um múltiplo primo distinto de g, mod 1000. Determinística
+        // porque um teste com RNG não semeado é um bug (`rules/testing.md` § 6).
+        Spi::run(
+            "INSERT INTO ivfp SELECT g, ('['||(g*7919%1000)||','||(g*6971%1000)||','||(g*5843%1000)||','\
+             ||(g*4507%1000)||','||(g*3571%1000)||','||(g*2683%1000)||','||(g*1789%1000)||','\
+             ||(g*997%1000)||']')::vector FROM generate_series(1,2000) g",
+        )
+        .unwrap();
+        Spi::run("CREATE INDEX ivfp_e ON ivfp USING ivfflat (e vector_l2_ops) WITH (lists = 64)").unwrap();
+        Spi::run("ANALYZE ivfp").unwrap();
+
+        let q = "[500,500,500,500,500,500,500,500]";
+        const K: usize = 200;
+
+        fn topk(setup: &str, q: &str) -> HashSet<i32> {
+            let sql = format!("SELECT id FROM ivfp ORDER BY e <-> '{q}'::vector LIMIT {K}");
+            Spi::connect(|c| {
+                c.select(setup, None, &[]).ok();
+                c.select(&sql, None, &[])
+                    .unwrap()
+                    .filter_map(|r| r.get::<i32>(1).unwrap())
+                    .collect()
+            })
+        }
+
+        let exato = topk("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on", q);
+        assert_eq!(exato.len(), K, "a verdade-terreno por seqscan deve devolver os {K} exatos");
+
+        let idx = "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on";
+        let poucos = topk(&format!("{idx}; SET theodb_ivfflat.probes TO DEFAULT; SET ivfflat.probes = 1"), q);
+        let muitos = topk(&format!("{idx}; SET theodb_ivfflat.probes TO DEFAULT; SET ivfflat.probes = 64"), q);
+
+        let recall = |got: &HashSet<i32>| got.intersection(&exato).count() as f64 / K as f64;
+        let (r1, r64) = (recall(&poucos), recall(&muitos));
+
+        assert!(
+            r64 > r1,
+            "o alias `ivfflat.probes` deve MUDAR o resultado medido: recall@{K} com probes=1 foi {r1:.3} e \
+             com probes=64 foi {r64:.3}. Iguais significa que o knob nunca alcançou o scan — o alias propaga \
+             o valor e não tem efeito, que é exatamente o que este teste existe para distinguir."
+        );
+        assert!(r1 < 1.0, "probes=1 lê uma célula; por contagem não pode conter os {K} exatos (recall {r1:.3})");
+    }
+
 }

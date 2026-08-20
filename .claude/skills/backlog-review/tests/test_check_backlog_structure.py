@@ -294,3 +294,152 @@ def test_other_repeated_fields_are_not_reported(tmp_path: Path) -> None:
     )
     report = check_backlog(backlog)
     assert [f for f in report["findings"] if f["check"] == "duplicate_field"] == []
+
+
+# ---------------------------------------------------------------------------
+# B-051 — o checkbox e o `status` são dois campos do mesmo bloco que podem
+# discordar em silêncio. Nada os comparava, e a divergência sobreviveu meses.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("status", ["raw", "triaged", "planned"])
+def test_checked_box_over_an_open_status_is_a_blocker(tmp_path: Path, status: str) -> None:
+    """`[x]` diz "fechado" e `raw`/`triaged`/`planned` dizem "aberto". Nenhum dos dois está errado
+    isolado, e é por isso que a divergência sobrevive: só a COMPARAÇÃO a revela.
+
+    Medido no `theo-db` de `842347c`: o B-001 carregava `[x]` com `status: raw` desde 2026-08-10 e
+    atravessou três leituras do backlog. Em 2026-08-20 a mesma classe reapareceu duas vezes no mesmo
+    dia (B-012 e B-015), e o custo foi concreto — eu ia reimplementar trabalho já lançado.
+    """
+    backlog = write_backlog(tmp_path, item_block("B-001", status=status, checkbox="x"))
+    report = check_backlog(backlog)
+    div = [f for f in report["findings"] if f["check"] == "checkbox_status_divergent"]
+    assert len(div) == 1, f"[x] com status {status} deve ser reportado"
+    assert div[0]["severity"] == "blocker"
+    assert div[0]["kind"] == "deterministic"
+    assert status in div[0]["message"]
+
+
+def test_unchecked_box_over_shipped_is_a_blocker(tmp_path: Path) -> None:
+    """A direção oposta e igualmente silenciosa: o trabalho foi lançado e o checkbox ficou para trás."""
+    backlog = write_backlog(tmp_path, item_block("B-001", status="shipped", checkbox=" "))
+    report = check_backlog(backlog)
+    div = [f for f in report["findings"] if f["check"] == "checkbox_status_divergent"]
+    assert len(div) == 1
+    assert div[0]["severity"] == "blocker"
+
+
+@pytest.mark.parametrize(
+    ("status", "checkbox"),
+    [("shipped", "x"), ("raw", " "), ("triaged", " "), ("planned", " "), ("killed", "x"), ("killed", " ")],
+)
+def test_aligned_checkbox_and_status_produce_no_finding(
+    tmp_path: Path, status: str, checkbox: str
+) -> None:
+    """O portão só afirma as duas direções que o DoD do B-051 nomeia.
+
+    `killed` fica de fora DELIBERADAMENTE, nos dois checkboxes: o contrato em `cycle-backlog.md`
+    não diz qual marca um item morto carrega, e inventar a regra aqui produziria um veredito sobre
+    convenção que nenhuma decisão sustenta — que é o mesmo defeito que o gate existe para impedir.
+    """
+    extra = "kill_reason: a medição não sustentou a hipótese\n" if status == "killed" else ""
+    backlog = write_backlog(
+        tmp_path, item_block("B-001", status=status, checkbox=checkbox, extra=extra)
+    )
+    report = check_backlog(backlog)
+    assert [f for f in report["findings"] if f["check"] == "checkbox_status_divergent"] == []
+
+
+def test_planned_without_evidence_is_a_major(tmp_path: Path) -> None:
+    """`raw → planned` sem passar por `triaged` é proibido em texto e ninguém verificava.
+
+    O histórico não está no arquivo, então a transição em si não é observável. O que É observável
+    é o rastro que ela deixa: `triaged` exige evidência (gate já existente), logo um `planned` com
+    `evidence: none-yet` prova que a medição foi pulada. É o proxy honesto — reporta o rastro, não
+    a transição que não pode ver.
+    """
+    backlog = write_backlog(
+        tmp_path, item_block("B-001", status="planned", checkbox=" ", evidence="none-yet")
+    )
+    report = check_backlog(backlog)
+    skipped = [f for f in report["findings"] if f["check"] == "planned_without_evidence"]
+    assert len(skipped) == 1
+    assert skipped[0]["severity"] == "major"
+    assert skipped[0]["kind"] == "deterministic"
+
+
+def test_planned_with_evidence_is_clean(tmp_path: Path) -> None:
+    backlog = write_backlog(
+        tmp_path,
+        item_block("B-001", status="planned", checkbox=" ", evidence="wiki/benchmarks/x.md"),
+    )
+    report = check_backlog(backlog)
+    assert [f for f in report["findings"] if f["check"] == "planned_without_evidence"] == []
+
+
+# ---------------------------------------------------------------------------
+# B-051 bullet 2 — `shipped` exige evidência de release, não a palavra `shipped`.
+# ---------------------------------------------------------------------------
+
+
+def test_shipped_citing_a_commit_outside_any_semver_tag_is_a_major(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """O erro que o próprio B-051 registra: marcar `shipped` no dia da implementação, com o
+    release ainda em `PR_OPEN_AWAITING_APPROVAL`. O commit existe; a release não.
+    """
+    import check_backlog_structure as mod
+
+    monkeypatch.setattr(mod, "_semver_tags_containing", lambda repo, sha: [])
+    backlog = write_backlog(
+        tmp_path,
+        item_block("B-001", status="shipped", checkbox="x", extra="entregue em `deadbeef`\n"),
+    )
+    report = check_backlog(backlog)
+    found = [f for f in report["findings"] if f["check"] == "shipped_without_release_evidence"]
+    assert len(found) == 1
+    assert found[0]["severity"] == "major"
+    assert "deadbeef" in found[0]["message"]
+
+
+def test_shipped_citing_a_commit_inside_a_semver_tag_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import check_backlog_structure as mod
+
+    monkeypatch.setattr(mod, "_semver_tags_containing", lambda repo, sha: ["v0.1.0"])
+    backlog = write_backlog(
+        tmp_path,
+        item_block("B-001", status="shipped", checkbox="x", extra="entregue em `deadbeef`\n"),
+    )
+    report = check_backlog(backlog)
+    assert [f for f in report["findings"] if f["check"] == "shipped_without_release_evidence"] == []
+
+
+def test_a_shipped_block_citing_no_commit_is_counted_as_unverified_not_clean(
+    tmp_path: Path,
+) -> None:
+    """Sem ponteiro no bloco não há o que verificar, e o honesto é DIZER isso.
+
+    Reprovar seria afirmar um defeito que a evidência não sustenta; passar em silêncio seria
+    alegar cobertura que não houve — o mesmo `cobertura-alegada-sem-execucao` que o acervo já
+    registra. O relatório carrega a contagem, e quem lê decide.
+    """
+    backlog = write_backlog(tmp_path, item_block("B-001", status="shipped", checkbox="x"))
+    report = check_backlog(backlog)
+    assert [f for f in report["findings"] if f["check"] == "shipped_without_release_evidence"] == []
+    assert report["shipped_without_verifiable_pointer"] == 1
+
+
+def test_open_items_are_never_asked_for_release_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import check_backlog_structure as mod
+
+    monkeypatch.setattr(mod, "_semver_tags_containing", lambda repo, sha: [])
+    backlog = write_backlog(
+        tmp_path, item_block("B-001", status="raw", extra="visto em `deadbeef`\n")
+    )
+    report = check_backlog(backlog)
+    assert [f for f in report["findings"] if f["check"] == "shipped_without_release_evidence"] == []
+    assert report["shipped_without_verifiable_pointer"] == 0

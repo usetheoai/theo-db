@@ -13,6 +13,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **O registro de manutenção passou a se contradizer em voz alta.** `BACKLOG.md` tinha dois campos por
+  bloco — o checkbox e o `status` — e nada os comparava: cada um está correto isolado, e só a comparação
+  revela a divergência. Ao ligar o portão, **30 dos 39 itens lançados** estavam com o checkbox para trás.
+  O gate também exige que `shipped` aponte para um commit contido em tag semver, e **declara** quantos
+  blocos não têm ponteiro verificável em vez de contá-los como limpos. Roda no Stop hook quando o
+  `BACKLOG.md` é tocado. (#B-051)
+
 ### Fixed
 - **`docker pull ghcr.io/usetheoai/theo-db:latest` funciona.** O primeiro comando do README nunca
   havia funcionado: as oito execuções do workflow de publicação desde 2026-07-29 falharam, e o
