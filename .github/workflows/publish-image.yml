@@ -107,7 +107,7 @@ jobs:
             --ignore-unfixed --scanners vuln '${{ steps.meta.outputs.scan_tag }}'
 
       - name: Login no GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
