@@ -3048,6 +3048,11 @@ why_now: o `check_intake_gates.py` acabou de mecanizar G1 (2026-08-20, ainda nã
 medido). Enquanto a tabela estiver assim, mecanizar o gate **recusa todo item novo deste projeto** — o gate
 passa a funcionar e a resposta dele é errada, que é pior que gate nenhum, porque agora ela é automática.
 status: triaged
+grill: `.claude/knowledge-base/grills/registry-ownership-model-grill.md` — 6 decisões resolvidas em
+  2026-08-20, veredito READY_FOR_PLAN. A unidade de propriedade é o **pilar**; `route_domain.py` passa a
+  resolver por domínio com queda para repo e recusa por ambiguidade; os 26 itens de `domain: theo-db` se
+  redistribuem em `metodo`/`arnes`/`governanca`/`vetorial`; a mudança nasce no kit. Desbloqueia também
+  [[B-079]] e [[B-080]].
 status_nota: 2026-08-20 — filado por engano como `raw` carregando evidência medida. `raw` é hipótese SEM
   evidência (`cycle-backlog.md § Item schema`); achado com medição nasce `triaged`. Corrigido no mesmo dia,
   apontado por `check_backlog_structure.py`.
@@ -3099,8 +3104,16 @@ manifesto e nada executou), `check_phase_review.py` (prova que a mini-review de 
 `check_intake_gates.py` (G1/G2 do intake), `detect_domains.py` (deriva a tabela de domínios do disco), e
 `consolidate_findings.py` com `READY_TO_MERGE_WITH_FOLLOWUPS` fail-closed. 210 testes verdes,
 `check_xrefs.py` PASS.
-Nada disso está no repositório do kit, e o repositório do kit **não está nesta máquina** — não há checkout de
-`squad` em `~/Projetos`. A regra global do owner é explícita: *"Uma correção escrita dentro de `.claude/` não
+~~Nada disso está no repositório do kit, e o repositório do kit **não está nesta máquina** — não há checkout de
+`squad` em `~/Projetos`.~~
+**RETRATADO em 2026-08-20, no mesmo dia e por medição melhor.** A frase acima saiu de um glob errado
+(`~/Projetos/*/squad*`, que exige um nível intermediário) e afirmou uma ausência que não existe. Medido de novo:
+o kit está em **`/home/paulo/Projetos/squad`**, branch `workspace`, árvore limpa, e carrega `sync_consumers.py`,
+`check_install_drift.py`, `install.sh` e `patch_install.sh`.
+**O tamanho também estava errado.** Comparando os 36 arquivos do commit `11581e2` contra o kit, arquivo a
+arquivo: **27 idênticos** (o commit `fea3976` do kit já os colheu), **9 divergentes**, **0 ausentes**. Os nove são
+`check_intake_gates.py` + seu teste, `check_phase_review.py` + seu teste, `mini_review.py`, `run_validation.py` +
+seu teste, e `consolidate_findings.py` + seu teste. O trabalho pendente é portar nove arquivos, não trinta e cinco. A regra global do owner é explícita: *"Uma correção escrita dentro de `.claude/` não
 existe até chegar ao repositório do kit"*.
 why_now: o trabalho está feito e verde. O custo de portar cresce com cada ciclo que roda por cima dele, e o
 `.claude/` deste repo recebe atualização do instalador — uma reinstalação sobrescreve o que não foi portado.
