@@ -617,17 +617,48 @@ mod tests {
         .unwrap();
     }
 
-    /// Recall@10 do índice contra a verdade exata (seqscan), para um `ef_search` já configurado.
+    /// Recall@10 do índice contra a verdade exata, calculada por VARREDURA SEQUENCIAL.
+    ///
+    /// A versão anterior desta função media o índice contra ele mesmo: a CTE `exato` e a subquery
+    /// `aprox` eram a MESMA query, e `seed_hnsw` deixa `enable_seqscan = off` na sessão. As duas
+    /// leem pelo índice, com o mesmo plano — a interseção é total por construção.
+    ///
+    /// Medido em 2026-08-20, e é o que justifica a reescrita em vez de um ajuste (B-086):
+    ///
+    /// | verdade-terreno | `ef_search = 1` | `ef_search = 400` |
+    /// |---|---|---|
+    /// | a antiga (o próprio índice) | 1.0 | 1.0 |
+    /// | por seqscan (esta) | **0.1** | **1.0** |
+    ///
+    /// Os dois valores iguais na primeira linha são o defeito inteiro: qualquer asserção sobre
+    /// "o knob mudou o recall" passava com o knob inerte. Nenhum número publicado é retratado — o
+    /// `ef_search` demonstravelmente funciona, e o efeito é de 10×. O que não funcionava era a
+    /// medição dele.
     fn recall_at_10() -> f64 {
-        Spi::get_one::<f64>(
-            "WITH q AS (SELECT '[3,6,9,12,15,18,21,24]'::vector AS v),
-                  exato AS (SELECT id FROM b034h, q ORDER BY e <-> v LIMIT 10)
-             SELECT count(*)::float8 / 10.0
-             FROM (SELECT id FROM b034h, q ORDER BY e <-> v LIMIT 10) aprox
-             WHERE aprox.id IN (SELECT id FROM exato)",
-        )
-        .unwrap()
-        .unwrap()
+        let exato: Vec<i32> = Spi::connect(|c| {
+            c.select("SET LOCAL enable_indexscan=off; SET LOCAL enable_seqscan=on", None, &[]).ok();
+            c.select(
+                "SELECT id FROM b034h ORDER BY e <-> '[3,6,9,12,15,18,21,24]'::vector LIMIT 10",
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
+        });
+        let aprox: Vec<i32> = Spi::connect(|c| {
+            c.select("SET LOCAL enable_indexscan=on; SET LOCAL enable_seqscan=off", None, &[]).ok();
+            c.select(
+                "SELECT id FROM b034h ORDER BY e <-> '[3,6,9,12,15,18,21,24]'::vector LIMIT 10",
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
+        });
+        let hits = aprox.iter().filter(|a| exato.contains(a)).count();
+        hits as f64 / 10.0
     }
 
     /// T1.1 — `SET hnsw.ef_search` (o nome que a app pgvector emite) tem EFEITO.
@@ -710,8 +741,10 @@ mod tests {
         Spi::run("SET hnsw.ef_search = 400").unwrap();
         let alto = recall_at_10();
         assert!(
-            alto >= baixo,
-            "recall com ef=400 ({alto}) deveria ser >= com ef=1 ({baixo}) — se forem sempre iguais, o GUC está inerte"
+            alto > baixo,
+            "recall com ef=400 ({alto}) tem de ser ESTRITAMENTE maior que com ef=1 ({baixo}). \
+             Iguais significa GUC inerte, e era exatamente isso que o `>=` anterior deixava \
+             passar. Não é flaky: medido em 0.1 contra 1.0, uma diferença de 10x (B-086)."
         );
     }
 }
