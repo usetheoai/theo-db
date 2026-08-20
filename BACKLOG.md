@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-88 items — **Open** 28 · **In flight** 10 · **Closed** 50
+88 items — **Open** 27 · **In flight** 4 · **Closed** 57
 
-### Open (28)
+### Open (27)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -101,24 +101,17 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala----) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
-| [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar----) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `triaged` | — |
 
-### In flight (10)
+### In flight (4)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
-| [`B-037`](#b-037--o-am-ivfflat-não-existe-metade-do-shim-pgvector-está-ausente----) | O AM `ivfflat` não existe: metade do shim pgvector está ausente | `planned` | — |
-| [`B-051`](#b-051--nada-compara-o-checkbox-com-o-status-e-a-divergência-sobreviveu-meses----) | Nada compara o checkbox com o `status`, e a divergência sobreviveu meses | `planned` | — |
-| [`B-052`](#b-052--workspace-não-tem-portão-73-commits-e-13-arquivos-rust-sem-um-gate-olhar----) | `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar | `planned` | — |
-| [`B-054`](#b-054--toda-iteração-em-rust-custa-8-minutos-e-2m34s-deles-eram-um-cp--r----) | Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r` | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
-| [`B-083`](#b-083--42-actions-de-terceiros-fixadas-por-tag-e-nenhuma-por-sha----) | 42 actions de terceiros fixadas por TAG, e nenhuma por SHA | `planned` | — |
-| [`B-086`](#b-086--o-teste-que-prova-o-alias-do-ef_search-passa-quando-o-guc-está-inerte----) | O teste que prova o alias do `ef_search` passa quando o GUC está inerte | `planned` | — |
 | [`B-088`](#b-088--o-gate-de-changelog-checa-presença-de-arquivo-não-de-entrada----) | O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA | `planned` | — |
 
-### Closed (50)
+### Closed (57)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -146,6 +139,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-034`](#b-034--set-hnswef_search-é-aceito-em-silêncio-e-não-faz-nada-meia-compatibilidade-que-produz-medição-plana---x) | `SET hnsw.ef_search` é aceito em silêncio e não faz nada: meia compatibilidade que produz medição plana | `shipped` | — |
 | [`B-035`](#b-035--cliente-theodb-no-vectordbbench-em-fork-para-medir-contra-pgvector-e-alloydb-no-mesmo-arnês---x) | Cliente `theodb` no VectorDBBench, em fork, para medir contra pgvector e AlloyDB no mesmo arnês | `shipped` | — |
 | [`B-036`](#b-036--o-hnsw-alias-não-aceita-m-nem-ef_construction-a-sintaxe-de-build-do-pgvector-falha-alto---x) | O `hnsw` alias não aceita `m` nem `ef_construction`: a sintaxe de build do pgvector falha alto | `shipped` | — |
+| [`B-037`](#b-037--o-am-ivfflat-não-existe-metade-do-shim-pgvector-está-ausente---x) | O AM `ivfflat` não existe: metade do shim pgvector está ausente | `shipped` | — |
 | [`B-039`](#b-039--o-detector-de-cargo-udeps-roda-no-host-onde-o-ambiente-de-build-não-existe---x) | O detector de `cargo-udeps` roda no host, onde o ambiente de build não existe | `shipped` | — |
 | [`B-040`](#b-040--cliente-fts-no-vectordbbench-validar-o-pilar-lexical-no-mesmo-arnês-com-a-mesma-disciplina---x) | Cliente FTS no VectorDBBench: validar o pilar lexical no mesmo arnês, com a mesma disciplina | `shipped` | — |
 | [`B-041`](#b-041--bm25_search-sobre-índice-nunca-construído-devolve-zero-linhas-sem-erro---x) | `bm25_search` sobre índice nunca construído devolve zero linhas, sem erro | `shipped` | — |
@@ -153,7 +147,10 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-045`](#b-045--nenhuma-comparação-que-publicamos-tem-teste-de-significância-e-tínhamos-o-instrumento---x) | Nenhuma comparação que publicamos tem teste de significância, e tínhamos o instrumento | `shipped` | — |
 | [`B-047`](#b-047--rodar-os-motores-concorrentes-nos-benchmarks-oficiais-na-mesma-máquina-como-prática-recorrente---x) | Rodar os motores concorrentes nos benchmarks oficiais, na mesma máquina, como prática recorrente | `shipped` | — |
 | [`B-048`](#b-048--a-superfície-responde-onde-deveria-recusar-três-instâncias-novas-e-a-classe-já-foi-consertada-três-vezes---x) | A superfície responde onde deveria recusar: três instâncias novas, e a classe já foi consertada três vezes | `shipped` | — |
+| [`B-051`](#b-051--nada-compara-o-checkbox-com-o-status-e-a-divergência-sobreviveu-meses---x) | Nada compara o checkbox com o `status`, e a divergência sobreviveu meses | `shipped` | — |
+| [`B-052`](#b-052--workspace-não-tem-portão-73-commits-e-13-arquivos-rust-sem-um-gate-olhar---x) | `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar | `shipped` | — |
 | [`B-053`](#b-053--o-núcleo-de-distância-vetorial-é-puro-por-uma-linha-e-é-ela-que-prende-o-micro-bench-na-suíte---x) | O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte | `shipped` | — |
+| [`B-054`](#b-054--toda-iteração-em-rust-custa-8-minutos-e-2m34s-deles-eram-um-cp--r---x) | Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r` | `shipped` | — |
 | [`B-060`](#b-060--o-arnês-verifica-que-o-índice-foi-usado-e-não-verifica-que-o-knob-de-busca-pegou---x) | O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou | `shipped` | — |
 | [`B-061`](#b-061--só-duas-suites-registradas-as-duas-vetoriais-o-colunar-não-tem-onde-ser-comparado---x) | Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado | `shipped` | — |
 | [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default---x) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `shipped` | — |
@@ -168,9 +165,12 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-078`](#b-078--seis-módulos-de-teste-do-kit-não-coletam-um-símbolo-removido-levou-as-suítes-junto----) | Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto | `killed` | — |
 | [`B-079`](#b-079--o-tooling-escrito-em-claude-protege-uma-máquina-até-chegar-ao-repo-do-kit----) | O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit | `killed` | — |
 | [`B-080`](#b-080--o-renumbered-do-revisor-de-backlog-é-blocker-e-afirma-um-dano-que-a-evidência-não-mostra----) | O `renumbered` do revisor de backlog é BLOCKER e afirma um dano que a evidência não mostra | `killed` | — |
+| [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar---x) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `shipped` | — |
 | [`B-082`](#b-082--o-primeiro-comando-do-readme-aponta-para-uma-org-que-não-é-a-nossa-e-a-imagem-nunca-foi-publicada---x) | O primeiro comando do README aponta para uma org que não é a nossa, e a imagem nunca foi publicada | `shipped` | — |
+| [`B-083`](#b-083--42-actions-de-terceiros-fixadas-por-tag-e-nenhuma-por-sha---x) | 42 actions de terceiros fixadas por TAG, e nenhuma por SHA | `shipped` | — |
 | [`B-084`](#b-084--a-esteira-do-banco-rodava-o-avaliador-e-três-constantes-fixavam-uma-versão-que-o-upstream-move---x) | A esteira do banco rodava o avaliador, e três constantes fixavam uma versão que o upstream move | `shipped` | — |
 | [`B-085`](#b-085--a-imagem-era-construída-onze-vezes-por-corrida-e-nenhum-job-dependia-de-outro---x) | A imagem era construída onze vezes por corrida, e nenhum job dependia de outro | `shipped` | — |
+| [`B-086`](#b-086--o-teste-que-prova-o-alias-do-ef_search-passa-quando-o-guc-está-inerte---x) | O teste que prova o alias do `ef_search` passa quando o GUC está inerte | `shipped` | — |
 | [`B-087`](#b-087--o-pacote-do-arnês-diz-010dev0-enquanto-as-releases-dizem-v010-e-v020---x) | O pacote do arnês diz `0.1.0.dev0` enquanto as releases dizem `v0.1.0` e `v0.2.0` | `shipped` | — |
 
 <!-- BACKLOG-INDEX:END -->
@@ -1642,7 +1642,7 @@ dod:
 >
 > A entrega em si não mudou: `CREATE INDEX … WITH (m=32, ef_construction=200)` funciona e é honrado,
 > medido no produto (`theodb:b036`), 478 testes verdes. O que muda é o rótulo do estado.
-## B-037 — O AM `ivfflat` não existe: metade do shim pgvector está ausente   [ ]
+## B-037 — O AM `ivfflat` não existe: metade do shim pgvector está ausente   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1650,9 +1650,8 @@ suggested_mode: bug
 source: discover-evolve
 evidence: medido em 2026-08-12 contra `theodb:b034`. `SELECT amname FROM pg_am WHERE amtype='i'` devolve `hnsw`, `theodb_hnsw`, `theodb_ivfflat` — **não há `ivfflat`**. Logo `CREATE INDEX ... USING ivfflat (embedding vector_l2_ops) WITH (lists=100)` falha. O shim (`vector/vector--0.6.0.sql:49-67`) registra o alias `hnsw` e as três opclasses `vector_*_ops` para ele, e **para por aí**. Enquanto isso o GUC `ivfflat.probes` **foi registrado** no B-034 — ou seja, hoje o produto aceita o botão de ajuste de um índice que não se pode criar pelo nome que a app escreve.
 why_now: a assimetria é o problema, não a ausência. O B-034 registrou `ivfflat.probes` porque o TheoDB tem `theodb_ivfflat`; um usuário que leia `pg_settings` e encontre `ivfflat.probes` conclui — razoavelmente — que `USING ivfflat` funciona. O alias é rotulagem de catálogo pura: mesmo handler own-code, mesmas opclasses, exatamente o que o `hnsw` já faz e que o próprio arquivo do shim documenta como "não é uma segunda implementação". Não fazer é deixar o shim pela metade com o botão da metade que falta já instalado.
-status: planned
-status_nota: 2026-08-20 — os quatro bullets fecharam; implementado no commit `fe92e0c` (workspace),
-  aguardando release. O bullet 3 era o único aberto e exigia **efeito medido**, não `SET` aceito: o
+status: shipped
+status_nota: 2026-08-20 — os quatro bullets fecharam; implementado no commit `fe92e0c` lançado em `v0.161.0`. O bullet 3 era o único aberto e exigia **efeito medido**, não `SET` aceito: o
   teste novo mede recall@200 contra verdade-terreno por seqscan em `probes=1` vs `probes=64`, com a
   diferença forçada por contagem. Passou de primeira — o produto já tinha o comportamento, faltava a
   prova. A coexistência de opclass (bullet 2, que o DoD exige por execução) é provada pelo
@@ -2126,7 +2125,7 @@ dod:
 > workflow de publish) — condição que este item não tenta contornar.
 
 Próximo id livre: **`B-051`**. Ids são monotônicos e nunca reusados.
-## B-051 — Nada compara o checkbox com o `status`, e a divergência sobreviveu meses   [ ]
+## B-051 — Nada compara o checkbox com o `status`, e a divergência sobreviveu meses   [x]
 
 domain: governanca
 repo: theo-db
@@ -2143,8 +2142,8 @@ why_now: o próprio saneamento de hoje **produziu** uma segunda divergência ant
 mesma semana, num arquivo de 50 blocos, é frequência que não se resolve com atenção. E o custo já foi pago:
 li os 9 itens `planned` corretos como registro podre e propus "avançá-los", raciocínio que só se sustentava
 porque eu não sabia distinguir um status errado de um status que eu não tinha entendido.
-status: planned
-status_nota: 2026-08-20 — implementado no commit `cf7633a` (workspace), aguardando release. Os quatro
+status: shipped
+status_nota: 2026-08-20 — implementado no commit `cf7633a` lançado em `v0.161.0`. Os quatro
   bullets fecharam; ao ligar o portão, 30 dos 39 `shipped` estavam com o checkbox para trás.
 dod:
   - um validador recusa `[x]` com `status` ∈ {raw, triaged, planned}, e `[ ]` com `status: shipped` — provado
@@ -2159,7 +2158,7 @@ dod:
 > vale exatamente porque o registro é o que decide onde o esforço vai. Um backlog em que dois campos podem
 > discordar em silêncio é um backlog que precisa ser lido inteiro para ser confiável, o que é o mesmo que
 > não ser confiável.
-## B-052 — `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar   [ ]
+## B-052 — `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -2178,7 +2177,7 @@ de recall que 109 artefatos de benchmark não pegaram e só apareceu quando a su
 que ali a suíte existia e ninguém a chamava, e aqui ela existe, é chamada, e olha o código tarde demais para
 impedir o merge. **A restrição que criou isto é real e não deve ser desfeita por decreto**: qualquer proposta
 que multiplique execuções do runner contradiz a razão pela qual o gatilho foi removido.
-status: planned
+status: shipped
 status_nota: 2026-08-20 — os três bullets fecharam. (1) O gate passou a rodar em `pull_request`, contra
   `refs/pull/N/merge` — a árvore mergeada, que é o que o `push` para `develop` testava, um passo antes.
   Não aumentou execuções porque não é acréscimo e sim TROCA: `push` ficou só em `main`. (2) Custo
@@ -2253,7 +2252,7 @@ dod:
 > para `vec` e passou a apontar para `kernels`. **Um gate mais barato que o gate que importa dá uma confiança
 > que ele não sustenta** — que é, literalmente, o assunto deste ciclo. O gate certo é
 > `cargo check --features pg18,pg_test --all-targets`, e ele fecha em 2m32s contra os ~6 min da suíte.
-## B-054 — Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r`   [ ]
+## B-054 — Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r`   [x]
 
 domain: governanca
 repo: theo-db
@@ -2272,7 +2271,7 @@ autoinfligidos pelo `cp -r`; (c) **o pior é de método** — eu rodava os **480
 em **um** módulo, quando `cargo pgrx test pg18 lexical` filtra e roda em segundos. O ciclo lento não é só
 desconfortável: ele empurra para usar gates mais baratos e errados, que foi exatamente o achado R-8 do ciclo
 anterior.
-status: planned
+status: shipped
 status_nota: 2026-08-20 — os três bullets fecharam. (1) `scripts/dev-test.sh` usa **montagem direta** em vez
   de cópia, então não há mtime a perder: medido em duas corridas consecutivas sem mudança de código,
   **0 crates recompilados** nas duas (53s e 75s) — o critério exato que o DoD pede. (2) O filtro
@@ -3417,7 +3416,7 @@ segunda_instancia: 2026-08-20 — a mesma classe apareceu num segundo achado, e 
   **Não consertado aqui de propósito:** escrever um DoD retroativo para um item já fechado seria inventar um
   critério depois do fato, que é o que `cycle-acceptance.md § Hard gates` chama de graduar um alvo movido.
 
-## B-081 — Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar   [ ]
+## B-081 — Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar   [x]
 
 domain: governanca
 repo: theo-db
@@ -3446,7 +3445,18 @@ máquina** — todo outro consumidor do kit segue acusando evidência fabricada 
 tipo de falso positivo que ensina a ignorar o portão. (3) **não** foi consertado: mexer no contrato de erro do
 `run_structural` é decisão de superfície pública, não conserto de borda, e o plano afetado ficou em
 `skipped_known` com a razão escrita em vez de ter a exceção pinada como se fosse contrato.
-status: triaged
+status: shipped
+status_nota: 2026-08-20 — os quatro bullets fecharam; commit `c52dfda`, lançado em `v0.161.0`.
+  (1) A resolução ciente de layout virou UMA implementação em `scripts/ecosystem_utils.py`, que o
+  próprio módulo já dizia ser o lugar; os três checadores delegam, e o `setup.sh` passou a instalar
+  o módulo — dependência real se declara no instalador, não numa cópia por checador. (2)
+  `check_coverage_matrix` reporta `coverage_lt_100` em vez de levantar; verificado ponta a ponta
+  contra `b015-b018-b019-plan.md`. (3) Teste que roda o checador a partir de layout de plugin, mais
+  o par que prova que standalone continua e que arquivo ausente continua `missing_file`. (4)
+  Registrado em `.claude/rules/README.md § Consertos que vivem só aqui`, nomeando quem fica exposto.
+  **Esta atualização se perdeu uma vez e foi recuperada**: o comando composto que a escrevia foi
+  bloqueado inteiro pelo hook de proveniência, e o retry refez só o commit — a mesma causa que
+  omitiu as entradas do CHANGELOG e gerou o [[B-088]].
 dod:
   - a resolução de caminho ciente de layout é UMA implementação, não uma cópia por checador — hoje são três
     lugares com a mesma condição (`_layout.py`, os dois resolvedores), e o `_layout.py` já registrava que a
@@ -3549,7 +3559,7 @@ dod:
   - a nota do README sai quando o comando funcionar, e não antes
   - a alegação do `CHANGELOG.md:1066` é retratada por acréscimo ou passa a ser verdadeira
 
-## B-083 — 42 actions de terceiros fixadas por TAG, e nenhuma por SHA   [ ]
+## B-083 — 42 actions de terceiros fixadas por TAG, e nenhuma por SHA   [x]
 
 domain: governanca
 repo: theo-db
@@ -3568,9 +3578,8 @@ why_now: o `dependabot.yml` entrou em 2026-08-20 e resolve a metade barata — a
 há versão nova. Ele **não** resolve a mutabilidade: com tag, a atualização silenciosa continua possível
 entre um aviso e outro. E o momento é agora porque a esteira acabou de ganhar um workflow que cria
 release com `contents: write` — o raio de alcance de uma action comprometida cresceu.
-status: planned
-status_nota: 2026-08-20 — os quatro bullets fecharam; implementado no commit `fe92e0c` (workspace),
-  aguardando release. 39 referências fixadas por SHA de 40 caracteres com a tag em comentário,
+status: shipped
+status_nota: 2026-08-20 — os quatro bullets fecharam; implementado no commit `fe92e0c` lançado em `v0.161.0`. 39 referências fixadas por SHA de 40 caracteres com a tag em comentário,
   `actions/*` e `docker/*` incluídas; dependabot já em vigor reescreve SHA e comentário juntos; e a
   política está em `.github/CONTRIBUTING-workflows.md`. actionlint contra os onze workflows: exit 0.
 dod:
@@ -3658,7 +3667,7 @@ dod:
   - a imagem do produto é construída uma vez por corrida, e todo job a consome por digest
   - nenhum job declara `cache-from` de um cache que ninguém garantiu ter escrito antes
   - as imagens de CI publicadas no GHCR têm política de retenção, ou está escrito por que não têm
-## B-086 — O teste que prova o alias do `ef_search` passa quando o GUC está inerte   [ ]
+## B-086 — O teste que prova o alias do `ef_search` passa quando o GUC está inerte   [x]
 
 domain: vetorial
 repo: theo-db
@@ -3675,7 +3684,7 @@ why_now: o teste irmão que acabou de entrar para o `ivfflat.probes` usa `>` est
 forçada por contagem (uma célula de Voronoi não cabe `k` vizinhos). Os dois estão lado a lado no mesmo
 repositório afirmando coisas de força diferente sobre a mesma classe de knob, e o mais fraco é o que cobre o
 AM que mais se usa.
-status: planned
+status: shipped
 status_nota: 2026-08-20 — MEDIDO, e o achado é pior do que o registro original. Não é só a asserção
   `>=`: a função `recall_at_10` comparava o índice CONTRA ELE MESMO — a CTE `exato` e a subquery
   `aprox` eram a mesma query, e `seed_hnsw` deixa `enable_seqscan = off` na sessão. Medição por
