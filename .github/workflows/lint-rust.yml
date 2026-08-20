@@ -100,6 +100,17 @@ jobs:
           command -v cargo-pgrx >/dev/null || cargo install --locked cargo-pgrx --version 0.19.0
           [ -d "$HOME/.pgrx" ] || cargo pgrx init --pg18 "$(which pg_config)"
 
+      # Verifica AQUI, e não no primeiro passo que precisa deles. A toolchain declara `components`
+      # em `rust-toolchain.toml` desde 2026-08-20, mas quem depende disso deve provar que chegou:
+      # a corrida anterior morreu em `error: 'cargo-fmt' is not installed`, e morreu três passos
+      # depois do ponto onde a causa estava.
+      - name: Os componentes da toolchain chegaram?
+        run: |
+          set -euo pipefail
+          rustup show active-toolchain
+          cargo fmt --version
+          cargo clippy --version
+
       - name: Lockfile drift (cargo metadata --locked)
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
