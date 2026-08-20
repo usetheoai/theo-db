@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-87 items — **Open** 31 · **In flight** 7 · **Closed** 49
+87 items — **Open** 30 · **In flight** 8 · **Closed** 49
 
-### Open (31)
+### Open (30)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -103,10 +103,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 | [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar----) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `triaged` | — |
-| [`B-086`](#b-086--o-teste-que-prova-o-alias-do-ef_search-passa-quando-o-guc-está-inerte----) | O teste que prova o alias do `ef_search` passa quando o GUC está inerte | `triaged` | — |
 | [`B-087`](#b-087--o-pacote-do-arnês-diz-010dev0-enquanto-as-releases-dizem-v010-e-v020----) | O pacote do arnês diz `0.1.0.dev0` enquanto as releases dizem `v0.1.0` e `v0.2.0` | `triaged` | — |
 
-### In flight (7)
+### In flight (8)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -117,6 +116,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-083`](#b-083--42-actions-de-terceiros-fixadas-por-tag-e-nenhuma-por-sha----) | 42 actions de terceiros fixadas por TAG, e nenhuma por SHA | `planned` | — |
+| [`B-086`](#b-086--o-teste-que-prova-o-alias-do-ef_search-passa-quando-o-guc-está-inerte----) | O teste que prova o alias do `ef_search` passa quando o GUC está inerte | `planned` | — |
 
 ### Closed (49)
 
@@ -3656,7 +3656,15 @@ why_now: o teste irmão que acabou de entrar para o `ivfflat.probes` usa `>` est
 forçada por contagem (uma célula de Voronoi não cabe `k` vizinhos). Os dois estão lado a lado no mesmo
 repositório afirmando coisas de força diferente sobre a mesma classe de knob, e o mais fraco é o que cobre o
 AM que mais se usa.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — MEDIDO, e o achado é pior do que o registro original. Não é só a asserção
+  `>=`: a função `recall_at_10` comparava o índice CONTRA ELE MESMO — a CTE `exato` e a subquery
+  `aprox` eram a mesma query, e `seed_hnsw` deixa `enable_seqscan = off` na sessão. Medição por
+  execução (`cargo pgrx test pg18`, 2026-08-20): com a verdade-terreno antiga, `ef=1 -> 1.0` e
+  `ef=400 -> 1.0`; com verdade-terreno por seqscan, `ef=1 -> 0.1` e `ef=400 -> 1.0`. Os dois valores
+  iguais são o defeito inteiro. Consertado reescrevendo a verdade-terreno e passando a asserção para
+  `>` estrito — não flaky, é diferença de 10x. **Nenhum número é retratado**: o `ef_search` funciona,
+  o que não funcionava era a medição dele.
 dod:
   - a asserção distingue "o knob mudou o resultado" de "o knob está inerte" — `>` estrito, ou a razão
     escrita de por que `>=` é o correto naquele corpus

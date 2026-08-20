@@ -13,6 +13,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **O teste que provava o efeito do `hnsw.ef_search` media o índice contra ele mesmo.** A CTE que
+  ele chamava de "verdade exata" era a mesma query da aproximada, com `enable_seqscan = off` na
+  sessão — recall 1.0 por construção, e a asserção `>=` nunca podia falhar. Medido: com a
+  verdade-terreno antiga, `ef=1` e `ef=400` davam ambos 1.0; com verdade-terreno por varredura
+  sequencial, dão **0.1 e 1.0**. Nenhum número publicado é retratado — o knob funciona, e o efeito é
+  de 10×; o que não funcionava era a medição dele. (#B-086)
+
 ### Changed
 - **Os oito portões pesados passaram a olhar o código ANTES do merge, e custam menos fazendo isso.**
   O gatilho de `pull_request` fora removido em 2026-08-12 porque o runner era único, serial e pago;
