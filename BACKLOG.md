@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-86 items — **Open** 31 · **In flight** 8 · **Closed** 47
+87 items — **Open** 32 · **In flight** 6 · **Closed** 49
 
-### Open (31)
+### Open (32)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -105,21 +105,20 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 | [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar----) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `triaged` | — |
 | [`B-086`](#b-086--o-teste-que-prova-o-alias-do-ef_search-passa-quando-o-guc-está-inerte----) | O teste que prova o alias do `ef_search` passa quando o GUC está inerte | `triaged` | — |
+| [`B-087`](#b-087--o-pacote-do-arnês-diz-010dev0-enquanto-as-releases-dizem-v010-e-v020----) | O pacote do arnês diz `0.1.0.dev0` enquanto as releases dizem `v0.1.0` e `v0.2.0` | `triaged` | — |
 
-### In flight (8)
+### In flight (6)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-037`](#b-037--o-am-ivfflat-não-existe-metade-do-shim-pgvector-está-ausente----) | O AM `ivfflat` não existe: metade do shim pgvector está ausente | `planned` | — |
 | [`B-051`](#b-051--nada-compara-o-checkbox-com-o-status-e-a-divergência-sobreviveu-meses----) | Nada compara o checkbox com o `status`, e a divergência sobreviveu meses | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
-| [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado----) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `planned` | — |
-| [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-083`](#b-083--42-actions-de-terceiros-fixadas-por-tag-e-nenhuma-por-sha----) | 42 actions de terceiros fixadas por TAG, e nenhuma por SHA | `planned` | — |
 
-### Closed (47)
+### Closed (49)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -158,9 +157,11 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-060`](#b-060--o-arnês-verifica-que-o-índice-foi-usado-e-não-verifica-que-o-knob-de-busca-pegou---x) | O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou | `shipped` | — |
 | [`B-061`](#b-061--só-duas-suites-registradas-as-duas-vetoriais-o-colunar-não-tem-onde-ser-comparado---x) | Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado | `shipped` | — |
 | [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default---x) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `shipped` | — |
+| [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado---x) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `shipped` | — |
 | [`B-064`](#b-064--o-eixo-theodb-do-próprio-arnês-não-constrói-índice-ele-emite-a-sintaxe-do-pgvector-contra-os-ams-do-theodb---x) | O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB | `shipped` | — |
 | [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada---x) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `shipped` | — |
 | [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala---x) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `shipped` | — |
+| [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico---x) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `shipped` | — |
 | [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem---x) | Dois flags de perfil prometem gates que não existem | `shipped` | — |
 | [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina---x) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `shipped` | — |
 | [`B-077`](#b-077--a-tabela-de-roteamento-é-a-do-ecossistema-inteiro-e-os-dois-repos-que-existem-não-roteiam---x) | A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam | `shipped` | — |
@@ -2685,7 +2686,7 @@ dod:
 
 > Registrado 2026-08-16 pelo RELEASE do B-060. **É item de infraestrutura de um repo irmão**, e vale porque a
 > ausência foi descoberta ao tentar cumprir o passo mais básico do ciclo: abrir um PR.
-## B-063 — O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado   [ ]
+## B-063 — O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado   [x]
 
 domain: arnes
 repo: theodb-bench
@@ -2716,9 +2717,8 @@ why_now: o próprio [[B-060]] deste ecossistema abriu citando este método como 
 *"disciplina exata"*, e construiu o portão do knob por analogia a ele. A analogia estava certa e o exemplar
 estava morto — de modo que o portão que o B-060 entregou é hoje o **único** apply-then-verify que roda no arnês.
 Registrar isto é o que impede a citação de continuar a circular como se o mecanismo existisse.
-status: planned
-status_nota: 2026-08-20 — implementado no `theodb-bench` commit `5d97e22` (workspace), aguardando
-  release. Os quatro bullets fecharam. O binding foi consertado extraindo `_query_parameters` (três
+status: shipped
+status_nota: 2026-08-20 — implementado no `theodb-bench` commit `5d97e22` `5d97e22`, lançado em `v0.2.0` do theodb-bench. Os quatro bullets fecharam. O binding foi consertado extraindo `_query_parameters` (três
   cópias do mesmo ternário e uma ausência); o chamador entrou como hook `verify_access_path` na base,
   não como chamada direta ao método do Postgres; o I5 foi reescrito para "verifica e NÃO força",
   porque `SET enable_seqscan = off` continua não sendo emitido; e o vulture entrou em confiança 60,
@@ -2945,7 +2945,7 @@ dod:
   - o tempo de carga de 1M × 128 é medido antes e depois na mesma máquina, e a razão entra no CHANGELOG
   - `LoadOutcome.complete` continua provando que todas as linhas chegaram — velocidade não substitui a prova
   - a constante `COPY_BATCH` descreve o que o código faz, ou some
-## B-071 — Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico   [ ]
+## B-071 — Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico   [x]
 
 domain: arnes
 repo: theodb-bench
@@ -2973,10 +2973,10 @@ maioria dos benchmarks vetoriais públicos declara — e ela não está no camin
 instância do mesmo padrão no mesmo dia: o [[B-063]] registrou o `assert_index_used` implementado, citado como
 exemplar e sem chamador. **O padrão é o item**: este repositório constrói componentes excelentes e nem sempre
 os liga.
-status: planned
+status: shipped
 status_nota: 2026-08-20 — os bullets 1-3 estão em `v0.1.0` (`compare` pareado com recusa,
   Pareto emitido por corrida, regressão consultada pelos perfis). O bullet 4 entrou agora no commit
-  `6ccaa14` (workspace), aguardando release: portão de módulo órfão por AST, com os TRÊS que restam
+  `6ccaa14` `6ccaa14`, lançado em `v0.2.0` do theodb-bench: portão de módulo órfão por AST, com os TRÊS que restam
   (`bench.graph`, `bench.operations`, `bench.retrieval`) nomeados num baseline que o teste obriga a
   encolher. Verificado que não são alcançados por registro dinâmico antes de chamá-los órfãos.
 dod:
@@ -3658,3 +3658,28 @@ dod:
 > Registrado 2026-08-20 pela leitura do código durante o [[B-037]]. **Não retrata nenhum número publicado**:
 > a suíte roda verde e o `ef_search` demonstravelmente funciona (481 testes passam, e o M60/M69/M70 mediram
 > recall). O defeito é de COBERTURA — o teste não protegeria a regressão que ele existe para proteger.
+## B-087 — O pacote do arnês diz `0.1.0.dev0` enquanto as releases dizem `v0.1.0` e `v0.2.0`   [ ]
+
+domain: arnes
+repo: theodb-bench
+suggested_mode: review
+source: discover-review
+evidence: medido em 2026-08-20 ao cortar a release 0.2.0. `pyproject.toml:7` declara
+`version = "0.1.0.dev0"`, e ele não foi tocado no corte da `v0.1.0` nem seria no da `v0.2.0` — o
+`release.yml` deriva a versão da TAG e as notas do CHANGELOG, e nunca lê o `pyproject.toml`. O
+resultado é que `pip show theodb-bench` responde `0.1.0.dev0` para um pacote instalado a partir da
+`v0.2.0`, e `importlib.metadata.version` idem. Um bundle de medição que registre a versão do arnês
+por essa via registra a errada.
+why_now: o corte da `v0.2.0` é o segundo em que a discrepância passa, e é o primeiro em que ela
+divergiria em MINOR e não só em sufixo. Enquanto era `0.1.0.dev0` vs `v0.1.0` dava para ler como
+sufixo de desenvolvimento; `0.1.0.dev0` vs `v0.2.0` é outra versão.
+status: triaged
+dod:
+  - a versão que o pacote reporta e a tag da release não podem divergir — ou o corte atualiza o
+    `pyproject.toml`, ou a versão passa a ser derivada da tag (`setuptools-scm` ou equivalente)
+  - existe verificação que reprova quando as duas divergem, e ela roda no corte e não depois
+  - se algum bundle de medição já publicado registrou a versão errada do arnês, isso está dito por
+    escrito — nenhum número é retratado sem que se diga qual
+
+> Registrado 2026-08-20 durante o corte da `v0.2.0`. **Não retrata nenhum número**: nenhum bundle
+> publicado foi verificado ainda quanto a esse campo, e é isso que o terceiro bullet pede.
