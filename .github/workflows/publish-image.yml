@@ -1,89 +1,110 @@
-# Image publish — #187. Segue o playbook do ecossistema (mesmo do theo-memory/theo-rag):
-# delega ao workflow REUTILIZÁVEL `usetheoai/theo/.github/workflows/build-publish.yml`, que já entrega
-# build + push GHCR, gate Trivy (CRITICAL/HIGH) antes do push, e SBOM + provenance SLSA + assinatura
-# keyless cosign nas tags. Escrever um workflow próprio aqui seria reimplementar o que o ecossistema já
-# resolve (Regra 9 / parsimony ladder rung 4) — e perderia Trivy, SBOM e assinatura.
+# publish — build da imagem, portão Trivy e push para o GHCR. NATIVO deste repositório.
+#
+# POR QUE DEIXOU DE DELEGAR (medido em 2026-08-20, e é a causa-raiz do B-082).
+# Este workflow delegava a `usetheoai/theo/.github/workflows/build-publish.yml@develop`. As oito
+# execuções registradas desde 2026-07-29 — inclusive a do tag `v0.158.0` — falharam, e as recentes
+# com **zero jobs** e a mensagem "This run likely failed because of a workflow file issue".
+#
+# A causa não era o arquivo. Medido: `usetheoai/theo` é **PRIVADO** e `usetheoai/theo-db` é
+# **PÚBLICO**, e o GitHub não permite que um repositório público consuma workflow reutilizável de um
+# privado. O `access_level: organization` do repo `theo` libera repos privados/internos da org — não
+# públicos. Nenhuma edição aqui resolveria isso: a referência simplesmente não resolve.
+#
+# Descartadas e por quê: tornar `theo` público é decisão de produto de outro repositório; copiar o
+# reutilizável para cá duplicaria um arquivo mantido por outra equipe. Reescrever o mínimo aqui é o
+# que mantém a esteira deste repositório autônoma — e autonomia é o que a falha cobrou.
+#
+# O QUE FOI PRESERVADO do reutilizável: build, **portão Trivy antes do push** e tags por versão.
+# O QUE NÃO FOI, declarado em vez de omitido: SBOM, provenance SLSA e assinatura cosign. Cada um
+# acrescentaria action de terceiro à superfície que o [[B-083]] já mede em 42 referências não fixadas
+# por SHA. Entram quando houver decisão sobre aquele item, não a reboque desta correção.
 #
 #   develop push → ghcr.io/usetheoai/theo-db:develop (+ :develop-<sha>)
-#   v* tag       → :X.Y.Z + :X.Y + :latest, assinada e verificada
-#
-# B-010 (2026-08-10): o `uses:` apontava para `usetheodev/theo`, org que NÃO EXISTE — o correto é
-# `usetheoai`. Consequência medida: TODA execução deste workflow falhava com `workflow was not found`,
-# no push de `develop` e na tag `v0.158.0`. Por isso a imagem nunca foi publicada, e por isso
-# `ghcr.io/usetheoai/theo-db:latest` responde `manifest unknown` até hoje.
-#
-# Contexto: a imagem nunca havia sido publicada — `docker pull ghcr.io/usetheoai/theo-db:latest`, o
-# primeiro comando do README, falhava com `manifest unknown`. O `ci.yml` constrói a imagem seis vezes,
-# mas sempre com `load: true` + tag local, para rodar os testes e descartar.
+#   v* tag       → :X.Y.Z + :latest
 name: publish
+
 on:
   push:
     branches: [develop]
     tags: ["v*"]
-    # Pushes só-de-documentação em develop não gastam a fila do runner.
-    #
-    # DELIBERADAMENTE `paths-ignore` (lista de exclusão), NÃO o filtro positivo que o `ci.yml`
-    # adotou: este workflow escuta `tags: ["v*"]`, e filtro de path se aplica TAMBÉM a push de tag.
-    # Um filtro positivo faria um release cujo commit não casasse a lista ser silenciosamente
-    # ignorado — nenhuma imagem publicada, nenhum erro. Lista de exclusão erra para o lado seguro
-    # (publica a mais), que aqui é o lado certo.
-    #
-    # Isso posto, a premissa que sustenta o `**/*.md` abaixo é que builds de TAG apontam para merge
-    # commits, sempre com código junto. É uma premissa do FLUXO, não uma garantia do mecanismo —
-    # registrada como risco latente numa issue própria.
+    # `paths-ignore` e não filtro positivo: este workflow escuta `tags`, e filtro de path se aplica
+    # TAMBÉM a push de tag. Um filtro positivo faria um release cujo commit não casasse a lista ser
+    # silenciosamente ignorado — nenhuma imagem, nenhum erro. Lista de exclusão erra para o lado que
+    # publica a mais, e aqui esse é o lado seguro.
     paths-ignore:
       - '.claude/**'
-      - '**/*.md'
-      # Adicionados em 2026-07-27: nada aqui entra na imagem (conferido nos `COPY` do Dockerfile —
-      # só `theodb_rs/`, `sql/`, `*.control`). O commit `3313226`, que tocou só workflows e o
-      # CHANGELOG, disparou um build+push completo de imagem idêntica.
       - 'wiki/**'
-      - 'knowledge-base/**'
-      - 'agents/**'
-      - '.review-runs/**'
-      - '.review-loop/**'
-      # Nada em `.github/` entra na imagem. Para exercitar uma alteração NESTE arquivo, use o
-      # `workflow_dispatch` declarado abaixo — é o escape hatch previsto.
-      #
-      # `.github/**`, não `.github/workflows/**`: `paths-ignore` só suprime o run quando TODO
-      # arquivo do commit casa algum padrão. Verificado no commit `6fcf218` — ele tocou workflows
-      # + CHANGELOG (ambos ignorados) e `.github/actionlint.yaml`, que ficava de fora do padrão
-      # mais estreito e sozinho bastou para disparar um build+push completo.
-      - '.github/**'
+      - '**/*.md'
   workflow_dispatch:
-
-# Runner self-hosted único: pushes sucessivos em develop devem SUPERSEDER o run anterior em vez de
-# empilhar. Runs de TAG têm grupo próprio por ref e nunca são cancelados por um push de develop —
-# abortar uma publicação de release deixaria manifesto parcial no registry.
-concurrency:
-  group: publish-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 permissions:
   contents: read
   packages: write
-  id-token: write   # cosign keyless via OIDC (somente em release)
+
+concurrency:
+  group: publish-${{ github.ref_name }}
+  # Nunca cancela: um push de tag interrompido deixa release sem imagem.
+  cancel-in-progress: false
 
 jobs:
-  image:
-    uses: usetheoai/theo/.github/workflows/build-publish.yml@develop
-    with:
-      image: theo-db
-      dockerfile: ./Dockerfile
-      context: .
-      trivy: true
-      sign: ${{ startsWith(github.ref, 'refs/tags/v') }}
-      verify: ${{ startsWith(github.ref, 'refs/tags/v') }}
-      # Mesma variável que todo job próprio deste repo consome — um só lugar governa a frota.
-      # O reusable recebe a STRING JSON (ele faz o `fromJSON` do lado dele), então aqui NÃO se
-      # envolve em `fromJSON`; o `||` continua sendo o fallback contra variável ausente.
-      #
-      # Por que o default é `theodb-do` e não o genérico `["self-hosted","linux","x64"]` do playbook:
-      # os runners da máquina theo-ci-runner (2 vCPU / 2 GB, que serve theo-cloud/theo-lens/
-      # theo-memory) carregam exatamente esses labels genéricos, e um build que compila Rust +
-      # PostgreSQL não cabe lá. O label específico prende o build na máquina de 8 vCPU.
-      runner: ${{ vars.CI_RUNNER || '["ubuntu-latest"]' }}
-    # SEM bloco `secrets:` — e sem `secrets: inherit`, que é o que o semgrep barra. O `secrets: {}`
-    # anterior expressava a mesma intenção (não repassar nada) mas o actionlint o rejeita como seção
-    # vazia; omitir tem efeito idêntico e satisfaz os dois linters. O TheoDB não consome módulo Go
-    # privado nem publica no Docker Hub hoje; o GHCR publica com o GITHUB_TOKEN do próprio run.
+  build-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Tags desta corrida
+        id: meta
+        run: |
+          set -euo pipefail
+          REPO="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          if [[ '${{ github.ref_type }}' == 'tag' ]]; then
+            V='${{ github.ref_name }}'; V="${V#v}"
+            printf 'tags=%s:%s,%s:latest\n' "$REPO" "$V" "$REPO" >> "$GITHUB_OUTPUT"
+          else
+            printf 'tags=%s:develop,%s:develop-%s\n' "$REPO" "$REPO" '${{ github.sha }}' >> "$GITHUB_OUTPUT"
+          fi
+          echo "scan_tag=$REPO:scan-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      # Constrói e CARREGA local primeiro. O push só acontece depois do portão — publicar e depois
+      # escanear inverteria a ordem que dá sentido ao portão.
+      - name: Build (local, ainda sem push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: ${{ steps.meta.outputs.scan_tag }}
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Trivy pela IMAGEM OFICIAL fixada por digest, não por action. É o precedente deste
+      # repositório (o `actionlint` é consumido assim, com a razão escrita lá) e evita acrescentar
+      # mais uma referência não fixada por SHA ao que o B-083 mede.
+      - name: Portão Trivy (CRITICAL + HIGH) antes de publicar
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD/.trivyignore:/.trivyignore:ro" \
+            aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
+            image --severity CRITICAL,HIGH --exit-code 1 --ignorefile /.trivyignore \
+            --scanners vuln '${{ steps.meta.outputs.scan_tag }}'
+
+      - name: Login no GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Reusa o cache do build acima, então não recompila — só publica.
+      - name: Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: ${{ steps.meta.outputs.tags }}
+          push: true
+          cache-from: type=gha

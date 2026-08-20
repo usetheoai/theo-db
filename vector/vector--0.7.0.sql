@@ -52,8 +52,17 @@ CREATE ACCESS METHOD hnsw TYPE INDEX HANDLER theodb_hnsw_amhandler;
 -- idêntico ao que as opclasses `theodb_hnsw_*_ops` já declaram (verificado em pg_amop: amoppurpose='o',
 -- amopsortfamily=float_ops).
 
--- L2 / distância euclidiana — DEFAULT, espelhando `theodb_hnsw_l2_ops` (que é o default do AM próprio).
-CREATE OPERATOR CLASS vector_l2_ops DEFAULT FOR TYPE vector USING hnsw AS
+-- NÃO é DEFAULT, e isso é compatibilidade e não descuido. Medido em 2026-08-20 contra
+-- `pgvector/pgvector@sha256:be400b5…` (pgvector 0.8.3): sob `ivfflat` a `vector_l2_ops` É default,
+-- e sob `hnsw` **nenhuma opclass é**. A versão anterior deste shim marcava DEFAULT aqui, com o
+-- comentário dizendo que espelhava o `theodb_hnsw_l2_ops` — espelhou o AM PRÓPRIO em vez do
+-- pgvector, que é o que este arquivo existe para imitar.
+--
+-- O efeito era observável e escapava: `pg_get_indexdef` OMITE a opclass quando ela é default, então
+-- um índice migrado de pgvector aparecia como `USING hnsw (embedding)` no TheoDB contra
+-- `USING hnsw (embedding vector_l2_ops)` na origem. O `migration-smoke` compara as definições e
+-- reprovava — só que ninguém via, porque a restauração falhava antes, no `ivfflat` ausente (B-037).
+CREATE OPERATOR CLASS vector_l2_ops FOR TYPE vector USING hnsw AS
     OPERATOR 1 <-> (vector, vector) FOR ORDER BY float_ops;
 
 -- Cosseno — a opclasse mais usada por apps de embedding (é a que o theo-memory declara).

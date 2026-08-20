@@ -14,6 +14,19 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Um índice HNSW migrado do pgvector volta a ter a mesma definição de origem.** O shim marcava
+  `vector_l2_ops` como padrão do método `hnsw`, e o pgvector não marca — medido contra a imagem
+  oficial 0.8.3. Como o PostgreSQL omite a classe de operadores quando ela é padrão, o mesmo índice
+  aparecia como `USING hnsw (embedding)` aqui e `USING hnsw (embedding vector_l2_ops)` lá. Nenhum
+  índice muda de comportamento; o que muda é a definição impressa, que agora coincide. Instalações
+  vindas da 0.6.0 mantêm a divergência, porque desfazê-la exigiria derrubar índices existentes —
+  está declarado no script de atualização (#B-037)
+- **A publicação da imagem deixa de depender de um repositório privado, e por isso volta a ser
+  possível.** O workflow delegava a um reutilizável em `usetheoai/theo`, que é privado, enquanto
+  este repositório é público — e o GitHub não permite essa combinação. Era essa a causa de as oito
+  execuções desde 2026-07-29 falharem sem sequer iniciar um job, incluindo a do release `v0.158.0`.
+  O workflow passa a ser próprio, com o portão de vulnerabilidades mantido **antes** do push
+  (#B-082)
 - **Índices `ivfflat` criados pela sintaxe do pgvector voltam a funcionar.** O shim de
   compatibilidade registrava o apelido `hnsw` e parava aí: `CREATE INDEX ... USING ivfflat (...)` —
   o que uma aplicação pgvector escreve — falhava com *"access method ivfflat does not exist"*, e um
