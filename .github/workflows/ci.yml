@@ -97,7 +97,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -148,7 +148,7 @@ jobs:
     # declaravam timeout (pg-regression 25, hybrid-search 20).
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Carregar a imagem construída uma vez pelo job `build`
         uses: actions/download-artifact@v4
@@ -228,7 +228,7 @@ jobs:
     # é ~2x o observado — folga para variação de download do dataset sem virar refém de um hang.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Carregar a imagem construída uma vez pelo job `build`
         uses: actions/download-artifact@v4
@@ -316,7 +316,7 @@ jobs:
     # do `pg-regression` (25), que também sobe container e roda suíte externa.
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Carregar a imagem construída uma vez pelo job `build`
         uses: actions/download-artifact@v4
@@ -362,7 +362,7 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -405,7 +405,7 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Carregar a imagem construída uma vez pelo job `build`
         uses: actions/download-artifact@v4
@@ -455,7 +455,7 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Carregar a imagem construída uma vez pelo job `build`
         uses: actions/download-artifact@v4
@@ -515,7 +515,7 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -573,7 +573,7 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Carregar a imagem construída uma vez pelo job `build`
         uses: actions/download-artifact@v4
         with:
@@ -628,7 +628,7 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: License sweep — columnar candidates permissive verdict (reproducible)
         run: bash packaging/license-sweep.sh || true   # § (a)/(b) need the theo-db image; § (c)/(e) curl-only verdicts always print
       - name: Build throwaway columnar image (canonical pg_mooncake distribution, MIT)

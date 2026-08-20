@@ -64,7 +64,7 @@ jobs:
       run:
         working-directory: theodb_rs
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 2026-08-20 — runner efêmero não tem o toolchain quente que a máquina paga tinha.
       # O Dockerfile já ensina o caminho barato: `cargo pgrx init --pg18 "$(which pg_config)"`
