@@ -50,7 +50,7 @@ jobs:
       #
       # A tag continua sendo verificada (o passo seguinte exige que seja ancestral de `main`) e é o
       # que a release aponta. Ela só deixa de ser de onde lemos o texto.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0   # histórico + tags, para a checagem de ancestralidade e o `--verify-tag`
 
@@ -85,6 +85,13 @@ jobs:
             echo "Release $TAG ja existe — atualizando as notas em vez de duplicar"
             gh release edit "$TAG" --notes-file /tmp/notes.md
           else
-            gh release create "$TAG" --title "$TAG" --notes-file /tmp/notes.md --verify-tag
+            # `--latest` DERIVADO, nunca implícito. O GitHub marca como "latest" a release criada por
+            # último, não a de maior versão — e em 2026-08-20 isso pôs a `v0.159.0` retroativa como
+            # latest, à frente da `v0.160.1` que acabara de sair. Uma release retroativa descreve o
+            # passado; anunciá-la como a atual manda todo mundo para a versão errada.
+            LATEST=$(git tag --sort=-v:refname | head -1)
+            if [ "$TAG" = "$LATEST" ]; then FLAG="--latest"; else FLAG="--latest=false"; fi
+            echo "maior tag do repo: $LATEST -> $TAG usa $FLAG"
+            gh release create "$TAG" --title "$TAG" --notes-file /tmp/notes.md --verify-tag "$FLAG"
           fi
           gh release view "$TAG" --json url --jq '"publicada: " + .url'

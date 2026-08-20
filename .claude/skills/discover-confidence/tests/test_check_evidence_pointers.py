@@ -117,3 +117,82 @@ def test_no_evidence_at_all(rooted: Path) -> None:
     assert report["total"] == 0
     assert report["fabricated"] == 0
     assert report["evidence_total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# B-081 — resolução de caminho ciente de layout, numa implementação só.
+# ---------------------------------------------------------------------------
+
+
+def test_a_pointer_into_the_ecosystem_resolves_from_a_plugin_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """O defeito, reproduzido: num consumidor o ecossistema vive sob `.claude/`.
+
+    Medido em 2026-08-20 no `theo-db`: a fixture `good-opportunity.md` **da própria skill**
+    pontuou `INVALID` com `fabricated_evidence` e os quatro pointers `missing_file`. No kit
+    passa, porque lá `rules/` está na raiz — de modo que o defeito é invisível exatamente onde
+    o código é mantido, e universal onde ele é usado.
+
+    Um falso positivo de "evidência fabricada" é o pior tipo: ele acusa de desonestidade quem
+    escreveu uma oportunidade legítima, e ensina a ignorar o portão.
+    """
+    root = tmp_path / "consumidor"
+    eco = root / ".claude"
+    for d in ("skills", "rules", "hooks"):
+        (eco / d).mkdir(parents=True)
+    (eco / "rules" / "cycle-discover.md").write_text("\n".join(f"linha {i}" for i in range(1, 60)))
+    monkeypatch.setattr(cep, "_find_project_root", lambda _start: root)
+
+    ok, motivo = cep._resolve_code_pointer(root, "rules/cycle-discover.md", 10)
+    assert ok, f"pointer do ecossistema deveria resolver em layout de plugin, deu {motivo!r}"
+
+
+def test_the_same_pointer_resolves_in_the_standalone_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E o layout do kit continua funcionando — a correção não troca um por outro."""
+    root = tmp_path / "kit"
+    for d in ("skills", "rules", "hooks"):
+        (root / d).mkdir(parents=True)
+    (root / "rules" / "cycle-discover.md").write_text("\n".join(f"linha {i}" for i in range(1, 60)))
+    monkeypatch.setattr(cep, "_find_project_root", lambda _start: root)
+
+    ok, motivo = cep._resolve_code_pointer(root, "rules/cycle-discover.md", 10)
+    assert ok, f"layout standalone deveria continuar resolvendo, deu {motivo!r}"
+
+
+def test_a_genuinely_absent_file_is_still_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A correção não pode transformar o portão em carimbo.
+
+    Um pointer para arquivo que não existe em NENHUM dos layouts continua `missing_file` — que
+    é a única coisa que faz o hard cap valer alguma coisa.
+    """
+    root = tmp_path / "consumidor"
+    (root / ".claude" / "rules").mkdir(parents=True)
+    monkeypatch.setattr(cep, "_find_project_root", lambda _start: root)
+
+    ok, motivo = cep._resolve_code_pointer(root, "rules/nao-existe.md", 1)
+    assert not ok
+    assert motivo == "missing_file"
+
+
+def test_the_layout_resolution_is_the_shared_one_not_a_local_copy() -> None:
+    """Bullet 1 do B-081: UMA implementação, não uma cópia por checador.
+
+    `scripts/ecosystem_utils.py` já declara no próprio docstring que todo script que precisa
+    localizar o ecossistema deve importar dali "em vez de duplicar a lógica de detecção". As
+    cópias inline eram a violação de um contrato que já existia — e é assim que duas delas
+    divergiram: o irmão `check_measurement_targets.py` carregava as duas candidatas para o
+    `live-target.txt` e não para os targets do plano, no mesmo arquivo.
+    """
+    import ecosystem_utils
+
+    assert hasattr(ecosystem_utils, "resolve_ecosystem_path")
+    assert cep._resolve_code_pointer.__module__ == "check_evidence_pointers"
+    fonte = Path(cep.__file__).read_text(encoding="utf-8")
+    assert "resolve_ecosystem_path" in fonte, (
+        "o checador deve delegar a resolução ao módulo compartilhado, não reimplementá-la"
+    )

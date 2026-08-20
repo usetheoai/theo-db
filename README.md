@@ -94,13 +94,6 @@ docker pull ghcr.io/usetheoai/theo-db:latest
 docker run -d --name theodb -e POSTGRES_PASSWORD=postgres -p 5432:5432 ghcr.io/usetheoai/theo-db:latest
 ```
 
-> **A imagem ainda não está publicada, e isto é medição, não ressalva de estilo.** As oito execuções
-> do workflow `publish` desde 2026-07-29 falharam — inclusive a do tag `v0.158.0` —, e um `GET` de
-> manifesto responde `403` tanto em `usetheoai` quanto na grafia antiga. O comando acima é o destino
-> correto e **ainda não funciona**; até funcionar, construa a partir do fonte (`docker build .`). O
-> caminho está aberto como B-082. A org também estava errada até 2026-08-20: o README dizia
-> `usetheodev`, que existe como **usuário** e não como a organização que hospeda os repositórios.
-
 A imagem cria a extensão automaticamente no primeiro init. Roda em **PostgreSQL 18** (a distribuição migrou
 do 17 para o 18 no M135; o tipo `vector` e os índices ANN são **own-code**, sem depender de pgvector/pgvectorscale):
 

@@ -20,7 +20,16 @@ evidence -- caught before the measurement rather than after.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+# `<ecossistema>/scripts/` visto a partir de `<ecossistema>/skills/<skill>/scripts/`. Ancorado em
+# `__file__` e não na raiz do projeto: a raiz é o que a detecção de layout resolve, e usá-la para
+# ENCONTRAR a detecção seria circular (B-081).
+_ECOSYSTEM_SCRIPTS = Path(__file__).resolve().parents[3] / "scripts"
+if str(_ECOSYSTEM_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_ECOSYSTEM_SCRIPTS))
+from ecosystem_utils import resolve_ecosystem_path  # noqa: E402
 from typing import Any
 
 
@@ -49,11 +58,8 @@ def _declared_live_targets(project_root: Path) -> set[str]:
     refuses to run (`cycle-discover.md`, gate G-L). Catching it here means the refusal
     lands while the plan is cheap to change.
     """
-    for candidate in (
-        project_root / "rules" / "live-target.txt",
-        project_root / ".claude" / "rules" / "live-target.txt",
-    ):
-        if candidate.is_file():
+    for candidate in (resolve_ecosystem_path(project_root, "rules/live-target.txt"),):
+        if candidate is not None:
             return {
                 m.group(1)
                 for m in re.finditer(
@@ -83,9 +89,12 @@ def check_measurement_targets(plan_path: Path) -> dict[str, Any]:
         if _is_explicitly_blocked(raw, match.end()):
             blocked.add(target)
             continue
-        # Two candidates, for the same reason the `live-target.txt` lookup above already
-        # has them: in a plugin install the ecosystem sits under `.claude/`.
-        if (project_root / target).exists() or (project_root / ".claude" / target).exists():
+        # Pelo mesmo resolvedor do `live-target.txt` acima. Estas duas resoluções viviam no
+        # MESMO arquivo com formas diferentes — uma consertada, a irmã não —, que é a forma que
+        # a duplicação toma antes de virar defeito (B-081).
+        # `files_only=False`: um target pode ser DIRETÓRIO — `knowledge-base/references/{projeto}`
+        # é o caso normal, não a exceção.
+        if resolve_ecosystem_path(project_root, target, files_only=False) is not None:
             verified.add(target)
         else:
             fabricated[target] = "path_not_found"

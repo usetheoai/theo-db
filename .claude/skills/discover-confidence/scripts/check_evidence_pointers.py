@@ -21,7 +21,17 @@ points past the end of a file is evidence that moved, and it is now caught.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+# O módulo compartilhado vive em `<ecossistema>/scripts/`, e este arquivo em
+# `<ecossistema>/skills/<skill>/scripts/`. Ancorar em `__file__` e não na raiz do projeto é o
+# ponto: a raiz é justamente o que a detecção de layout resolve, e usá-la para ENCONTRAR a
+# detecção de layout seria circular (B-081).
+_ECOSYSTEM_SCRIPTS = Path(__file__).resolve().parents[3] / "scripts"
+if str(_ECOSYSTEM_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_ECOSYSTEM_SCRIPTS))
+from ecosystem_utils import resolve_ecosystem_path  # noqa: E402
 from typing import Any
 
 
@@ -70,11 +80,8 @@ def _resolve_code_pointer(project_root: Path, rel_path: str, line: int) -> tuple
     # into the ecosystem read as fabricated. Same failure `skills/implement/scripts/_layout.py`
     # records for the knowledge-base, and the sibling `check_measurement_targets.py` already
     # carried the two-candidate branch for `live-target.txt` while its target loop did not.
-    for candidate in (project_root / rel_path, project_root / ".claude" / rel_path):
-        if candidate.is_file():
-            path = candidate
-            break
-    else:
+    path = resolve_ecosystem_path(project_root, rel_path)
+    if path is None:
         return False, "missing_file"
     try:
         total_lines = sum(1 for _ in path.open("r", encoding="utf-8", errors="replace"))

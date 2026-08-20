@@ -64,11 +64,22 @@ def test_coverage_matrix_empty_table_no_orphans(tmp_path: Path) -> None:
     assert report.is_complete is True
 
 
-def test_coverage_matrix_no_section_raises(tmp_path: Path) -> None:
+def test_coverage_matrix_no_section_reports_instead_of_raising(tmp_path: Path) -> None:
+    """Este teste PINAVA a excecao como se fosse contrato, e era o que impedia o conserto.
+
+    A ausencia da secao e a condicao exata que o `plan-confidence-golden-rule.md` cobre com o
+    hard cap `coverage_lt_100` — ou seja, e um plano INVALIDO, resultado normal do portao, nao
+    uma falha da ferramenta. Pinar a excecao transformava um veredito previsto em crash, e quem
+    chama passava a nao distinguir "o plano esta errado" de "a skill quebrou" (B-081).
+
+    Um `FileNotFoundError` continua sendo excecao, e a diferenca e o ponto: um plano que nao
+    existe nao pode ser reprovado, so relatado como ausente.
+    """
     plan = tmp_path / "no-section.md"
     plan.write_text("# Plan\n\nJust prose, no coverage section.\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="Coverage Matrix"):
-        check_coverage_matrix(plan)
+    report = check_coverage_matrix(plan)
+    assert report.is_complete is False
+    assert any("Coverage Matrix" in e for e in report.parse_errors)
 
 
 def test_coverage_matrix_file_not_found() -> None:
@@ -232,3 +243,49 @@ def test_coverage_matrix_truly_unmapped_still_fails(tmp_path: Path) -> None:
     assert report.deferred_gaps == 0
     assert report.mapped_gaps == 1
     assert report.is_complete is False
+
+
+# ---------------------------------------------------------------------------
+# B-081 — um portao que QUEBRA nao e um portao que reprova.
+# ---------------------------------------------------------------------------
+
+
+def test_a_plan_without_a_coverage_matrix_is_invalid_not_a_crash(tmp_path: Path) -> None:
+    """Medido em 2026-08-20: `run_structural` levantava
+    `ValueError: No '## Coverage Matrix' section found in plan` para
+    `b015-b018-b019-plan.md`, em vez de emitir o hard cap que o
+    `plan-confidence-golden-rule.md` define para EXATAMENTE essa condicao.
+
+    Quem chama nao consegue distinguir "plano invalido" de "ferramenta quebrada", e as duas
+    coisas exigem acoes opostas — a primeira e para o autor do plano consertar, a segunda para
+    o dono da skill. `rules/error-handling.md` § 2: erro explicito e tipado, nunca excecao crua
+    atravessando a fronteira.
+
+    O contrato ja existia no proprio dataclass: `is_complete` e `parse_errors` estao la desde
+    sempre. Faltava usa-los.
+    """
+    plan = tmp_path / "sem-matriz-plan.md"
+    plan.write_text(
+        "---\ntype: plan\nslug: sem-matriz\n---\n\n## Goal\n\nFazer algo.\n\n"
+        "## Tasks\n\n### T1.1 — passo\n",
+        encoding="utf-8",
+    )
+    report = check_coverage_matrix(plan)
+    assert report.is_complete is False
+    assert report.coverage_ratio == 0.0
+    assert any("Coverage Matrix" in e for e in report.parse_errors), (
+        f"o motivo deve estar legivel em parse_errors, veio {report.parse_errors!r}"
+    )
+
+
+def test_a_plan_with_a_coverage_matrix_is_unaffected(tmp_path: Path) -> None:
+    """A correcao nao pode transformar o portao em carimbo."""
+    plan = tmp_path / "com-matriz-plan.md"
+    plan.write_text(
+        "---\ntype: plan\nslug: com-matriz\n---\n\n## Coverage Matrix\n\n"
+        "| Claim | Where | Task |\n|---|---|---|\n| faz X | Goal | T1.1 |\n\n"
+        "## Tasks\n\n### T1.1 — passo\n",
+        encoding="utf-8",
+    )
+    report = check_coverage_matrix(plan)
+    assert report.parse_errors == ()

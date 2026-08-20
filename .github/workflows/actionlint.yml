@@ -63,7 +63,7 @@ jobs:
     # runner frio, não uma estimativa do trabalho.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: actionlint (workflows + shellcheck dos blocos run:)
         # Imagem fixada por digest, consistente com a política de supply-chain do repo (mesmo

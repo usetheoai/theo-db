@@ -64,7 +64,7 @@ jobs:
       run:
         working-directory: theodb_rs
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # 2026-08-20 — runner efêmero não tem o toolchain quente que a máquina paga tinha.
       # O Dockerfile já ensina o caminho barato: `cargo pgrx init --pg18 "$(which pg_config)"`
@@ -85,7 +85,7 @@ jobs:
       # `~/.cargo/bin` e `~/.pgrx` cacheados juntos: sem isso, cada corrida reinstala o
       # `cargo-pgrx` (compilação longa) para rodar um `cargo fmt` de segundos.
       - name: Cache do cargo-pgrx e do pgrx init
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/bin

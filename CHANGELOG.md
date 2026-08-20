@@ -13,6 +13,38 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- **As 39 referências a actions de terceiros passaram a ser fixadas por SHA imutável**, com a tag
+  legível ao lado em comentário. Uma tag é um ponteiro mutável: quem controla o repositório da
+  action pode reapontá-la, e o consumidor executa código novo sem um diff em lugar nenhum — nem no
+  PR, nem no histórico, nem na revisão. `actions/*` e `docker/*` incluídas, porque pertencer ao
+  GitHub não torna uma tag imutável. O dependabot já em vigor reescreve SHA e comentário juntos, e
+  a política ficou em `.github/CONTRIBUTING-workflows.md`. (#B-083)
+
+### Added
+- **`SET ivfflat.probes` tem efeito medido, e agora há prova disso.** O alias pgvector tinha teste
+  de propagação de valor — que o GUC devolve o que foi setado —, o que é diferente de ter efeito:
+  um alias pode propagar certo e nunca alcançar o scan. O teste novo mede recall@200 contra
+  verdade-terreno por seqscan em `probes=1` e `probes=64`, e a diferença é forçada por contagem
+  (uma célula de Voronoi não cabe 200 vizinhos), não por amostragem. (#B-037)
+- **O registro de manutenção passou a se contradizer em voz alta.** `BACKLOG.md` tinha dois campos por
+  bloco — o checkbox e o `status` — e nada os comparava: cada um está correto isolado, e só a comparação
+  revela a divergência. Ao ligar o portão, **30 dos 39 itens lançados** estavam com o checkbox para trás.
+  O gate também exige que `shipped` aponte para um commit contido em tag semver, e **declara** quantos
+  blocos não têm ponteiro verificável em vez de contá-los como limpos. Roda no Stop hook quando o
+  `BACKLOG.md` é tocado. (#B-051)
+
+### Fixed
+- **`docker pull ghcr.io/usetheoai/theo-db:latest` funciona.** O primeiro comando do README nunca
+  havia funcionado: as oito execuções do workflow de publicação desde 2026-07-29 falharam, e o
+  manifesto respondia `403`. A causa estava em três níveis acima do que os logs mostravam — a
+  organização **proibia pacotes públicos**, o que forçava o pacote a privado, o que impedia
+  vinculá-lo a um repositório público, o que tirava o acesso do workflow. Verificado do jeito que um
+  usuário faz: `docker logout` e `docker pull`, sem credencial (#B-082)
+- A nota do README que declarava a imagem indisponível foi removida — ela era verdadeira quando
+  escrita hoje de manhã, e mantê-la depois de a medição mudar seria o mesmo defeito com o sinal
+  invertido (#B-082)
+
 ## [0.160.1] - 2026-08-20
 
 ### Added

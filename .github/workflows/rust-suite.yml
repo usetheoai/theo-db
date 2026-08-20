@@ -66,10 +66,10 @@ jobs:
     # harness ficava 17 min sem saída esperando um servidor que nunca subia.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       # O estágio builder do Dockerfile já tem PG18 + pgrx init + o toolchain pinado. Reusá-lo em
       # vez de montar um ambiente próprio mantém UMA definição de ambiente (a imagem que ships).
