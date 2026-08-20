@@ -82,37 +82,37 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-008`](#b-008--lakehouse-4-funções-expostas-escala-e-formatos-nunca-medidos----) | Lakehouse: 4 funções expostas, escala e formatos nunca medidos | `raw` | — |
 | [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada----) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `raw` | — |
 | [`B-010`](#b-010--maturidade-zero-uso-real-e-é-o-gargalo-de-todos-os-pilares----) | Maturidade: zero uso real, e é o gargalo de todos os pilares | `raw` | — |
-| [`B-012`](#b-012--as-outras-18-falhas-da-suíte-seguem-sem-causa-capturada---x) | As outras 18 falhas da suíte seguem sem causa capturada | `raw` | — |
+| [`B-012`](#b-012--as-outras-18-falhas-da-suíte-seguem-sem-causa-capturada---x) | As outras 18 falhas da suíte seguem sem causa capturada | `triaged` | — |
 | [`B-014`](#b-014--bm25_search-aceita-um-termo-por-chamada-consulta-de-usuário-tem-vários----) | `bm25_search` aceita um termo por chamada; consulta de usuário tem vários | `raw` | — |
 | [`B-015`](#b-015--cinco-testes-falham-com-contador-em-zero-instrumentação-ou-o-chunk-skip-não-poda----) | Cinco testes falham com contador em zero: instrumentação ou o chunk-skip não poda? | `triaged` | — |
-| [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `raw` | — |
-| [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off----) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `raw` | — |
+| [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
+| [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off----) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `triaged` | — |
 | [`B-021`](#b-021--o-diagnóstico-não-enxerga-índice-criado-pela-sintaxe-pgvector-e-o-opclass-default-não-serve-----) | O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>` | `triaged` | — |
 | [`B-026`](#b-026--resíduo-do-symqg-função-morta-com-null-deref-latente-e-o-gate-de-clippy-está-vermelho-por-ela----) | Resíduo do SymQG: função morta com null-deref latente, e o gate de clippy está vermelho por ela | `triaged` | — |
-| [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `raw` | — |
-| [`B-037`](#b-037--o-am-ivfflat-não-existe-metade-do-shim-pgvector-está-ausente----) | O AM `ivfflat` não existe: metade do shim pgvector está ausente | `raw` | — |
-| [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta----) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `raw` | — |
-| [`B-042`](#b-042--o-build-do-hnsw-é-36-mais-lento-que-o-do-pgvector-usando-8-mais-threads-e-o-grafo-sai-pior----) | O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior | `raw` | — |
-| [`B-043`](#b-043--o-qps-lexical-satura-em-20-clientes-numa-máquina-de-16-vcpu-e-não-sobe-mais----) | O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais | `raw` | — |
+| [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `triaged` | — |
+| [`B-037`](#b-037--o-am-ivfflat-não-existe-metade-do-shim-pgvector-está-ausente----) | O AM `ivfflat` não existe: metade do shim pgvector está ausente | `triaged` | — |
+| [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta----) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `triaged` | — |
+| [`B-042`](#b-042--o-build-do-hnsw-é-36-mais-lento-que-o-do-pgvector-usando-8-mais-threads-e-o-grafo-sai-pior----) | O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior | `triaged` | — |
+| [`B-043`](#b-043--o-qps-lexical-satura-em-20-clientes-numa-máquina-de-16-vcpu-e-não-sobe-mais----) | O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais | `triaged` | — |
 | [`B-046`](#b-046--paridade-de-qps-com-o-pgvector-a-recall-casado-hoje-o-déficit-medido-é-163----) | Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3% | `triaged` | — |
-| [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `raw` | — |
-| [`B-050`](#b-050--o-conserto-do-cliente-opensearch-é-do-upstream-e-o-fork-tem-saída-declarada----) | O conserto do cliente OpenSearch é do upstream, e o fork tem saída declarada | `raw` | — |
-| [`B-051`](#b-051--nada-compara-o-checkbox-com-o-status-e-a-divergência-sobreviveu-meses----) | Nada compara o checkbox com o `status`, e a divergência sobreviveu meses | `raw` | — |
-| [`B-052`](#b-052--workspace-não-tem-portão-73-commits-e-13-arquivos-rust-sem-um-gate-olhar----) | `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar | `raw` | — |
-| [`B-054`](#b-054--toda-iteração-em-rust-custa-8-minutos-e-2m34s-deles-eram-um-cp--r----) | Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r` | `raw` | — |
-| [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança----) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `raw` | — |
-| [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `raw` | — |
-| [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `raw` | — |
-| [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `raw` | — |
-| [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default----) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `raw` | — |
-| [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado----) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `raw` | — |
-| [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela----) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `raw` | — |
-| [`B-066`](#b-066--a-contenção-escritascan-não-é-medível-não-existe-arnês-concorrente----) | A contenção escrita×scan não é medível: não existe arnês concorrente | `raw` | — |
-| [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala----) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `raw` | — |
-| [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `raw` | — |
-| [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `raw` | — |
-| [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem----) | Dois flags de perfil prometem gates que não existem | `raw` | — |
-| [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `raw` | — |
+| [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `triaged` | — |
+| [`B-050`](#b-050--o-conserto-do-cliente-opensearch-é-do-upstream-e-o-fork-tem-saída-declarada----) | O conserto do cliente OpenSearch é do upstream, e o fork tem saída declarada | `triaged` | — |
+| [`B-051`](#b-051--nada-compara-o-checkbox-com-o-status-e-a-divergência-sobreviveu-meses----) | Nada compara o checkbox com o `status`, e a divergência sobreviveu meses | `triaged` | — |
+| [`B-052`](#b-052--workspace-não-tem-portão-73-commits-e-13-arquivos-rust-sem-um-gate-olhar----) | `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar | `triaged` | — |
+| [`B-054`](#b-054--toda-iteração-em-rust-custa-8-minutos-e-2m34s-deles-eram-um-cp--r----) | Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r` | `triaged` | — |
+| [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança----) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `triaged` | — |
+| [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `triaged` | — |
+| [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
+| [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
+| [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default----) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `triaged` | — |
+| [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado----) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `triaged` | — |
+| [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela----) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `triaged` | — |
+| [`B-066`](#b-066--a-contenção-escritascan-não-é-medível-não-existe-arnês-concorrente----) | A contenção escrita×scan não é medível: não existe arnês concorrente | `triaged` | — |
+| [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala----) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `triaged` | — |
+| [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
+| [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `triaged` | — |
+| [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem----) | Dois flags de perfil prometem gates que não existem | `triaged` | — |
+| [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 | [`B-077`](#b-077--a-tabela-de-roteamento-é-a-do-ecossistema-inteiro-e-os-dois-repos-que-existem-não-roteiam----) | A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam | `triaged` | — |
 | [`B-078`](#b-078--seis-módulos-de-teste-do-kit-não-coletam-um-símbolo-removido-levou-as-suítes-junto----) | Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto | `triaged` | — |
 | [`B-079`](#b-079--o-tooling-escrito-em-claude-protege-uma-máquina-até-chegar-ao-repo-do-kit----) | O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit | `triaged` | — |
@@ -640,7 +640,7 @@ suggested_mode: review
 source: discover-review
 evidence: 20 falhas na primeira execução da suíte; **2 causas capturadas** (B-011), 18 sem mensagem — o `tail` do script de execução cortou os pânicos.
 why_now: 6 das 18 são do `lexical::engine`, o pilar promovido a binário default em 2026-08-09. Promover superfície pública com teste vermelho é o defeito que o M184 mediu no SymQG e o M176 removeu.
-status: raw
+status: triaged
 dod:
   - as 18 causas capturadas e classificadas em defeito de produto vs limitação de ambiente
   - as 6 do lexical resolvidas ou o pilar sai do default até que estejam
@@ -847,7 +847,7 @@ suggested_mode: live-test
 source: human
 evidence: `.claude/knowledge-base/dogfood/evidence/` — 4 evidências em 2026-08-10, todas `partial`/`pass` de **verificação**, nenhuma de uso.
 why_now: o B-010 ficou com dois DoD abertos, e a razão é estrutural, não de esforço. A golden rule define `running` como *"ativamente usado pelo time em infraestrutura real"*, e exige ≥ 3 evidências mais **uma história de falha**. Uma falha em operação **emerge de operação** — não existe ação, minha ou de ninguém, que a produza num dia. Registrar isto como item próprio evita que o B-010 fique aberto para sempre parecendo trabalho não feito, quando o que falta é calendário.
-status: raw
+status: triaged
 dod:
   - `theo-rag` mergeado e rodando sobre TheoDB em dev por ao menos duas semanas
   - ≥ 3 evidências de **operação** (não de verificação), com operador humano nomeado
@@ -908,7 +908,7 @@ suggested_mode: bug
 source: discover-live-test
 evidence: suíte de integração do `theo-rag` contra `ghcr.io/usetheoai/theo-db:0.140.0` (2026-08-10): `o planner deveria alcançar o índice HNSW sob enable_seqscan = off`. Plano escolhido: `Limit → Sort → Nested Loop → Index Scan` — **há um `Sort` acima**, então o índice não está servindo a ordenação.
 why_now: a correção do planner de hoje ([m175](wiki/benchmarks/m175-planner-cost-inversion-verdict.md)) resolveu a busca simples e **não cobre o caminho de junção**, que é o que o `theo-rag` usa de verdade. Encontrado pela suíte do produto, não por benchmark — o quarto defeito do dia pelo mesmo mecanismo.
-status: raw
+status: triaged
 dod:
   - o teste `ensureHnswIndex` do `theo-rag` passa sem `Sort` acima do `Index Scan`
   - determinado se a causa é o mesmo modelo de custo (m175) num caminho não coberto, ou outra
@@ -1402,7 +1402,7 @@ suggested_mode: review
 source: human
 evidence: medido em 2026-08-12 na saída de `cargo pgrx test pg18` (suíte completa, 446 testes). O build emite **1.460 avisos**, e o lint dominante é `unsafe_op_in_unsafe_fn` (E0133) com **2.872 ocorrências**: 1.874 chamadas a função `unsafe`, 932 desreferências de ponteiro cru, 54 usos de `static` mutável e 4 acessos a campo de `union`. A concentração é o que assusta — `src/am/columnar_agg.rs` (1.236), `src/am/page/mod.rs` (354), `src/am/columnar.rs` (286), `src/am/customscan.rs` (140), `src/am/build_stream.rs` (140), `src/am/page/ivf.rs` (138). Para contraste medido na mesma saída: código morto (`never used/read/constructed`) aparece **10** vezes. O eixo de risco deste repositório não é código morto.
 why_now: o `CLAUDE.md` do projeto declara que `unsafe`/FFI/pgrx é "a classe de defeito mais cara já encontrada em review — panic atravessando C, `TopMemoryContext`, MVCC do SPI", e manda abrir o acervo de pgrx antes de tocar em qualquer bloco `unsafe`. O que o lint diz é exatamente sobre enxergar esses blocos: dentro de uma `unsafe fn`, sem `unsafe {}` explícito, **o corpo inteiro é implicitamente inseguro** — some a capacidade de apontar QUAIS linhas são as perigosas. Num banco onde um panic atravessando a fronteira C derruba o backend do usuário, essa visibilidade é a diferença entre revisar 12 linhas marcadas e reler 1.236. O sinal já é emitido pelo compilador a cada build e ninguém o consome; ele não foi descoberto por ferramenta nova, foi descoberto por alguém ter lido a saída.
-status: raw
+status: triaged
 dod:
   - decidido em ADR se o lint vira erro (`#![deny(unsafe_op_in_unsafe_fn)]`) de uma vez, por módulo, ou com prazo — e o ADR registra o custo escolhido
   - `src/am/columnar_agg.rs` e `src/am/page/mod.rs`, que somam 1.590 das 2.872, tratados primeiro ou explicitamente adiados com razão escrita
@@ -1547,7 +1547,7 @@ suggested_mode: bug
 source: discover-evolve
 evidence: medido em 2026-08-12 contra `theodb:b034`. `SELECT amname FROM pg_am WHERE amtype='i'` devolve `hnsw`, `theodb_hnsw`, `theodb_ivfflat` — **não há `ivfflat`**. Logo `CREATE INDEX ... USING ivfflat (embedding vector_l2_ops) WITH (lists=100)` falha. O shim (`vector/vector--0.6.0.sql:49-67`) registra o alias `hnsw` e as três opclasses `vector_*_ops` para ele, e **para por aí**. Enquanto isso o GUC `ivfflat.probes` **foi registrado** no B-034 — ou seja, hoje o produto aceita o botão de ajuste de um índice que não se pode criar pelo nome que a app escreve.
 why_now: a assimetria é o problema, não a ausência. O B-034 registrou `ivfflat.probes` porque o TheoDB tem `theodb_ivfflat`; um usuário que leia `pg_settings` e encontre `ivfflat.probes` conclui — razoavelmente — que `USING ivfflat` funciona. O alias é rotulagem de catálogo pura: mesmo handler own-code, mesmas opclasses, exatamente o que o `hnsw` já faz e que o próprio arquivo do shim documenta como "não é uma segunda implementação". Não fazer é deixar o shim pela metade com o botão da metade que falta já instalado.
-status: raw
+status: triaged
 dod:
   - `CREATE ACCESS METHOD ivfflat` com o handler `theodb_ivfflat_amhandler` e as opclasses `vector_l2_ops` / `vector_cosine_ops` / `vector_ip_ops` registradas para ele — mesmo padrão do `hnsw`, no mesmo arquivo
   - **o conflito de nome de opclass está resolvido e testado**: nomes de opclass são únicos POR access method, então `vector_l2_ops` pode existir para `hnsw` e para `ivfflat` ao mesmo tempo — o item confirma isso por execução, não por leitura
@@ -1564,7 +1564,7 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-12 contra `theodb:b034`. `SELECT typname FROM pg_type WHERE typname IN ('vector','halfvec','sparsevec')` devolve **só `vector`**. O `pgvector-python 0.5.0` trata a ausência sem erro — `register_vector` só registra os dois se `TypeInfo.fetch` os encontrar (verificado na fonte do pacote) —, então nada quebra no cliente; o que quebra é qualquer DDL ou consulta de app que os use, e todos os casos de quantização do VectorDBBench, que assumem `halfvec` e `bit` como tipo de coluna.
 why_now: é a lacuna de drop-in mais funda das três encontradas neste ciclo e, honestamente, **a menos urgente** — as outras duas são rotulagem ou parâmetro sobre capacidade que já existe; esta pede tipos novos com I/O binário, operadores, opclasses e cast. Fica registrada porque foi medida, e porque uma decisão de NÃO fazer também precisa estar escrita: se o posicionamento é "compatível com pgvector", um `ERROR: type "halfvec" does not exist` é uma resposta que o produto dá hoje e ninguém decidiu dar.
-status: raw
+status: triaged
 dod:
   - uma DECISÃO registrada em ADR sobre implementar ou declarar fora de escopo — as duas saídas são aceitáveis, o silêncio não é
   - se implementar: `halfvec(N)` com o MESMO formato de fio do pgvector (o `vector` já tem — provado pelo `COPY FORMAT BINARY` do B-035), operadores de distância, opclasses nos AMs, e cast `vector <-> halfvec`
@@ -1724,7 +1724,7 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-12 no droplet `g-16vcpu-64gb`, corpus `Performance1536D50K` (50.000 × 1536d, COSINE), decompondo `load_duration` do JSON do VectorDBBench. **A inserção está em paridade** — pgvector 18,80 s contra TheoDB 19,66 s (4%). **A construção do índice não:** pgvector **35,09 s**, TheoDB **125,09 s** e 122,85 s numa segunda corrida independente (1,8% entre elas). O caminho paralelo do TheoDB **foi usado** — o limiar é 4.096 nós (`ann/hnsw_parallel.rs:18`) e o corpus tem 50.000, com `available_parallelism()` = 16 threads no droplet. O pgvector usou **2** workers de manutenção (`max_parallel_maintenance_workers=2`, lido do log da corrida). Em segundos-de-thread para o mesmo grafo, a razão é **28,5×**.
 why_now: o que torna isto um achado e não uma escolha de projeto é a **ausência de troca**: o grafo mais barato do pgvector é também o **melhor**. No mesmo `ef_search=64` o pgvector entrega recall **0,9835** e o TheoDB **0,9600** — para casar recall o TheoDB precisa de `ef=128`, e é daí que sai o déficit de 16% de QPS já publicado. Ou seja, o custo aparece duas vezes: uma no tempo de build, outra na varredura. Enquanto for assim, "paridade de recall" é verdade apenas com o dobro de trabalho por consulta, e isso não está dito em lugar nenhum. O eixo para investigar está bloqueado pelo [[B-036]] — sem `m`/`ef_construction` ajustáveis, não é possível separar qualidade-de-grafo de eficiência-de-varredura por experimento.
-status: raw
+status: triaged
 dod:
   - o tempo de build é **decomposto por fase** com profiling real (seleção de vizinhos, descida, escrita de página) — não estimado —, e a fase dominante é nomeada com percentual
   - está medido se as 16 threads produzem trabalho útil ou contenção: build sequencial forçado (`THEODB_HNSW_PARALLEL_THRESHOLD` alto) contra paralelo, no mesmo corpus, com o speedup real reportado
@@ -1751,7 +1751,7 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-13 no droplet `g-16vcpu-64gb`, MS MARCO 100K, caso `FTSBm25Performance`. Curva de concorrência (clientes → QPS): 1 → 251,2 · 5 → 1.025,9 · 10 → 1.460,4 · **20 → 1.613,2** · 30 → 1.507,3 · 40 → 1.592,6 · 60 → 1.616,4 · 80 → 1.600,0. A latência p99 cresce de 0,005 s a 0,112 s no mesmo intervalo. Ou seja: **de 20 a 80 clientes o throughput não sobe 1%, e a p99 cresce 4×** — a fila cresce contra capacidade fixa. A p99 serial é 4,8 ms, o que a 16 núcleos daria um teto teórico bem acima de 1.616.
 why_now: o pilar lexical acabou de ganhar seu primeiro número público (`wiki/benchmarks/b040-theodb-fts-msmarco.md`), e o teto de vazão é a métrica que uma instalação real encontra primeiro. **A causa não está medida** e há pelo menos três candidatas que exigem instrumentos diferentes: saturação de CPU real (o trabalho por consulta é simplesmente caro), contenção no índice lexical compartilhado (trava), ou teto do cliente Python do arnês — que a esta escala é hipótese séria, porque o B-035 já declarou que a 50 mil vetores boa parte do custo é round-trip. Publicar a curva sem investigar deixa o leitor concluir o que quiser.
-status: raw
+status: triaged
 dod:
   - a causa é **nomeada e medida**, não inferida: perfil de CPU do backend durante a corrida a 20 e a 80 clientes, com a fração de tempo em espera de trava versus trabalho
   - a hipótese do cliente Python é **descartada ou confirmada** por um gerador de carga que não seja o arnês (por exemplo `pgbench` com a consulta do BM25), no mesmo corpus e máquina
@@ -1953,7 +1953,10 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: o [[B-045]] fechou a lacuna para métricas de **qualidade** — a paridade lexical do `b047` passou a ter p=0,477 sobre 6.980 consultas, com IC 95% de [−0,0011, +0,0025]. Ele **não** fecha para velocidade, e a razão é estrutural: o teste pareado precisa de valor **por consulta**, e QPS não tem — é uma taxa agregada sobre a corrida inteira. As duas maiores diferenças que publicamos são justamente de velocidade e seguem sem teste: **Elasticsearch faz 4,3× o nosso QPS** no lexical (`b047`) e **pgvector faz +16,3%** a recall casado no vetorial (`b035`). O que existe hoje como sustentação são duas corridas concordantes a 1,3% no b035, e **uma única corrida por configuração** no b047.
 why_now: os dois números são grandes o bastante para que ninguém duvide do sinal — mas o projeto acabou de gastar um ciclo inteiro para poder dizer "demonstrado" em vez de "observado" num empate de terceira casa decimal, e continua dizendo "observado" nas duas diferenças que mais aparecem. A assimetria é indefensável: exigimos rigor onde a diferença é minúscula e o dispensamos onde ela é de 4×. Pior, a ausência morde na direção errada quando o número **melhorar**: o [[B-042]] e o [[B-046]] existem para fechar essas diferenças, e sem teste um ganho de 8% será tão inafirmável quanto o déficit atual.
-status: raw
+status: triaged
+status_nota_evidencia: 2026-08-20 — o campo ARGUMENTA a partir de medições que já existem (p=0,477 do
+  [[B-045]]; os 4,3× do b047 e +16,3% do b035) em vez de trazer medição nova. Sustenta `triaged` porque
+  cada fato citado é verificável, e a lacuna que ele afirma é de ausência — que se verifica por ausência.
 dod:
   - o runner passa a aceitar **N corridas por configuração** (N declarado no artefato), e o artefato reporta média, desvio e IC — não um número solto
   - o teste aplicado é **apropriado para amostras independentes** (bootstrap sobre as N corridas, ou t não-pareado), e a escolha é justificada como a do `significance.py` justifica a permutação pareada — nunca aplicar o pareado a taxas agregadas, que é o erro que este item existe para não cometer
@@ -1973,7 +1976,7 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-13 durante o [[B-047]]. `REPLICA_HEALTH_TIMEOUT: Final[str] = "30m"` (sintaxe de duração do Elasticsearch) era passado como `timeout=` ao transporte do `opensearch-py`, que levanta `ValueError: Timeout value connect was 30m, but it must be an int, float or None` **antes de qualquer requisição sair**. `_update_replicas` chama `_wait_till_green` incondicionalmente de `optimize()`, então **toda** corrida de OpenSearch falhava no passo de otimização — não era caminho lento, era caminho morto. Corrigido no nosso fork (`"30m"` → `1800`), e a corrida passou a completar: NDCG 0,7344 sobre 6.980 consultas.
 why_now: o conserto está no fork `usetheoai/VectorDBBench@theodb` **fora do escopo do nosso cliente**, e a Política de Fork (D3) manda diff mínimo com saída declarada. Enquanto ele viver só aqui, duas coisas ruins acontecem ao mesmo tempo: o fork carrega dívida que não é nossa e fica mais difícil de rebasear; e qualquer pessoa que rode o OpenSearch no VectorDBBench upstream continua batendo num caminho morto que já sabemos consertar. É uma correção de uma linha, com reprodução clara e evidência medida — o formato que um PR upstream aceita bem.
-status: raw
+status: triaged
 dod:
   - PR aberto no `zilliztech/VectorDBBench` com **só** essa mudança, corpo trazendo a mensagem de erro exata, a versão do `opensearch-py` e do OpenSearch onde foi observado, e por que o caminho é incondicional
   - o PR **não** menciona o TheoDB nem o nosso cliente: é conserto do cliente deles, e misturar as duas coisas transformaria uma correção óbvia numa discussão de escopo
@@ -2003,7 +2006,7 @@ why_now: o próprio saneamento de hoje **produziu** uma segunda divergência ant
 mesma semana, num arquivo de 50 blocos, é frequência que não se resolve com atenção. E o custo já foi pago:
 li os 9 itens `planned` corretos como registro podre e propus "avançá-los", raciocínio que só se sustentava
 porque eu não sabia distinguir um status errado de um status que eu não tinha entendido.
-status: raw
+status: triaged
 dod:
   - um validador recusa `[x]` com `status` ∈ {raw, triaged, planned}, e `[ ]` com `status: shipped` — provado
     por teste que hoje falharia contra o `BACKLOG.md` de `842347c`
@@ -2036,7 +2039,7 @@ de recall que 109 artefatos de benchmark não pegaram e só apareceu quando a su
 que ali a suíte existia e ninguém a chamava, e aqui ela existe, é chamada, e olha o código tarde demais para
 impedir o merge. **A restrição que criou isto é real e não deve ser desfeita por decreto**: qualquer proposta
 que multiplique execuções do runner contradiz a razão pela qual o gatilho foi removido.
-status: raw
+status: triaged
 dod:
   - existe verificação sobre o que está em `workspace` **antes** do merge, sem aumentar o número de execuções
     da esteira pesada no runner — a restrição de capacidade é premissa, não obstáculo
@@ -2117,7 +2120,7 @@ autoinfligidos pelo `cp -r`; (c) **o pior é de método** — eu rodava os **480
 em **um** módulo, quando `cargo pgrx test pg18 lexical` filtra e roda em segundos. O ciclo lento não é só
 desconfortável: ele empurra para usar gates mais baratos e errados, que foi exatamente o achado R-8 do ciclo
 anterior.
-status: raw
+status: triaged
 dod:
   - o comando de execução preserva mtime (`cp -a`, `rsync -a` ou montagem direta) — provado por
     `grep -c "^   Compiling"` numa segunda corrida consecutiva sem mudança de código, que deve dar **0**
@@ -2174,7 +2177,7 @@ README é justamente a que faz alguém não verificar antes. **Nada aqui foi exe
 a diferença importa: eu não medi se o `ef_search` de fato se perde entre transações nem se os contadores de
 fato se misturam. São predições fundamentadas, não resultados, e publicar a matriz sem medir seria o
 `cobertura-alegada-sem-execucao` que este projeto persegue.
-status: raw
+status: triaged
 dod:
   - PgBouncer sobe nos **três** modos (`session`, `transaction`, `statement`) contra a imagem do produto, e
     cada hipótese acima é confirmada ou refutada **por execução**
@@ -2211,7 +2214,7 @@ performance de completude, exatamente a classe que o [[B-048]] persegue no produ
 recusou as três. E há um agravante de método: o `cycle-acceptance.md` já estabelece que **o veredito é
 computado por script a partir de artefato em disco, nunca asserido pelo agente** — o gate do `/goal` faz o
 oposto, julgando por leitura de prosa.
-status: raw
+status: triaged
 dod:
   - o gate lê **estado do repositório** (commits, artefatos em `knowledge-base/`, status no `BACKLOG.md`) e não
     a janela de conversa — provado por um caso em que o trabalho está commitado e a sessão encerra
@@ -2244,7 +2247,7 @@ está a um `docker pull google/alloydbomni:18` de distância, trazendo o ScaNN e
 `wiki/decisions/0005` já chama o Omni de concorrente direto). O `ADR-0061` exige concorrente na mesma corrida e
 na mesma máquina; foi o que o b035 fez com o pgvector e o b047 com Elasticsearch/OpenSearch. Com o AlloyDB
 **nunca foi feito**, e é a única comparação que o North Star de fato pede.
-status: raw
+status: triaged
 dod:
   - o `scann` AM do Omni e o `theodb_hnsw` correm no MESMO arnês, na MESMA máquina, no MESMO caso — recall × QPS,
     com o ponto de operação casado (a lição da terceira variação do b035)
@@ -2279,7 +2282,12 @@ traz dois achados que valem mais que os speedups: **(a)** ligar o colunar PIOROU
 separado; **(b)** a população automática do store **falha em silêncio** num engine recém-ligado ou após
 restart, porque o recomendador usa histórico de consultas que está vazio: o store fica vazio, todo plano cai
 para heap, e a corrida não mede nada sem erro nem aviso.
-status: raw
+status: triaged
+status_nota_evidencia: 2026-08-20 — campo de evidência MISTO, e a distinção importa. O grosso dele
+  (`Q6 39×`, `311×` a SF100, o crossover) é medição de TERCEIRO sobre produto de terceiro, e
+  `cycle-discover.md § Anti-patterns` proíbe prior art como evidência. O que sustenta este item é a
+  última frase, que é nossa: apenas **43 queries do ClickBench** medidas, a suíte completa nunca, e
+  nenhuma comparação com concorrente. É essa lacuna medida que o torna `triaged` — não os 311×.
 dod:
   - TPC-H nos mesmos moldes: `theodb_columnar` contra heap no MESMO binário, e contra o Omni com engine off/on
     na mesma máquina
@@ -2494,7 +2502,7 @@ why_now: é o [[B-052]] um repositório ao lado, e com um agravante: no `theo-db
 ele não tinha onde olhar. Criei `develop` a partir de `b6a5bfd` para que o PR #1 tivesse alvo — o que resolve o
 sintoma e **não** a estrutura: não há `main`, não há tag de release, não há branch protection, e nada impede o
 próximo push de ir direto para a default.
-status: raw
+status: triaged
 dod:
   - a estrutura que o `ci.yml` já declara existe no remoto: `workspace` → `develop` → `main`
   - `main` e `develop` têm branch protection exigindo PR — sem isso o hook local garante a ORIGEM do trabalho e
@@ -2536,7 +2544,7 @@ why_now: o próprio [[B-060]] deste ecossistema abriu citando este método como 
 *"disciplina exata"*, e construiu o portão do knob por analogia a ele. A analogia estava certa e o exemplar
 estava morto — de modo que o portão que o B-060 entregou é hoje o **único** apply-then-verify que roda no arnês.
 Registrar isto é o que impede a citação de continuar a circular como se o mecanismo existisse.
-status: raw
+status: triaged
 dod:
   - `assert_index_used` tem chamador no caminho de medição do `bench/vector.py`, e um teste falha se o chamador
     for removido
@@ -2613,7 +2621,7 @@ why_now: o [[B-061]] entregou a suíte analítica e o portão de residência sob
 primeiro bullet do seu DoD (shape TPC-H) ficou **declarado e não feito** por esta razão. Sem isto, os números
 do concorrente para Q1/Q5/Q6/Q18 não têm onde ser respondidos com o mesmo shape — e responder com shape nosso
 mede outra coisa e chama de comparação.
-status: raw
+status: triaged
 dod:
   - `AnalyticalTable` (ou sucessor) expressa esquema multi-tabela com chaves, e o oráculo calcula a resposta
     esperada de uma junção sem consultar nenhum dos caminhos medidos
@@ -2635,7 +2643,7 @@ em disco), porque foi exatamente aí que a avaliação independente mediu uma **
 **piorou** a contenção a SF100 (29% contra 16% do row store), contra empate a SF10 (13,5% ≈ 13,6%). É o único
 número do artigo em que o colunar do concorrente sai **pior**, e é portanto o mais interessante de responder —
 e o que não temos instrumento para medir. Ficou declarado e não feito no B-061.
-status: raw
+status: triaged
 dod:
   - existe executor concorrente que roda escrita e scan simultaneamente, com p95/p99 medidos por lado
   - a degradação é reportada como **razão** contra a linha de base isolada, não como número absoluto
@@ -2690,7 +2698,7 @@ access method em vez da biblioteca, e a ressalva decisiva da sua resposta é **e
 carga linha-a-linha, cada iteração dessa medição custa dezenas de minutos, o que na prática empurra o arnês para
 escalas onde a pergunta não é a mesma. O oráculo de recall, que tinha o mesmo tipo de problema (10,5 GB de RSS
 por causa de um `np.tile` de 4 GB), já foi consertado no mesmo dia; a carga é a metade que sobrou.
-status: raw
+status: triaged
 dod:
   - a carga usa `COPY` binário via `cursor.copy()`, e um teste prova que o caminho emitido é `COPY` e não
     `INSERT`
@@ -2715,7 +2723,10 @@ a passagem: o `statement_timeout` único cancelava o build de 1M (consertado —
 `sut_crashed` culpava o motor por recusa do portão (consertado — aborto classificado em três checks) e o
 `over_fetch` não era varrível (consertado). Enquanto medições saírem por fora, defeitos assim não aparecem —
 o script contorna o arnês e o arnês nunca é exercitado no caminho que o usuário final vai percorrer.
-status: raw
+status: triaged
+status_nota_evidencia: 2026-08-20 — campo misto: abre com uma DECISÃO do owner (que não é medição) e
+  fecha com a medição que a sustenta — três medições do dia saíram de scripts fora do arnês, nomeados.
+  É a segunda parte que o torna `triaged`.
 dod:
   - o crossover do colunar sai de `theodb-bench run` com bundle válido, e o número publicado cita o bundle
   - o efeito do `pre_reordering_num_neighbors` do ScaNN é uma varredura registrada, não um script
@@ -2771,7 +2782,7 @@ maioria dos benchmarks vetoriais públicos declara — e ela não está no camin
 instância do mesmo padrão no mesmo dia: o [[B-063]] registrou o `assert_index_used` implementado, citado como
 exemplar e sem chamador. **O padrão é o item**: este repositório constrói componentes excelentes e nem sempre
 os liga.
-status: raw
+status: triaged
 dod:
   - `theodb-bench compare` produz teste pareado, IC e tamanho de efeito quando há repetições suficientes, e
     **recusa** comparar médias quando não há
@@ -2800,7 +2811,7 @@ why_now: um perfil é o contrato de rigor que separa "validação local" de "nú
 leitor externo vai consultar para saber o que aquele número vale. Um flag decorativo nesse contrato é a mesma
 classe do `assert_index_used` ([[B-063]]) e do I5 declarado-e-morto: **o documento afirma um gate que o código
 não executa**.
-status: raw
+status: triaged
 dod:
   - `regression_gate = True` faz a corrida comparar contra baseline e reprovar na ausência de baseline
     comparável (fail-closed, como o I22 exige), ou o flag sai do perfil
@@ -2940,7 +2951,7 @@ why_now: a escala de referência de 20M ([[B-075]]) carrega e consulta (20M linh
 constrói grafo** neste host, e o dimensionamento que eu mesmo publiquei olhava o disco: 1,27 GB/milhão
 dizia que ~200M cabiam. Pela RAM, um host de 16 GB comporta **~5,8M**. Qualquer fronteira recall×QPS a
 20M e qualquer alegação de escala bilhão dependem disto.
-status: raw
+status: triaged
 dod:
   - o build do `theodb_hnsw` respeita um orçamento de memória declarado, ou **falha cedo com mensagem que
     o nomeie** — hoje o operador recebe um servidor reiniciado e nenhuma pista
@@ -3094,3 +3105,15 @@ dod:
   - se ordem de aparição virar achado, ele é `minor`/`heuristic` e a mensagem descreve o que de fato acontece
   - existe teste com um backlog fora de ordem SEM id repetido que prova a ausência do blocker
   - `cycle-backlog.md § Item schema` diz explicitamente se "monotonic" governa alocação ou posição no arquivo
+  - `thin_dod` deixa de disparar em item `killed` (ver segunda instância abaixo)
+
+segunda_instancia: 2026-08-20 — a mesma classe apareceu num segundo achado, e por isso este item cobre a
+  CLASSE e não só o `renumbered`. `check_backlog_structure.py:249` é `if not item.dod`, **sem isenção para
+  estado fechado**. O [[B-028]] está `killed` com `kill_reason` completo — nasceu e morreu no mesmo ciclo — e
+  o achado afirma *"nothing states when this item is done, so it never closes"* sobre um item que já fechou.
+  Diferença que vale registrar: este é rotulado `heuristic`, então o leitor é avisado de que decide; o
+  `renumbered` é `blocker` rotulado `deterministic`, e é por isso que ele é o caso grave. O escopo do conserto
+  é `killed` — um item `shipped` sem DoD continua sendo achado legítimo, porque não há como saber contra o quê
+  ele entregou.
+  **Não consertado aqui de propósito:** escrever um DoD retroativo para um item já fechado seria inventar um
+  critério depois do fato, que é o que `cycle-acceptance.md § Hard gates` chama de graduar um alvo movido.
