@@ -97,32 +97,64 @@ raw ──/discover measures──┬──> triaged ──/to-plan──> plann
 
 ## Domain routing
 
-`domain` is what assigns the item to a specialist. **This table is derived from the project it lives in** — `skills/backlog-init/scripts/detect_domains.py` reads the topology from disk and emits it. What follows is THIS repository's instance (the `theo` ecosystem), not a set every consumer must fit into.
+`domain` is what assigns the item to a specialist. **This table is this project's own**, written by hand on
+2026-08-20 per the decisions in `knowledge-base/grills/registry-ownership-model-grill.md`. It replaced the
+ecosystem-wide table the kit ships, which named 16 repos of which this machine has two — the exact failure the
+paragraph below records for `theokit-sdk`.
 
-A consumer that keeps this table inherits a map of repos it does not have, and gate G1 then refuses every item it files — correctly, since it genuinely cannot tell who owns the work. Measured on `theokit-sdk` (2026-08-18): 88 items with measured `file:line` evidence, all `BLOCKER/unroutable_repo`. Re-derive with `--write` when adopting the kit.
+`skills/backlog-init/scripts/detect_domains.py` emits a table from the directory layout, and the header it
+generates says to edit it by hand when ownership does not follow that layout. **Here it does not**: the unit of
+ownership in this project is the **pillar** (vector, lexical, columnar, …), not the repository. Two repos hold
+eight pillars between them, so a repo-shaped table would send 66 of 80 items to one generic owner.
 
-Verified on disk 2026-08-05 (`find -maxdepth 2 -name .git` + `git -C <repo> rev-list --count HEAD`), not copied from any inventory table.
+A consumer that keeps a table it did not write inherits a map of repos it does not have, and gate G1 then
+refuses every item it files — correctly, since it genuinely cannot tell who owns the work. Measured on
+`theokit-sdk` (2026-08-18): 88 items with measured `file:line` evidence, all `BLOCKER/unroutable_repo`. Measured
+here on 2026-08-20 before this rewrite: `theodb-bench` `UNROUTED` (13 items) and `theo-db` `BROKEN ROUTE` to a
+specialist that was never written.
 
-| Domain | Repos (present on disk) | Specialist |
+**Read the `Repos` column as "which repo routes here by DEFAULT" — not "which repos this pillar touches".**
+The distinction is load-bearing and is the reason this table needs no change to `route_domain.py`. Every repo
+appears in exactly one row, so resolution by repo is deterministic; a pillar with an empty cell is reached
+through the item's own `domain:` field, never by repo. Listing a repo under every pillar it touches would make
+`route()` return whichever row comes first — it takes the first match and does not object — which is the
+ambiguity this shape avoids by construction rather than by code.
+
+| Domain | Repos (default route) | Specialist |
 |---|---|---|
-| `engine-go` | `theo` | `agents/engine-go.md` |
-| `control-plane` | `theo-cloud`, `theo-traefik-mcp` | `agents/control-plane.md` |
-| `data-plane-ts` | `theo-memory`, `theo-rag`, `theo-lens`, `theo-trust`, `theo-skills`, `theo-promptly` | `agents/data-plane-ts.md` |
-| `theo-db` | `theo-db` | `agents/theo-db.md` |
-| `infra-terraform` | `theo-infra-modules`, `theo-infra-live` | `agents/infra-terraform.md` |
-| `contracts-auth` | `theo-contracts` | `agents/contracts-auth.md` |
-| `frontend-dashboard` | `theo-cloud/dashboard` | `agents/frontend-dashboard.md` |
-| `platform-cli` | `theo-cli`, `theo-storage` | `agents/platform-cli.md` |
+| `engine-pgrx` | `theo-db` | `agents/theo-pgrx.md` |
+| `arnes` | `theodb-bench` | `agents/arnes.md` |
+| `vetorial` | — | `agents/theo-recall.md` |
+| `lexical` | — | `agents/theo-lexical.md` |
+| `colunar` | — | `agents/theo-columnar.md` |
+| `hot-path` | — | `agents/theo-hotpath.md` |
+| `ai-surface` | — | `agents/theo-ai-surface.md` |
+| `acervo` | — | `agents/theo-wiki.md` |
+| `metodo` | — | `agents/theo-auditor.md` |
+| `governanca` | — | `agents/governanca.md` |
 
-**One repo, two domains — resolved by path, not by judgement.** `theo-cloud` holds both the Go control plane and the TypeScript dashboard (`theo-cloud/dashboard/package.json`, verified on disk). The `repo` field therefore takes `theo-cloud` for the Go half and `theo-cloud/dashboard` for the UI half. Listing the bare repo under both domains would make routing depend on iteration order — the same item routing differently on different runs, which works until it does not and nothing changed. `scripts/route_domain.py` enforces the one-repo-one-domain invariant, and `tests/test_route_domain.py::test_no_repo_belongs_to_two_domains` is what caught the ambiguity.
+**Why `theo-db` defaults to `engine-pgrx`.** It is the pillar holding the most items filed against that repo
+(25 of the 60). The default is a starting point, not a verdict: `/backlog-item` asks for the `domain:` in the
+grill, and a governance or vector item filed against `theo-db` takes its own pillar there. The default only
+decides what `route_domain theo-db` answers when nobody said otherwise.
 
-### Repos an inventory names but disk does not
+**`theo-concurrency.md` deliberately has no domain.** No item has been filed against it, and inventing a domain
+so an existing agent has a row would put a routing target where the registry has no work — the same emptiness
+gate G1 exists to refuse. The agent stays directly invocable.
 
-`theo-contextify`, `theo-gateway`, `theo-sandboox`, `theokit-app` and `theo-itself` appear in the umbrella's `CLAUDE.md` and have **no checkout** as of 2026-08-05. They are listed here rather than deleted so that the divergence stays visible: an item filed against one of them routes nowhere until the repo is actually cloned, and `/backlog-item` gate G1 refuses it.
+### Repos this scope governs, and the ones it does not
 
-This is exactly why `skills/backlog-init/SKILL.md` mandates reading the inventory from disk. The umbrella's table claims it was "verified 2026-07-28" and states that a repo absent from it does not exist in the folder; a week later, five of its entries had no checkout. Documentation drifts, and a routing table that names a repo nobody has cloned sends work to a specialist who cannot open the code.
+Two, both in the table above and both verified on disk on 2026-08-20 (`git -C <repo> rev-parse HEAD`):
+`theo-db` (the extension and engine) and `theodb-bench` (the measurement harness, a sibling checkout at
+`../theodb-bench`). No item may name anything else — the table is the whole inventory.
 
-`theo-workspace` (a nested clone of the umbrella itself) takes no items.
+The kit's shipped version of this section listed `theo-contextify`, `theo-gateway`, `theo-sandboox`,
+`theokit-app` and `theo-itself` as named-but-not-cloned. **None of them belongs to this project**, and the
+paragraph survived here only because the ecosystem-wide table did. It is removed rather than kept, because a
+routing document that lists repos nobody here will ever file against teaches the reader to skim it.
+
+What the removed paragraph got right, and this project just paid for, is worth keeping: **a routing table
+describes disk, and disk drifts.** Re-verify before trusting it, rather than trusting the date on it.
 
 ## Verdicts
 

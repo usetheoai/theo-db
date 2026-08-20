@@ -83,8 +83,8 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada----) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `raw` | — |
 | [`B-010`](#b-010--maturidade-zero-uso-real-e-é-o-gargalo-de-todos-os-pilares----) | Maturidade: zero uso real, e é o gargalo de todos os pilares | `raw` | — |
 | [`B-012`](#b-012--as-outras-18-falhas-da-suíte-seguem-sem-causa-capturada---x) | As outras 18 falhas da suíte seguem sem causa capturada | `raw` | — |
-| [`B-015`](#b-015--cinco-testes-falham-com-contador-em-zero-instrumentação-ou-o-chunk-skip-não-poda----) | Cinco testes falham com contador em zero: instrumentação ou o chunk-skip não poda? | `triaged` | — |
 | [`B-014`](#b-014--bm25_search-aceita-um-termo-por-chamada-consulta-de-usuário-tem-vários----) | `bm25_search` aceita um termo por chamada; consulta de usuário tem vários | `raw` | — |
+| [`B-015`](#b-015--cinco-testes-falham-com-contador-em-zero-instrumentação-ou-o-chunk-skip-não-poda----) | Cinco testes falham com contador em zero: instrumentação ou o chunk-skip não poda? | `triaged` | — |
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `raw` | — |
 | [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off----) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `raw` | — |
 | [`B-021`](#b-021--o-diagnóstico-não-enxerga-índice-criado-pela-sintaxe-pgvector-e-o-opclass-default-não-serve-----) | O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>` | `triaged` | — |
@@ -103,7 +103,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança----) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `raw` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `raw` | — |
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `raw` | — |
-| [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `raw` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `raw` | — |
 | [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default----) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `raw` | — |
 | [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado----) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `raw` | — |
@@ -113,6 +112,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `raw` | — |
 | [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico----) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `raw` | — |
 | [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem----) | Dois flags de perfil prometem gates que não existem | `raw` | — |
+| [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `raw` | — |
 | [`B-077`](#b-077--a-tabela-de-roteamento-é-a-do-ecossistema-inteiro-e-os-dois-repos-que-existem-não-roteiam----) | A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam | `triaged` | — |
 | [`B-078`](#b-078--seis-módulos-de-teste-do-kit-não-coletam-um-símbolo-removido-levou-as-suítes-junto----) | Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto | `triaged` | — |
 | [`B-079`](#b-079--o-tooling-escrito-em-claude-protege-uma-máquina-até-chegar-ao-repo-do-kit----) | O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit | `triaged` | — |
@@ -125,8 +125,8 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-001`](#b-001--cargo-pgrx-test-não-roda-o-binário-de-teste-morre-em-currentmemorycontext----) | `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext` | `planned` | — |
 | [`B-004`](#b-004--lexical-qualidade-de-recuperação-nunca-foi-medida-contra-um-corpus-público----) | Lexical: qualidade de recuperação nunca foi medida contra um corpus público | `planned` | — |
 | [`B-011`](#b-011--o-vector-join-do-hnsw-perde-exatamente-um-elemento---x) | O vector-join do HNSW perde exatamente um elemento | `planned` | — |
-| [`B-016`](#b-016--os-testes-de-egress-esbarram-na-guarda-ssrf-do-próprio-produto----) | Os testes de egress esbarram na guarda SSRF do próprio produto | `planned` | — |
 | [`B-013`](#b-013--a-suíte-não-roda-no-ci-então-a-próxima-regressão-espera-meses---x) | A suíte não roda no CI, então a próxima regressão espera meses | `planned` | — |
+| [`B-016`](#b-016--os-testes-de-egress-esbarram-na-guarda-ssrf-do-próprio-produto----) | Os testes de egress esbarram na guarda SSRF do próprio produto | `planned` | — |
 | [`B-022`](#b-022--dois-testes-declaram-fragmento-em-pg_testerror---e-o-pgrx-compara-a-mensagem-inteira----) | Dois testes declaram FRAGMENTO em `#[pg_test(error = …)]`, e o pgrx compara a mensagem INTEIRA | `planned` | — |
 | [`B-023`](#b-023--um-teste-de-performance-mora-na-suíte-funcional-e-ele-reprovou-com-avx-51-mais-lento----) | Um teste de PERFORMANCE mora na suíte funcional, e ele reprovou com AVX 51% mais lento | `planned` | — |
 | [`B-025`](#b-025--a-imagem-theodb-builder-não-traz-cargo-clippy-então-o-gate-de-lint-não-roda-fora-do-ci----) | A imagem `theodb-builder` não traz `cargo-clippy`, então o gate de lint não roda fora do CI | `planned` | — |
@@ -153,8 +153,8 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada----) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `planned` | — |
 | [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala----) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
-| [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina----) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `planned` | — |
+| [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 
 ### Closed (4)
 
@@ -399,7 +399,6 @@ por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão 
 >
 > O checkbox já estava `[x]` e o status `raw` — inconsistência que ninguém pegou porque nada compara os dois.
 > A última release é a **v0.158.0**; os PRs #227 e #228 seguem aguardando aprovação humana. `shipped` exige `RELEASED` (`rules/cycle-backlog.md § Status transitions`), então o estado correto é `planned`.
-
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
 domain: acervo
@@ -415,7 +414,6 @@ dod:
   - os itens B-003..B-010 são repriorizados contra esse ADR, e os que não servem a nenhum eixo são mortos
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `objetivo-atratividade-medida`).
-
 ## B-003 — Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido   [ ]
 
 domain: vetorial
@@ -431,7 +429,6 @@ dod:
   - zero regressão de recall a ≤1M (A/B same-data)
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `vetorial-teto-build-100m`).
-
 ## B-004 — Lexical: qualidade de recuperação nunca foi medida contra um corpus público   [ ]
 
 domain: lexical
@@ -474,7 +471,6 @@ dod:
 > O eixo foi depois **muito além do DoD**: o [[B-040]] mediu MS MARCO 100K em arnês público (VectorDBBench),
 > e o [[B-047]] comparou contra Elasticsearch 9.1.2 e OpenSearch 2.17.1 na mesma máquina, com o [[B-045]]
 > aplicando teste pareado sobre 6.980 consultas. A última release é a **v0.158.0**; os PRs #227 e #228 seguem aguardando aprovação humana. `shipped` exige `RELEASED` (`rules/cycle-backlog.md § Status transitions`), então o estado correto é `planned`.
-
 ## B-005 — Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo   [ ]
 
 domain: lexical
@@ -490,7 +486,6 @@ dod:
   - cobertura de teste de `hybrid.rs` proporcional à superfície exposta
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `hibrido-fusao-significativa`).
-
 ## B-006 — Colunar: 43 queries do ClickBench medidas, a suíte completa nunca   [ ]
 
 domain: colunar
@@ -506,7 +501,6 @@ dod:
   - o hardware e o método de reprodução no artefato
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `colunar-clickbench-completo`).
-
 ## B-007 — Grafo: 23 funções expostas e nenhuma medição contra peer algum   [ ]
 
 domain: colunar
@@ -522,7 +516,6 @@ dod:
   - o veredito é publicado mesmo se desfavorável
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `grafo-sem-baseline`).
-
 ## B-008 — Lakehouse: 4 funções expostas, escala e formatos nunca medidos   [ ]
 
 domain: colunar
@@ -538,7 +531,6 @@ dod:
   - os 6 testes existentes efetivamente executados (depende de B-001)
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `lakehouse-escala-formatos`).
-
 ## B-009 — AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada   [ ]
 
 domain: ai-surface
@@ -554,7 +546,6 @@ dod:
   - o comportamento fail-open/fail-closed de cada função está declarado e coberto
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `ai-surface-robustez-egress`).
-
 ## B-010 — Maturidade: zero uso real, e é o gargalo de todos os pilares   [ ]
 
 domain: engine-pgrx
@@ -582,7 +573,6 @@ dod:
 >
 > **DoD 1 e 2 seguem abertos** e dependem do merge + deploy: `running` exige uso sustentado em infraestrutura
 > real, e nenhuma das 4 evidências é uso — todas são verificação.
-
 ## B-011 — O vector-join do HNSW perde exatamente um elemento   [x]
 
 domain: vetorial
@@ -642,7 +632,6 @@ dod:
 > **A divergência tem custo medido:** eu recomendei este item como prioridade número 1 do Tier A hoje, lendo o
 > título ("perde exatamente um elemento") sem abrir o bloco. É a terceira vez neste ciclo que o texto de um item
 > me levou a planejar contra algo que não existia — depois dos `migrate-*` e do [[B-016]].
-
 ## B-012 — As outras 18 falhas da suíte seguem sem causa capturada   [x]
 
 domain: engine-pgrx
@@ -671,7 +660,52 @@ dod:
 >
 > **As 10 abertas herdaram itens novos** (B-015, B-016), porque classificá-las mostrou que são duas famílias
 > distintas e não um resto homogêneo.
+## B-013 — A suíte não roda no CI, então a próxima regressão espera meses   [x]
 
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: none-yet
+why_now: a suíte destravou em 2026-08-10 (B-001) e revelou **20 falhas na primeira execução**, das quais uma (B-011) é um defeito de recall que 109 artefatos de benchmark não pegaram. Nada garante que a próxima regressão apareça antes de meses: a execução hoje depende de alguém lembrar de rodá-la à mão, com uma receita de cinco peças que vive num runbook. Medido: a suíte inteira leva **480 s** — o argumento de custo não existe.
+status: planned
+dod:
+  - a suíte roda em cada push para `workspace`, com a receita do runbook, e o resultado é visível sem abrir log
+  - o número de falhas é um gate declarado (baseline aceito hoje = 20) e **subir esse número reprova**
+  - o tempo de execução é publicado, para que a degradação do próprio CI seja visível
+
+> Registered 2026-08-10 by `/backlog-item` (slug: `suite-no-ci`).
+> Saiu do DoD do B-012 por ser trabalho diferente: B-012 é diagnosticar 18 falhas, este é impedir a próxima.
+
+> **2026-08-13 — `raw` → `planned`. FECHADO pela medição do Tier 1**
+> (`.claude/knowledge-base/discoveries/opportunities/tier1-portao-opportunity.md`).
+>
+> `rust-suite.yml` existe e faz o que o `dod` pedia: roda `cargo pgrx test pg18` num contêiner do
+> `theodb-builder`, e o gate (`:143-160`) reprova quando `failed > BASELINE`. **O baseline é `0` desde
+> 2026-08-12** — "a dívida acabou: 440 passed; 0 failed", diz o comentário no arquivo. Verde na execução de
+> 2026-08-12T11:45 sobre `develop`.
+>
+> O terceiro bullet — distinguir "a suíte não emitiu resultado" de "a suíte reprovou" — está em `:149`, e
+> funciona porque o passo do gate **não** usa `set -e`: o `grep` que não casa devolve string vazia em vez de
+> matar o passo, e a mensagem preparada para esse caso chega a imprimir.
+>
+> **O que este item NÃO cobre, e virou [[B-052]]:** a suíte só roda em `push` para `develop`/`main`. Sobre
+> `workspace`, onde todo trabalho nasce, ela não roda — 73 commits desde a última execução.
+## B-014 — `bm25_search` aceita um termo por chamada; consulta de usuário tem vários   [ ]
+
+domain: lexical
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: none-yet
+why_now: descoberto ao medir a qualidade do pilar contra o BEIR (`wiki/benchmarks/m186-lexical-ndcg-scifact-verdict.md`). Para avaliar uma consulta multi-termo eu tive de **somar os scores por termo do lado de fora** — aproximação grosseira que o BM25 real não faz, porque ele normaliza uma vez sobre a consulta inteira. O pilar entrou no binário default em 2026-08-09 expondo `bm25_search(index, termo, k)`: **nenhuma consulta real de usuário é um termo só.**
+status: raw
+dod:
+  - `bm25_search` aceita uma consulta multi-termo e a pontua numa passagem, sem agregação externa
+  - o nDCG@10 é re-medido nos dois corpora do m186 com a nova assinatura — a expectativa é SUBIR, já que a agregação atual subestima
+  - a assinatura antiga permanece ou é migrada por script de upgrade; quebrar quem já usa não é aceitável
+
+> Registered 2026-08-10 by `/backlog-item` (slug: `bm25-multi-termo`).
 ## B-015 — Cinco testes falham com contador em zero: instrumentação ou o chunk-skip não poda?   [ ]
 
 domain: colunar
@@ -760,7 +794,6 @@ dod:
 > **Experimento decisivo, uma linha:** `SET max_parallel_workers_per_gather = 0` antes da consulta do teste.
 > Se os contadores passarem a reportar > 0, a hipótese está confirmada e o pilar colunar não tem defeito. Se
 > continuarem em zero mesmo em serial, aí sim o chunk-skip não está podando — e é defeito de performance real.
-
 ## B-016 — Os testes de egress esbarram na guarda SSRF do próprio produto   [ ]
 
 domain: ai-surface
@@ -806,55 +839,6 @@ dod:
 > | disjuntor com cobertura sem rede | `m104_breaker_success_closes` registra as K falhas **direto na máquina de estados**; a única URL no corpo é chave do mapa, não destino. Zero rede |
 >
 > A guarda **não** era "exercitada por acidente" quando este item foi escrito — ou deixou de ser desde então.
-
-## B-013 — A suíte não roda no CI, então a próxima regressão espera meses   [x]
-
-domain: engine-pgrx
-repo: theo-db
-suggested_mode: evolve
-source: human
-evidence: none-yet
-why_now: a suíte destravou em 2026-08-10 (B-001) e revelou **20 falhas na primeira execução**, das quais uma (B-011) é um defeito de recall que 109 artefatos de benchmark não pegaram. Nada garante que a próxima regressão apareça antes de meses: a execução hoje depende de alguém lembrar de rodá-la à mão, com uma receita de cinco peças que vive num runbook. Medido: a suíte inteira leva **480 s** — o argumento de custo não existe.
-status: planned
-dod:
-  - a suíte roda em cada push para `workspace`, com a receita do runbook, e o resultado é visível sem abrir log
-  - o número de falhas é um gate declarado (baseline aceito hoje = 20) e **subir esse número reprova**
-  - o tempo de execução é publicado, para que a degradação do próprio CI seja visível
-
-> Registered 2026-08-10 by `/backlog-item` (slug: `suite-no-ci`).
-> Saiu do DoD do B-012 por ser trabalho diferente: B-012 é diagnosticar 18 falhas, este é impedir a próxima.
-
-> **2026-08-13 — `raw` → `planned`. FECHADO pela medição do Tier 1**
-> (`.claude/knowledge-base/discoveries/opportunities/tier1-portao-opportunity.md`).
->
-> `rust-suite.yml` existe e faz o que o `dod` pedia: roda `cargo pgrx test pg18` num contêiner do
-> `theodb-builder`, e o gate (`:143-160`) reprova quando `failed > BASELINE`. **O baseline é `0` desde
-> 2026-08-12** — "a dívida acabou: 440 passed; 0 failed", diz o comentário no arquivo. Verde na execução de
-> 2026-08-12T11:45 sobre `develop`.
->
-> O terceiro bullet — distinguir "a suíte não emitiu resultado" de "a suíte reprovou" — está em `:149`, e
-> funciona porque o passo do gate **não** usa `set -e`: o `grep` que não casa devolve string vazia em vez de
-> matar o passo, e a mensagem preparada para esse caso chega a imprimir.
->
-> **O que este item NÃO cobre, e virou [[B-052]]:** a suíte só roda em `push` para `develop`/`main`. Sobre
-> `workspace`, onde todo trabalho nasce, ela não roda — 73 commits desde a última execução.
-
-## B-014 — `bm25_search` aceita um termo por chamada; consulta de usuário tem vários   [ ]
-
-domain: lexical
-repo: theo-db
-suggested_mode: evolve
-source: human
-evidence: none-yet
-why_now: descoberto ao medir a qualidade do pilar contra o BEIR (`wiki/benchmarks/m186-lexical-ndcg-scifact-verdict.md`). Para avaliar uma consulta multi-termo eu tive de **somar os scores por termo do lado de fora** — aproximação grosseira que o BM25 real não faz, porque ele normaliza uma vez sobre a consulta inteira. O pilar entrou no binário default em 2026-08-09 expondo `bm25_search(index, termo, k)`: **nenhuma consulta real de usuário é um termo só.**
-status: raw
-dod:
-  - `bm25_search` aceita uma consulta multi-termo e a pontua numa passagem, sem agregação externa
-  - o nDCG@10 é re-medido nos dois corpora do m186 com a nova assinatura — a expectativa é SUBIR, já que a agregação atual subestima
-  - a assinatura antiga permanece ou é migrada por script de upgrade; quebrar quem já usa não é aceitável
-
-> Registered 2026-08-10 by `/backlog-item` (slug: `bm25-multi-termo`).
-
 ## B-017 — `running` exige tempo, e nenhuma ação instantânea o produz   [ ]
 
 domain: engine-pgrx
@@ -916,7 +900,6 @@ dod:
 > de sincronização ([#212](https://github.com/usetheoai/theo-rag/pull/212)), honrando a deleção deliberada de
 > `build-publish.yml` que o `develop` havia feito. A ordem inversa — release primeiro, bumps depois — teria
 > evitado o conflito inteiro.
-
 ## B-018 — O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off`   [ ]
 
 domain: vetorial
@@ -959,7 +942,6 @@ dod:
 > capturando o plano (o teste já o imprime na mensagem de falha desde o #167). Um evento de 1-em-11 exige
 > repetição, não outro cenário inventado. Enquanto isso o item fica `raw`, com o espaço de busca
 > reduzido — que é o resultado honesto desta rodada.
-
 ## B-019 — `CREATE INDEX` de HNSW não é idempotente: estoura em vez de ser no-op   [ ]
 
 domain: vetorial
@@ -998,7 +980,6 @@ dod:
 > `/discover`, não falha). A ação real é do lado do consumidor — serializar o `ensureHnswIndex` com
 > `pg_advisory_lock` — mais `B-020` do nosso lado, que encolhe a janela. Corrigir o nosso AM para
 > "resolver" um comportamento do engine seria workaround sobre causa alheia.
-
 ## B-020 — `CREATE INDEX` de HNSW é 93× mais lento que inserir as mesmas linhas   [ ]
 
 domain: vetorial
@@ -1030,7 +1011,6 @@ dod:
 
 > Registered 2026-08-11 by `/discover --mode bug` (slug: `hnsw-build-em-lote-lento`), como achado
 > colateral da medição do `B-019`.
-
 ## B-021 — O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>`   [ ]
 
 domain: vetorial
@@ -1070,7 +1050,6 @@ dod:
 > `cargo check --lib`**, que não compila `#[cfg(test)]`. Eu havia escrito isso nesta mesma sessão, ao
 > justificar por que a compilação limpa não cobria um teste novo — e mesmo assim declarei conclusão sobre
 > uma verificação que não alcançava o que eu tinha escrito.
-
 ## B-022 — Dois testes declaram FRAGMENTO em `#[pg_test(error = …)]`, e o pgrx compara a mensagem INTEIRA   [ ]
 
 domain: engine-pgrx
@@ -1103,7 +1082,6 @@ dod:
 >
 > Nenhum foi afrouxado para `should_panic` genérico — o pgrx compara por igualdade, então passar É a prova de
 > que a mensagem declarada casa inteira. Os outros dois bullets já constavam riscados no bloco.
-
 ## B-023 — Um teste de PERFORMANCE mora na suíte funcional, e ele reprovou com AVX 51% mais lento   [ ]
 
 domain: hot-path
@@ -1169,7 +1147,6 @@ dod:
 > O que ficou na suíte é o que é determinístico e pertence: a **correção** do despacho, com os dois branches
 > comparados contra o oráculo escalar em 8 dimensões. Só a medição de **velocidade** saiu, e lá o `criterion`
 > reporta variância em vez de uma asserção sobre o relógio.
-
 ## B-024 — O autotune recomendou `ef_search` sobre contadores em ZERO, e ninguém mediu o alcance   [ ]
 
 domain: vetorial
@@ -1188,7 +1165,6 @@ dod:
 
 > Registered 2026-08-11 by `/review` (slug: `autotune-sobre-zeros`), como followup HIGH obrigatório do
 > verdict `READY_TO_MERGE_WITH_FOLLOWUPS` — `.claude/knowledge-base/reviews/b015-review-2026-08-11.md`.
-
 ## B-025 — A imagem `theodb-builder` não traz `cargo-clippy`, então o gate de lint não roda fora do CI   [ ]
 
 domain: engine-pgrx
@@ -1242,7 +1218,6 @@ dod:
 > **Medido hoje, dentro da imagem**: `cargo clippy --version` → `clippy 0.1.97`, `cargo fmt --version` →
 > `rustfmt 1.9.0-stable`. Os dois respondem; o falso "está tudo certo" que o bloco documenta (o
 > `grep -c "^Diff in"` imprimindo 0 porque o comando falhou) não se reproduz mais. A última release é a **v0.158.0**; os PRs #227 e #228 seguem aguardando aprovação humana. `shipped` exige `RELEASED` (`rules/cycle-backlog.md § Status transitions`), então o estado correto é `planned`.
-
 ## B-026 — Resíduo do SymQG: função morta com null-deref latente, e o gate de clippy está vermelho por ela   [ ]
 
 domain: engine-pgrx
@@ -1280,7 +1255,6 @@ dod:
 > **A lição operacional:** um gate que reprova em cascata (um erro por vez) esconde a dimensão do
 > problema. Se o gate estivesse verde antes do M176, o primeiro resíduo teria aparecido sozinho, na hora,
 > em vez de quatro deles emergirem meses depois durante um release não relacionado.
-
 ## B-027 — Run cancelado deixa o contêiner `suite` órfão, e o run seguinte reprova sem rodar um teste   [ ]
 
 domain: engine-pgrx
@@ -1310,7 +1284,6 @@ dod:
 > 3. o gate distingue "não emitiu resultado" de "reprovou" (`:149`), verificado hoje na leitura do arquivo.
 >
 > `planned` e não `shipped` porque a última release é a **v0.158.0** e este conserto não está nela.
-
 ## B-028 — O harness de upgrade declarou "TODOS OS CENÁRIOS PASSARAM" com um cenário PULADO   [x]
 
 domain: engine-pgrx
@@ -1326,7 +1299,6 @@ kill_reason: corrigido no mesmo ciclo em que foi descoberto. (a) o path passa a 
 > review do B-021. O item nasce e morre no mesmo ciclo, mas fica registrado: o valor está no PADRÃO, não
 > no conserto — é a terceira leitura falsa deste harness, e as três têm a mesma forma (um resumo que
 > afirma mais do que a execução sustenta).
-
 ## B-029 — A esteira invoca arquivos que não existem mais, e o produto ficou sem nenhum portão de verificação   [ ]
 
 domain: engine-pgrx
@@ -1363,7 +1335,6 @@ dod:
 >
 > **O que o produto NÃO recuperou**, e é consequência do [[B-031]], não deste ciclo: o oráculo do caminho de
 > atualização da própria extensão. A cadeia foi removida por ADR; não há o que testar.
-
 ## B-030 — Um produto, três extensões: o umbrella `theodb` é resíduo de uma migração que terminou   [ ]
 
 domain: engine-pgrx
@@ -1442,7 +1413,6 @@ dod:
 > nova:** `cargo-udeps` foi instalado no mesmo dia e mede outra coisa (dependência não usada). Este saiu de
 > ler os 1.460 avisos que toda build já imprimia. Fica registrado separado porque 2.872 ocorrências não são
 > trabalho de um ciclo, e embuti-las neste diluiria as duas coisas.
-
 ## B-033 — O tipo `vector` own-code não tem `=`, e cinco padrões de app pgvector quebram   [ ]
 
 domain: engine-pgrx
@@ -1519,7 +1489,6 @@ dod:
 > **2026-08-12 — triaged.** Oportunidade em `.claude/knowledge-base/discoveries/opportunities/b035-vectordbbench-client-opportunity.md`. A medição confirmou que o formato de fio binário do nosso `vector` é compatível com o `pgvector-python` (`COPY FORMAT BINARY` carregou 5.000 linhas) e encontrou **três lacunas do produto**, agora itens próprios: [[B-036]] (`m`/`ef_construction`), [[B-037]] (AM `ivfflat`), [[B-038]] (`halfvec`/`sparsevec`).
 
 > **2026-08-12 — implementado, não shipped.** Ciclo completo (DISCOVER→PLAN→IMPLEMENT→CODE-QUALITY→REVIEW→RELEASE). Cliente em `usetheoai/VectorDBBench@theodb` (3 arquivos upstream tocados, +19 linhas, núcleo intocado, zero dependências novas). Corrida real num droplet `g-16vcpu-64gb` (IP 164.90.141.31, destruído): **a recall casado (~0,983) o pgvector faz +16,3% de QPS e constrói o índice 2,7× mais rápido** — `wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md`. Review `READY_TO_MERGE`; release `PR_OPEN_AWAITING_APPROVAL` (PR #228). `shipped` só depois do merge.
-
 ## B-036 — O `hnsw` alias não aceita `m` nem `ef_construction`: a sintaxe de build do pgvector falha alto   [ ]
 
 domain: engine-pgrx
@@ -1570,7 +1539,6 @@ dod:
 >
 > A entrega em si não mudou: `CREATE INDEX … WITH (m=32, ef_construction=200)` funciona e é honrado,
 > medido no produto (`theodb:b036`), 478 testes verdes. O que muda é o rótulo do estado.
-
 ## B-037 — O AM `ivfflat` não existe: metade do shim pgvector está ausente   [ ]
 
 domain: engine-pgrx
@@ -1588,7 +1556,6 @@ dod:
 
 > Registrado 2026-08-12 pela medição do B-035. **Custo estimado por comparação com o que já existe**, não por
 > impressão: o alias `hnsw` custou ~20 linhas de SQL no shim. Este deve custar o mesmo.
-
 ## B-038 — `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta   [ ]
 
 domain: engine-pgrx
@@ -1605,10 +1572,9 @@ dod:
 
 > Registrado 2026-08-12 pela medição do B-035. Escrito com a prioridade relativa dita, não escondida: dos
 > três achados do ciclo, este é o que menos dói e o mais caro.
-
 ## B-039 — O detector de `cargo-udeps` roda no host, onde o ambiente de build não existe   [ ]
 
-domain: theo-db
+domain: governanca
 repo: theo-db
 suggested_mode: bug
 source: discover-evolve
@@ -1645,7 +1611,6 @@ dod:
 >    montada `:ro` (verificado: o contêiner não escreve na árvore do host).
 >
 > 27 testes no detector (era 21), cobrindo os quatro modos de falha distintos.
-
 ## B-040 — Cliente FTS no VectorDBBench: validar o pilar lexical no mesmo arnês, com a mesma disciplina   [ ]
 
 domain: engine-pgrx
@@ -1699,8 +1664,6 @@ dod:
 > porque `k1`/`b` não são configuráveis) e o cliente recusa alto quem os peça. O que **falta** é a comparação:
 > nenhum outro motor foi rodado, deliberadamente — citar números publicados do leaderboard compararia
 > máquinas e datas diferentes. Rodar Elastic/OpenSearch no mesmo arnês é o trabalho seguinte.
-
-
 ## B-041 — `bm25_search` sobre índice nunca construído devolve zero linhas, sem erro   [ ]
 
 domain: lexical
@@ -1753,7 +1716,6 @@ dod:
 > Suíte: **480 passed; 0 failed**. Review:
 > `.claude/knowledge-base/reviews/b041-b048-silencio-review-2026-08-13.md` (`READY_TO_MERGE`).
 > `planned` e não `shipped` porque a última release é a **v0.158.0** e este conserto não está nela.
-
 ## B-042 — O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior   [ ]
 
 domain: engine-pgrx
@@ -1781,8 +1743,6 @@ dod:
 > dos dois lados) ou quando houver um ADR explicando por que a paridade não é alcançável nesta arquitetura —
 > com a mesma disciplina do `ADR-0035`, que declarou não-alcançável a superioridade sobre o ScaNN por
 > medição, não por desânimo.
-
-
 ## B-043 — O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais   [ ]
 
 domain: lexical
@@ -1801,7 +1761,6 @@ dod:
 
 > Registrado 2026-08-13. **A curva é o achado; a causa é a pergunta.** Não afirmo trava — a saturação também
 > é compatível com trabalho genuinamente caro por consulta, e distinguir as duas exige perfil, não leitura.
-
 ## B-044 — Implementar stemming no analisador lexical (a decisão está tomada)   [ ]
 
 domain: lexical
@@ -1838,11 +1797,9 @@ dod:
 >
 > **A lição do ciclo não é o número.** Minha primeira leitura dizia −31,8% de QPS, medida contra uma corrida
 > anterior feita noutro modelo de CPU. Refeita na mesma máquina, é +10,9%.
-
-
 ## B-045 — Nenhuma comparação que publicamos tem teste de significância, e tínhamos o instrumento   [ ]
 
-domain: theo-db
+domain: metodo
 repo: theo-db
 suggested_mode: evolve
 source: discover-evolve
@@ -1874,8 +1831,6 @@ dod:
 > por consulta do lado sem stemming não foram preservados.
 >
 > **2026-08-13 — a promessa virou item.** O "significância para velocidade é item próprio" citado acima e no artefato do b047 agora é o [[B-049]]. Ficou três turnos como menção sem registro, que é a falha que o `cycle-maintenance` documenta: mencionar sem filar dá falsa sensação de cobertura.
-
-
 ## B-046 — Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3%   [ ]
 
 domain: engine-pgrx
@@ -1906,10 +1861,9 @@ dod:
 > `shared hit=139`, pgvector `182` num corpus de brinquedo), e do nosso lado ainda há `candidates_seen`, que o
 > pgvector não tem; (3) **recall e páginas-por-consulta não dependem da máquina** — só o QPS depende. A
 > decomposição roda no host; o droplet fica para o número final do artefato.
-
 ## B-047 — Rodar os motores concorrentes nos benchmarks oficiais, na mesma máquina, como prática recorrente   [ ]
 
-domain: theo-db
+domain: metodo
 repo: theo-db
 suggested_mode: evolve
 source: human
@@ -1941,8 +1895,6 @@ dod:
 > upstream), e o `elasticsearch-py` não-pinado contra servidor 8.15 produz um 400 opaco.
 >
 > **2026-08-13 — o conserto do OpenSearch virou item.** O "candidato a PR upstream" citado acima agora é o [[B-050]], com escopo estreito de propósito: é o PR de uma linha do cliente deles, não o do nosso cliente FTS.
-
-
 ## B-048 — A superfície responde onde deveria recusar: três instâncias novas, e a classe já foi consertada três vezes   [ ]
 
 domain: lexical
@@ -1993,10 +1945,9 @@ dod:
 >
 > Zero remanescentes sem etiqueta. Mecanizar a classe segue item próprio — consertar seis instâncias e
 > declará-la morta seria a sétima promessa.
-
 ## B-049 — As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas   [ ]
 
-domain: theo-db
+domain: metodo
 repo: theo-db
 suggested_mode: evolve
 source: discover-evolve
@@ -2014,10 +1965,9 @@ dod:
 > filado** — o que é a mesma falha de registro que o `cycle-maintenance` documenta: mencionar sem filar dá
 > falsa sensação de cobertura. O custo estimado por medição: cada corrida do caso FTS levou ~7 min no droplet
 > depois do dataset em cache, então N=5 por configuração são ~35 min por motor.
-
 ## B-050 — O conserto do cliente OpenSearch é do upstream, e o fork tem saída declarada   [ ]
 
-domain: theo-db
+domain: metodo
 repo: theo-db
 suggested_mode: evolve
 source: discover-evolve
@@ -2036,10 +1986,9 @@ dod:
 > workflow de publish) — condição que este item não tenta contornar.
 
 Próximo id livre: **`B-051`**. Ids são monotônicos e nunca reusados.
-
 ## B-051 — Nada compara o checkbox com o `status`, e a divergência sobreviveu meses   [ ]
 
-domain: theo-db
+domain: governanca
 repo: theo-db
 suggested_mode: review
 source: human
@@ -2068,7 +2017,6 @@ dod:
 > vale exatamente porque o registro é o que decide onde o esforço vai. Um backlog em que dois campos podem
 > discordar em silêncio é um backlog que precisa ser lido inteiro para ser confiável, o que é o mesmo que
 > não ser confiável.
-
 ## B-052 — `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar   [ ]
 
 domain: engine-pgrx
@@ -2100,7 +2048,6 @@ dod:
 > um palpite: nenhum dos cinco itens do Tier 1 nomeava esta janela, e ela é o que faz os outros quatro
 > valerem menos do que parecem — um portão que só olha depois do merge protege `develop` de si mesmo, não o
 > trabalho de quem o produz.
-
 ## B-053 — O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte   [ ]
 
 domain: hot-path
@@ -2151,10 +2098,9 @@ dod:
 > para `vec` e passou a apontar para `kernels`. **Um gate mais barato que o gate que importa dá uma confiança
 > que ele não sustenta** — que é, literalmente, o assunto deste ciclo. O gate certo é
 > `cargo check --features pg18,pg_test --all-targets`, e ele fecha em 2m32s contra os ~6 min da suíte.
-
 ## B-054 — Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r`   [ ]
 
-domain: theo-db
+domain: governanca
 repo: theo-db
 suggested_mode: evolve
 source: human
@@ -2200,7 +2146,6 @@ dod:
 >
 > Publicar a recomendação sem este número teria sido conselho por intuição, que é a classe que este projeto
 > persegue em toda parte.
-
 ## B-055 — Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança"   [ ]
 
 domain: engine-pgrx
@@ -2244,10 +2189,9 @@ dod:
 
 > Registrado 2026-08-13 a partir de pergunta direta do owner ("nosso banco de dados suporta PgBouncer?"). A
 > pergunta não tinha resposta no projeto — e a ausência é o achado tanto quanto a análise.
-
 ## B-056 — O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito   [ ]
 
-domain: theo-db
+domain: governanca
 repo: theo-db
 suggested_mode: review
 source: human
@@ -2281,7 +2225,6 @@ dod:
 > item sobre o ferramental do ciclo, não sobre o produto** — e vale porque o ferramental decide o que o
 > trabalho parece ser. Um gate que pede para refazer o feito não protege qualidade: ele treina a produzir
 > aparência de execução, que é a única coisa que ele sabe ler.
-
 ## B-057 — O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL   [ ]
 
 domain: vetorial
@@ -2316,35 +2259,6 @@ dod:
 > Registrado 2026-08-16. **Não é reabertura do ADR-0002 nem contestação do M73** — a vantagem algorítmica do
 > AH-LUT é real e está medida. É a observação de que a comparação usou um substituto mais favorável ao
 > concorrente do que o produto dele, e que o produto agora é obtenível.
-
-## B-076 — O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco   [ ]
-
-domain: theo-db
-repo: theo-db
-suggested_mode: bug
-source: discover-live-test
-evidence: medido em 2026-08-17 no droplet efêmero `138.197.22.192` (s-8vcpu-16gb). `CREATE INDEX … USING
-theodb_hnsw … WITH (m=16)` sobre 20 000 000 de vetores foi **morto pelo OOM killer**:
-`Out of memory: Killed process 209232 (postgres) … anon-rss:10033724kB`, com o `DETAIL` do PostgreSQL
-nomeando exatamente esse `CREATE INDEX`. Curva medida isoladamente, `maintenance_work_mem=64MB`:
-**250k → 606 MB** de pico de `VmRSS` do backend / 84 s / índice 181 MB; **1M → 1871 MB** / 422 s /
-índice 724 MB. Ajuste: **~184 MB fixos + ~1687 MB por milhão**; projeção a 20M **~34 GB** contra 16 GB
-do host. O índice em **disco** é exatamente linear (4× linhas → 4× tamanho), então o problema é o build.
-Causa-raiz localizada: `am/build.rs:403` chama `collect_corpus` **incondicionalmente** no `ambuild_hnsw`,
-e a rota de memória limitada do M96 (`build_stream.rs::should_stream`, que já lê o GUC certo) está atrás
-do gate `pq_subspaces > 0 && separate_storage` — opções do **IVFFlat**. Issue: **#230**.
-why_now: a escala de referência de 20M ([[B-075]]) carrega e consulta (20M linhas, 11 GB) mas **não
-constrói grafo** neste host, e o dimensionamento que eu mesmo publiquei olhava o disco: 1,27 GB/milhão
-dizia que ~200M cabiam. Pela RAM, um host de 16 GB comporta **~5,8M**. Qualquer fronteira recall×QPS a
-20M e qualquer alegação de escala bilhão dependem disto.
-status: raw
-dod:
-  - o build do `theodb_hnsw` respeita um orçamento de memória declarado, ou **falha cedo com mensagem que
-    o nomeie** — hoje o operador recebe um servidor reiniciado e nenhuma pista
-  - a curva de memória é re-medida depois do fix nos mesmos 3 pontos, pelo `theodb-bench`
-  - a relação com [[B-058]] e a issue #221 é resolvida por escrito: dois componentes ignorando o mesmo
-    orçamento é ausência de contrato de memória, não dois bugs isolados
-
 ## B-058 — O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos   [ ]
 
 domain: colunar
@@ -2398,10 +2312,9 @@ parcial_2026-08-17: **dois dos quatro critérios já têm resposta medida, por c
 
 > Registrado 2026-08-16 a partir de avaliação independente. Os números dela são o alvo mais concreto que o
 > pilar colunar já teve.
-
 ## B-059 — O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia   [ ]
 
-domain: theo-db
+domain: arnes
 repo: theodb-bench
 suggested_mode: evolve
 source: human
@@ -2444,10 +2357,9 @@ dod:
   - a versão medida é lida do servidor e registrada no bundle, não inferida da tag: o artigo mediu que a imagem
     do Docker Hub ficou em PG 17 enquanto os pacotes Linux já estavam em 18
   - uma corrida vetorial `theodb` × `alloydbomni` × `pgvector` na mesma máquina produz bundle válido
-
 ## B-060 — O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou   [ ]
 
-domain: theo-db
+domain: arnes
 repo: theodb-bench
 suggested_mode: review
 source: human
@@ -2514,7 +2426,6 @@ dod:
 > `workspace` era a branch default — todo push ia direto para a default, sem gate de PR, embora o `ci.yml` já
 > declare `branches: [main, develop, workspace]` e `pull_request`. Criei `develop` a partir de `b6a5bfd` para
 > que o PR tivesse alvo.
-
 ## B-061 — Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado   [ ]
 
 domain: colunar
@@ -2568,10 +2479,9 @@ dod:
 > independente de AlloyDB. **O B-060 é o mais valioso dos três e o menos óbvio:** os outros dois acrescentam
 > alcance ao arnês, e ele conserta uma lacuna que faria o arnês publicar número errado com aparência de certo —
 > para qualquer motor, inclusive o nosso.
-
 ## B-062 — O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default   [ ]
 
-domain: theo-db
+domain: arnes
 repo: theodb-bench
 suggested_mode: review
 source: discover-review
@@ -2595,10 +2505,9 @@ dod:
 
 > Registrado 2026-08-16 pelo RELEASE do B-060. **É item de infraestrutura de um repo irmão**, e vale porque a
 > ausência foi descoberta ao tentar cumprir o passo mais básico do ciclo: abrir um PR.
-
 ## B-063 — O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado   [ ]
 
-domain: theo-db
+domain: arnes
 repo: theodb-bench
 suggested_mode: review
 source: discover-review
@@ -2637,10 +2546,9 @@ dod:
     duas, nunca um docstring afirmando a primeira enquanto o código faz a segunda
   - existe detector de código morto no CI do repositório: o projeto não tem nenhum hoje, e é por isso que um
     método sem chamador sobreviveu sendo citado como exemplar
-
 ## B-064 — O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB   [ ]
 
-domain: theo-db
+domain: arnes
 repo: theodb-bench
 suggested_mode: bug
 source: discover-review
@@ -2688,7 +2596,6 @@ dod:
   - a superfície de compatibilidade (`USING hnsw` via shim `vector`) fica declarada como eixo **separado** e não
     medida por default: ela é a mesma engine pelo mesmo handler, então medi-la como se fosse a nativa não
     acrescenta informação e esconde qual superfície a corrida exercitou
-
 ## B-065 — O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela   [ ]
 
 domain: colunar
@@ -2713,7 +2620,6 @@ dod:
   - Q1, Q6 e Q18 do TPC-H registradas como suíte, com o mesmo shape que o concorrente publicou
   - Q5 registrada ou explicitamente declarada fora de escopo com a razão — seis junções não são um detalhe
   - o gerador de dados é semeado e reprodutível, e o fator de escala aparece no rótulo do bundle
-
 ## B-066 — A contenção escrita×scan não é medível: não existe arnês concorrente   [ ]
 
 domain: colunar
@@ -2736,7 +2642,6 @@ dod:
   - os dois regimes são distinguidos no artefato: dado residente em memória e dado que excede o cache
   - o arnês recusa reportar contenção quando a linha de base isolada não foi medida na mesma sessão — comparar
     contra baseline de outra corrida é a classe de erro que o [[B-060]] e o [[B-063]] documentam
-
 ## B-067 — O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada   [ ]
 
 domain: colunar
@@ -2765,10 +2670,9 @@ dod:
   - o artefato do benchmark carrega os campos da família de workload que rodou, sem campos vetoriais vazios
     fingindo forma
   - `theodb-bench list` mostra a suíte analítica ao lado das vetoriais
-
 ## B-068 — A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala   [ ]
 
-domain: theo-db
+domain: arnes
 repo: theodb-bench
 suggested_mode: evolve
 source: discover-evolve
@@ -2794,10 +2698,9 @@ dod:
   - o número de linhas carregadas continua verificado contra o esperado (`LoadOutcome.complete`) — velocidade
     não pode custar a prova de que tudo chegou
   - a constante `COPY_BATCH` passa a descrever o que o código faz, ou desaparece
-
 ## B-069 — Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts   [ ]
 
-domain: theo-db
+domain: arnes
 repo: theodb-bench
 suggested_mode: review
 source: human
@@ -2819,10 +2722,9 @@ dod:
   - existe um teste ou gate que detecta número citado em documento sem bundle correspondente — a alegação e o
     artefato deixam de poder divergir
   - `docs/` do `theodb-bench` documenta que medição fora do arnês não é publicável, com a razão
-
 ## B-070 — Carga de 1M por `executemany` domina o tempo de toda corrida em escala   [ ]
 
-domain: theo-db
+domain: arnes
 repo: theodb-bench
 suggested_mode: evolve
 source: discover-evolve
@@ -2841,10 +2743,9 @@ dod:
   - o tempo de carga de 1M × 128 é medido antes e depois na mesma máquina, e a razão entra no CHANGELOG
   - `LoadOutcome.complete` continua provando que todas as linhas chegaram — velocidade não substitui a prova
   - a constante `COPY_BATCH` descreve o que o código faz, ou some
-
 ## B-071 — Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico   [ ]
 
-domain: theo-db
+domain: arnes
 repo: theodb-bench
 suggested_mode: review
 source: discover-review
@@ -2878,10 +2779,9 @@ dod:
   - a detecção de regressão roda nos perfis que a declaram (ver [[B-072]])
   - existe teste ou gate que reprova quando um módulo de `analysis/` ou `bench/` fica sem chamador em `src/` —
     o padrão não pode reaparecer em silêncio
-
 ## B-072 — Dois flags de perfil prometem gates que não existem   [ ]
 
-domain: theo-db
+domain: arnes
 repo: theodb-bench
 suggested_mode: review
 source: discover-review
@@ -2907,10 +2807,9 @@ dod:
   - `frozen_methodology = True` recusa a corrida quando a metodologia divergiu do que a baseline usou, ou o
     flag sai
   - um teste enumera os campos de `Profile` e exige que cada um tenha consumidor fora de `profiles.py`
-
 ## B-073 — Oito dos catorze pilares declarados não têm adapter nenhum   [ ]
 
-domain: theo-db
+domain: arnes
 repo: theodb-bench
 suggested_mode: evolve
 source: discover-review
@@ -2957,10 +2856,39 @@ dod:
     vocabulário
   - cada pilar que ganhar adapter ganha junto o portão equivalente ao de residência do colunar: a capability
     só é declarada quando o caminho é provado, nunca quando é escrito
+## B-074 — O teste pareado cancela variância de query, e não cancela deriva temporal da máquina   [ ]
 
+domain: arnes
+repo: theodb-bench
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-17, logo depois de o teste pareado passar a rodar ([[B-071]]). A comparação
+`theodb × alloydbomni` a recall casado devolveu p = 0,0001, n = 500, IC 95% [−0,753, −0,624] ms, dz = −0,94 e
+**448 de 500 queries** a favor do `theodb` — sinal nítido. **Mas as duas corridas foram sequenciais**, com
+~4 minutos de intervalo, e o pareamento remove a variância de **dificuldade de query**, não a de **estado da
+máquina**.
+Que a segunda é grande está medido no mesmo dia: a mesma configuração `pg_scann probes=20` deu **476,5**,
+**385,0** e **402,8** QPS em três corridas (24% de amplitude), e `scann leaves=20` deu **438,8** e **299,6**
+(46%). Se a máquina estava mais carregada durante uma das corridas do par, o teste pareado atribui essa
+diferença ao motor com a mesma confiança com que atribuiria uma diferença real — e o IC estreito **não**
+protege disso, porque ele mede a dispersão entre queries, não entre corridas.
+why_now: o teste pareado é o que torna o arnês publicável (I14), e ele acabou de produzir seu primeiro veredito
+com p = 0,0001. Um veredito forte obtido sob um confundidor não controlado é mais perigoso que nenhum veredito:
+ele convida a citação. O SOTA para isto é **intercalar** — a mesma query respondida pelos dois sistemas em
+sequência imediata, alternando a ordem para não favorecer o aquecimento de nenhum lado.
+status: planned
+closed: FECHADO 2026-08-17: `theodb-bench head2head` intercala query a query com ordem alternada. **Mudou um veredito**: o pareado sequencial dava theodb com dz=−0,94 e 448/500; intercalado, alloydbomni vence o ponto médio. Recusa par com gap de recall > 0,01 e declara quando o vencedor operava em recall menor.
+dod:
+  - existe modo de corrida intercalada: um executor que percorre a query `i` nos dois sistemas antes de passar
+    para a `i+1`, com a ordem alternada por query
+  - o artefato registra se o par veio de corridas sequenciais ou intercaladas, e o veredito **diz qual** — um
+    leitor não pode ter de adivinhar qual confundidor está em jogo
+  - a mesma comparação é rodada nos dois modos na mesma máquina, e a diferença entre os vereditos é medida:
+    se intercalar não muda o resultado, isso é um honest-negative que vale registrar
+  - enquanto o modo intercalado não existir, o rodapé do veredito pareado declara o limite em vez de omiti-lo
 ## B-075 — A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio   [ ]
 
-domain: theo-db
+domain: arnes
 repo: theodb-bench
 suggested_mode: evolve
 source: human
@@ -2992,41 +2920,36 @@ dod:
   - existe um bundle de `vector/bigann20m/hnsw` com recall real contra oráculo computado, ou o custo do build
     registrado como limite medido quando ele não fechar
   - nenhum número de 20M é publicado sem sair de `theodb-bench run` (invariante 11 do arnês)
+## B-076 — O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco   [ ]
 
-## B-074 — O teste pareado cancela variância de query, e não cancela deriva temporal da máquina   [ ]
-
-domain: theo-db
-repo: theodb-bench
-suggested_mode: evolve
-source: discover-evolve
-evidence: medido em 2026-08-17, logo depois de o teste pareado passar a rodar ([[B-071]]). A comparação
-`theodb × alloydbomni` a recall casado devolveu p = 0,0001, n = 500, IC 95% [−0,753, −0,624] ms, dz = −0,94 e
-**448 de 500 queries** a favor do `theodb` — sinal nítido. **Mas as duas corridas foram sequenciais**, com
-~4 minutos de intervalo, e o pareamento remove a variância de **dificuldade de query**, não a de **estado da
-máquina**.
-Que a segunda é grande está medido no mesmo dia: a mesma configuração `pg_scann probes=20` deu **476,5**,
-**385,0** e **402,8** QPS em três corridas (24% de amplitude), e `scann leaves=20` deu **438,8** e **299,6**
-(46%). Se a máquina estava mais carregada durante uma das corridas do par, o teste pareado atribui essa
-diferença ao motor com a mesma confiança com que atribuiria uma diferença real — e o IC estreito **não**
-protege disso, porque ele mede a dispersão entre queries, não entre corridas.
-why_now: o teste pareado é o que torna o arnês publicável (I14), e ele acabou de produzir seu primeiro veredito
-com p = 0,0001. Um veredito forte obtido sob um confundidor não controlado é mais perigoso que nenhum veredito:
-ele convida a citação. O SOTA para isto é **intercalar** — a mesma query respondida pelos dois sistemas em
-sequência imediata, alternando a ordem para não favorecer o aquecimento de nenhum lado.
-status: planned
-closed: FECHADO 2026-08-17: `theodb-bench head2head` intercala query a query com ordem alternada. **Mudou um veredito**: o pareado sequencial dava theodb com dz=−0,94 e 448/500; intercalado, alloydbomni vence o ponto médio. Recusa par com gap de recall > 0,01 e declara quando o vencedor operava em recall menor.
+domain: vetorial
+repo: theo-db
+suggested_mode: bug
+source: discover-live-test
+evidence: medido em 2026-08-17 no droplet efêmero `138.197.22.192` (s-8vcpu-16gb). `CREATE INDEX … USING
+theodb_hnsw … WITH (m=16)` sobre 20 000 000 de vetores foi **morto pelo OOM killer**:
+`Out of memory: Killed process 209232 (postgres) … anon-rss:10033724kB`, com o `DETAIL` do PostgreSQL
+nomeando exatamente esse `CREATE INDEX`. Curva medida isoladamente, `maintenance_work_mem=64MB`:
+**250k → 606 MB** de pico de `VmRSS` do backend / 84 s / índice 181 MB; **1M → 1871 MB** / 422 s /
+índice 724 MB. Ajuste: **~184 MB fixos + ~1687 MB por milhão**; projeção a 20M **~34 GB** contra 16 GB
+do host. O índice em **disco** é exatamente linear (4× linhas → 4× tamanho), então o problema é o build.
+Causa-raiz localizada: `am/build.rs:403` chama `collect_corpus` **incondicionalmente** no `ambuild_hnsw`,
+e a rota de memória limitada do M96 (`build_stream.rs::should_stream`, que já lê o GUC certo) está atrás
+do gate `pq_subspaces > 0 && separate_storage` — opções do **IVFFlat**. Issue: **#230**.
+why_now: a escala de referência de 20M ([[B-075]]) carrega e consulta (20M linhas, 11 GB) mas **não
+constrói grafo** neste host, e o dimensionamento que eu mesmo publiquei olhava o disco: 1,27 GB/milhão
+dizia que ~200M cabiam. Pela RAM, um host de 16 GB comporta **~5,8M**. Qualquer fronteira recall×QPS a
+20M e qualquer alegação de escala bilhão dependem disto.
+status: raw
 dod:
-  - existe modo de corrida intercalada: um executor que percorre a query `i` nos dois sistemas antes de passar
-    para a `i+1`, com a ordem alternada por query
-  - o artefato registra se o par veio de corridas sequenciais ou intercaladas, e o veredito **diz qual** — um
-    leitor não pode ter de adivinhar qual confundidor está em jogo
-  - a mesma comparação é rodada nos dois modos na mesma máquina, e a diferença entre os vereditos é medida:
-    se intercalar não muda o resultado, isso é um honest-negative que vale registrar
-  - enquanto o modo intercalado não existir, o rodapé do veredito pareado declara o limite em vez de omiti-lo
-
+  - o build do `theodb_hnsw` respeita um orçamento de memória declarado, ou **falha cedo com mensagem que
+    o nomeie** — hoje o operador recebe um servidor reiniciado e nenhuma pista
+  - a curva de memória é re-medida depois do fix nos mesmos 3 pontos, pelo `theodb-bench`
+  - a relação com [[B-058]] e a issue #221 é resolvida por escrito: dois componentes ignorando o mesmo
+    orçamento é ausência de contrato de memória, não dois bugs isolados
 ## B-077 — A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam   [ ]
 
-domain: theo-db
+domain: governanca
 repo: theo-db
 suggested_mode: review
 source: discover-review
@@ -3069,10 +2992,9 @@ dod:
   - se a decisão for pilar, o `route_domain.py` deixa de assumir um-repo-um-domínio, ou G1 passa a rotear
     pelo campo que é inequívoco (`domain:`) em vez de por `repo:`
   - nenhum dos 76 itens existentes fica órfão pela mudança
-
 ## B-078 — Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto   [ ]
 
-domain: theo-db
+domain: governanca
 repo: theo-db
 suggested_mode: bug
 source: discover-review
@@ -3096,10 +3018,9 @@ dod:
   - `python3 -m pytest skills/ -q` coleta tudo sem erro
   - cada teste órfão ou foi reescrito contra o contrato que sobreviveu, ou foi removido com a razão no commit
   - nada é silenciado por `@skip` (dívida invisível, `rules/testing.md § 6`)
-
 ## B-079 — O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit   [ ]
 
-domain: theo-db
+domain: governanca
 repo: theo-db
 suggested_mode: evolve
 source: human
@@ -3146,10 +3067,9 @@ dod:
   - o repositório do kit está clonado nesta máquina, ou está declarado por escrito onde ele vive
   - os 35 arquivos estão no repo do kit, ou está registrado por escrito quais foram descartados e por quê
   - um `install.sh` a partir do kit reproduz o estado que hoje só existe em `theo-db/.claude/`
-
 ## B-080 — O `renumbered` do revisor de backlog é BLOCKER e afirma um dano que a evidência não mostra   [ ]
 
-domain: theo-db
+domain: governanca
 repo: theo-db
 suggested_mode: bug
 source: discover-review
@@ -3174,4 +3094,3 @@ dod:
   - se ordem de aparição virar achado, ele é `minor`/`heuristic` e a mensagem descreve o que de fato acontece
   - existe teste com um backlog fora de ordem SEM id repetido que prova a ausência do blocker
   - `cycle-backlog.md § Item schema` diz explicitamente se "monotonic" governa alocação ou posição no arquivo
-
