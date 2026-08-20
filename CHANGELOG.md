@@ -14,6 +14,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **O portão de vulnerabilidades da imagem volta a poder passar.** Ele reprovava em 60 achados
+  CRITICAL/HIGH da imagem base do PostgreSQL, dos quais **38 não têm correção disponível em lugar
+  nenhum** — o Debian não vai corrigi-los nesta versão. Um portão que bloqueia no que ninguém pode
+  consertar só sabe dizer não, e portão permanentemente vermelho ensina a ignorar vermelho. Agora
+  bloqueia só no que é acionável; os 22 restantes vivem num allowlist com prazo de validade e razão
+  medida — todos estão no `gosu`, o utilitário de troca de usuário do entrypoint, num binário que
+  **não tem código de rede nem de TLS ligado**, verificado (#B-082)
 - **Um índice HNSW migrado do pgvector volta a ter a mesma definição de origem.** O shim marcava
   `vector_l2_ops` como padrão do método `hnsw`, e o pgvector não marca — medido contra a imagem
   oficial 0.8.3. Como o PostgreSQL omite a classe de operadores quando ela é padrão, o mesmo índice
