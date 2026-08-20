@@ -13,6 +13,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Índices `ivfflat` criados pela sintaxe do pgvector voltam a funcionar.** O shim de
+  compatibilidade registrava o apelido `hnsw` e parava aí: `CREATE INDEX ... USING ivfflat (...)` —
+  o que uma aplicação pgvector escreve — falhava com *"access method ivfflat does not exist"*, e um
+  `pg_restore` de qualquer dump que contivesse esse índice quebrava no meio. O apelido usa o mesmo
+  código nosso do `theodb_ivfflat`, inclusive a opção `WITH (lists = N)`, então a sintaxe é coberta
+  por inteiro e não só o nome. O shim vai a **0.7.0**, com caminho de atualização para quem já tem
+  0.6.0 instalada (#B-037)
+
 ### Changed
 - **A imagem do TheoDB passa a ser construída UMA vez por corrida, e não onze.** Cada job fazia o
   próprio `docker build` e nenhum declarava dependência, então o único job que publicava cache e os
