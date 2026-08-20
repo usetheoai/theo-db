@@ -151,7 +151,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: theodb-ci-image
           path: /tmp
@@ -231,7 +231,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: theodb-ci-image
           path: /tmp
@@ -319,7 +319,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: theodb-ci-image
           path: /tmp
@@ -368,7 +368,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: theodb-ci-image
           path: /tmp
@@ -408,7 +408,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: theodb-ci-image
           path: /tmp
@@ -458,7 +458,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: theodb-ci-image
           path: /tmp
@@ -521,7 +521,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: theodb-ci-image
           path: /tmp
@@ -575,7 +575,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: theodb-ci-image
           path: /tmp
