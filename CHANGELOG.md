@@ -13,6 +13,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`docker pull ghcr.io/usetheoai/theo-db:latest` funciona.** O primeiro comando do README nunca
+  havia funcionado: as oito execuções do workflow de publicação desde 2026-07-29 falharam, e o
+  manifesto respondia `403`. A causa estava em três níveis acima do que os logs mostravam — a
+  organização **proibia pacotes públicos**, o que forçava o pacote a privado, o que impedia
+  vinculá-lo a um repositório público, o que tirava o acesso do workflow. Verificado do jeito que um
+  usuário faz: `docker logout` e `docker pull`, sem credencial (#B-082)
+- A nota do README que declarava a imagem indisponível foi removida — ela era verdadeira quando
+  escrita hoje de manhã, e mantê-la depois de a medição mudar seria o mesmo defeito com o sinal
+  invertido (#B-082)
+
 ## [0.160.1] - 2026-08-20
 
 ### Added
