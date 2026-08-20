@@ -4,6 +4,8 @@ date: 2026-08-20
 questions_asked: 6
 decisions_resolved: 6
 verdict: READY_FOR_PLAN
+revised: 2026-08-20
+scope: local-only
 items_unblocked: [B-077, B-079, B-080]
 ---
 
@@ -12,6 +14,56 @@ items_unblocked: [B-077, B-079, B-080]
 Desbloqueia o [[B-077]] (17 dos 18 blockers do `/backlog-review`) e a classe
 `raw_with_evidence` (26 majors). Escopo: quem é dono de um item e o que governa o status.
 Fora de escopo, deliberadamente: o `status` do [[B-021]] — item único, não decisão de modelo.
+
+## Revisão de 2026-08-20 — decisão do owner, e o que ela retirou
+
+**Escopo: apenas este consumidor. O repositório do kit (`squad`) não é tocado.**
+
+O owner recusou a D5 como eu a havia escrito, e estava certo. Duas medições novas sustentam a recusa:
+
+| # | Medição | Resultado |
+|---|---|---|
+| M10 | Como `check_backlog_structure.py` decide `unroutable_repo` | `_known_repos()` (`:144-174`) monta a **união de todos os repos de todas as linhas** e testa **pertinência** (`:245`). **Nunca pergunta qual domínio.** Logo os 17 blockers caem com a tabela apenas — zero linha de código |
+| M11 | O que o instalador do kit diz sobre `rules/` e `agents/` | *"`rules/` and `agents/` are exactly where a project's own configuration lives: the routing table…"* (`install.sh:76`). Recusa sobrescrever sem `--force`, faz snapshot antes, e na pós-instalação manda rodar `detect_domains --write .claude/rules/cycle-backlog.md` |
+
+A tabela de roteamento é **ponto de extensão por projeto**, e eu a tratei como código do kit. Erro meu de
+categoria, não de medição.
+
+### A forma de tabela que dispensa as mudanças de código
+
+Levando a restrição a sério, existe uma escrita da tabela em que a ambiguidade nunca aparece: **cada repo
+figura em EXATAMENTE UMA linha**, e os pilares que não possuem repo ficam com a coluna `Repos` vazia.
+
+| Domain | Repos | Specialist |
+|---|---|---|
+| `engine-pgrx` | `theo-db` | `agents/theo-pgrx.md` |
+| `arnes` | `theodb-bench` | `agents/arnes.md` |
+| `vetorial` | *(vazio)* | `agents/theo-recall.md` |
+| … | | |
+
+Ela entrega as três coisas de uma vez: `known_repos` continua sendo a união, então os 17 blockers caem (M10);
+`route_domain <repo>` fica **determinístico**, porque nenhum repo está em duas linhas; e os pilares seguem
+sendo a unidade semântica dos itens (D1 preservada).
+
+**O preço, declarado e não escondido:** a coluna `Repos` deixa de significar *"quais repos este pilar toca"* e
+passa a significar *"qual repo roteia para cá por omissão"*. Um pilar de coluna vazia é alcançável pelo campo
+`domain:` do item, nunca por repo. Isso tem de estar escrito na própria tabela, ou o próximo leitor infere o
+sentido antigo.
+
+### O que a revisão RETIRA
+
+- **D2 sai.** Ela existia para desambiguar um repo em vários domínios. Com um repo por linha, não há ambiguidade
+  a desambiguar. O defeito do primeiro-casamento silencioso (M4) **continua existindo no tool** — apenas deixa
+  de ser alcançável por esta tabela. Fica registrado no [[B-080]] como defeito latente, não consertado aqui.
+- **D6 sai.** Ela existia para permitir derivar a tabela do backlog. A tabela passa a ser escrita à mão, que é
+  o que o próprio gerador autoriza no cabeçalho que emite (*"edit it by hand when ownership does not follow the
+  directory layout"*). `detect_domains --from-backlog` continua recusando, e isso deixa de importar.
+- **D5 é reescrita** (ver abaixo).
+
+### O que a revisão NÃO retira
+
+D1, D3 e D4 seguem inteiras: pilar como unidade, os 26 redistribuídos em quatro destinos com dois especialistas
+a escrever, e a evidência governando o status.
 
 ## Medições que fundamentaram as recomendações
 
@@ -38,7 +90,8 @@ do kit nesta máquina, e isso saiu de um glob errado (`~/Projetos/*/squad*`). O 
    mandaria 66 de 80 itens para um agente genérico que não existe: o gate responderia
    `routed: true` sem nomear ninguém, que é a mesma vacuidade do exit 3. Por pilar, sete dos
    oito domínios já apontam para especialista escrito (M2).
-2. **D2 — `route_domain.py` resolve por domínio, com queda para repo.** O alvo casa primeiro
+2. **D2 — ~~`route_domain.py` resolve por domínio, com queda para repo.~~ RETIRADA na revisão de
+   2026-08-20 — a forma da tabela dispensa a mudança de código. Texto original preservado abaixo.** O alvo casa primeiro
    como domínio; se nenhum casar, cai para repo; e o caminho por repo **recusa nomeando a
    ambiguidade** quando o repo está em mais de um domínio, em vez de devolver o primeiro (M4).
    A precedência preserva consumidores de modelo por-repo — o kit é compartilhado ([[B-079]]).
@@ -55,13 +108,16 @@ do kit nesta máquina, e isso saiu de um glob errado (`~/Projetos/*/squad*`). O 
    Os 26 migram para `triaged` (M7), **item a item com leitura do campo**: o que não for
    medição vira `evidence: none-yet`, não `triaged`. Migrar por script trocaria um registro
    impreciso por um impreciso e confiante.
-5. **D5 — A mudança nasce no KIT, e o consumidor vem depois.** O `route_domain.py` está hoje
+5. **D5 — ~~A mudança nasce no KIT, e o consumidor vem depois.~~ REESCRITA na revisão de 2026-08-20:
+   a mudança é INTEIRAMENTE LOCAL e o `squad` não é tocado. `rules/` e `agents/` são configuração por
+   projeto, e o instalador diz isso (M11). Texto original preservado abaixo.** O `route_domain.py` está hoje
    idêntico nos dois (M9); editar aqui primeiro cria divergência no núcleo da mudança, que é o
    defeito que o `check_install_drift.py` existe para denunciar. E tabela por pilar escrita
    antes de o tool saber rotear por domínio é tabela que o tool não honra — trocaria `UNROUTED`
    por rota silenciosamente errada. As 9 divergências de M9 vão junto: são a metade pendente
    do [[B-079]].
-6. **D6 — A derivação passa a aceitar repo em vários domínios; a recusa muda de lugar.**
+6. **D6 — ~~A derivação passa a aceitar repo em vários domínios.~~ RETIRADA na revisão de 2026-08-20 —
+   a tabela é escrita à mão, que é o que o gerador autoriza. Texto original preservado abaixo.**
    `detect_domains --from-backlog` recusa hoje na derivação (`detect_domains.py:213-217`) e foi
    o que bloqueou derivar a tabela deste projeto. Derivar `theo-db` sob sete pilares é dado
    correto; o que não se pode é *perguntar por repo* contra essa tabela — e D2 já cobre isso.
@@ -115,3 +171,11 @@ este repo antes, a tabela fica escrita e inerte até o kit chegar, e isso precis
   `triaged`. Item único, não modelo; fica para leitura do owner.
 - **A ordem de ataque** entre kit e consumidor está fixada (D5), mas o *quando* não.
 - **Nenhuma linha de código foi escrita.** O contrato de saída deste arquivo é o `/to-plan`.
+
+## Adendo à revisão — o que sobra fora do escopo, e por quê
+
+| Assunto | Situação após a revisão |
+|---|---|
+| Meus dois arquivos novos (`--rule` no `check_intake_gates.py` + testes herméticos) | Commitados e verdes aqui. Portar ao kit vira **opcional**, não pendência |
+| Os 7 arquivos em que este consumidor está **ATRÁS** do kit | Pré-existente e não causado por nada deste ciclo. Registrado no [[B-079]], não bloqueia |
+| Defeito do primeiro-casamento em `route()` (M4) | Continua no tool; deixa de ser alcançável por esta tabela. Registrado, não consertado |

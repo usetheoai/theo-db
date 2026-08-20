@@ -3053,6 +3053,12 @@ grill: `.claude/knowledge-base/grills/registry-ownership-model-grill.md` — 6 d
   resolver por domínio com queda para repo e recusa por ambiguidade; os 26 itens de `domain: theo-db` se
   redistribuem em `metodo`/`arnes`/`governanca`/`vetorial`; a mudança nasce no kit. Desbloqueia também
   [[B-079]] e [[B-080]].
+escopo: **local-only**, decidido pelo owner em 2026-08-20. O `squad` não é tocado. Medido o que sustenta
+  isso: `check_backlog_structure.py:_known_repos` monta a UNIÃO dos repos de todas as linhas e testa
+  pertinência (`:245`) — nunca pergunta qual domínio —, então os 17 blockers caem com a tabela apenas.
+  A tabela é escrita com **cada repo em exatamente uma linha** e os pilares sem repo com a coluna `Repos`
+  vazia: assim `route_domain <repo>` fica determinístico sem mudar código, e os pilares seguem sendo a
+  unidade semântica dos itens. As decisões D2 e D6 do grill foram RETIRADAS por essa razão.
 status_nota: 2026-08-20 — filado por engano como `raw` carregando evidência medida. `raw` é hipótese SEM
   evidência (`cycle-backlog.md § Item schema`); achado com medição nasce `triaged`. Corrigido no mesmo dia,
   apontado por `check_backlog_structure.py`.
@@ -3113,7 +3119,22 @@ o kit está em **`/home/paulo/Projetos/squad`**, branch `workspace`, árvore lim
 **O tamanho também estava errado.** Comparando os 36 arquivos do commit `11581e2` contra o kit, arquivo a
 arquivo: **27 idênticos** (o commit `fea3976` do kit já os colheu), **9 divergentes**, **0 ausentes**. Os nove são
 `check_intake_gates.py` + seu teste, `check_phase_review.py` + seu teste, `mini_review.py`, `run_validation.py` +
-seu teste, e `consolidate_findings.py` + seu teste. O trabalho pendente é portar nove arquivos, não trinta e cinco. A regra global do owner é explícita: *"Uma correção escrita dentro de `.claude/` não
+seu teste, e `consolidate_findings.py` + seu teste. O trabalho pendente é portar nove arquivos, não trinta e cinco.
+**SEGUNDA correção, mesmo dia: eu também inverti a DIREÇÃO.** Medida com `diff` linha a linha nos nove, o kit
+está **à frente** em sete deles: `run_validation.py` é o caso conclusivo — **+0 linhas exclusivas do
+consumidor** contra 41 exclusivas do kit, ou seja, o conteúdo local é subconjunto do kit. Também
+`consolidate_findings.py` (kit 680 linhas × 375 aqui), `check_phase_review.py` (281 × 167),
+`test_check_phase_review.py` (212 × 104), `mini_review.py` (446 × 417).
+**Só dois arquivos têm conteúdo genuinamente novo aqui**, e são os que escrevi hoje: o encaminhamento do
+`--rule` em `check_intake_gates.py` (+15) e seus testes herméticos (+26).
+Consequência: este `.claude/` é um checkout **defasado** do kit com dois consertos locais em cima — não um
+adiantado. A descrição original ("27 arquivos modificados e 8 novos que mecanizam gates") descrevia o diff
+contra o HEAD **deste** repo e nunca contra o kit; medir contra a referência errada e ler o resultado como
+resposta é a mesma classe de erro do glob acima.
+**Decisão do owner em 2026-08-20: o repositório do kit NÃO é tocado.** `rules/` e `agents/` são configuração
+por projeto — o próprio `install.sh:76` diz isso. Portanto portar os dois arquivos novos vira **opcional**, e
+os sete atrasados viram **fato registrado**, não pendência. Este item deixa de descrever trabalho a fazer e
+passa a descrever um estado conhecido; o que sobra é a decisão de sincronizar ou não, que é do owner. A regra global do owner é explícita: *"Uma correção escrita dentro de `.claude/` não
 existe até chegar ao repositório do kit"*.
 why_now: o trabalho está feito e verde. O custo de portar cresce com cada ciclo que roda por cima dele, e o
 `.claude/` deste repo recebe atualização do instalador — uma reinstalação sobrescreve o que não foi portado.
