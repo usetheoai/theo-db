@@ -40,6 +40,11 @@ on:
 # de uma branch importa. `head_ref || ref_name` faz o evento `push` e o `pull_request` do MESMO commit
 # caírem no MESMO grupo — sem isso cada commit disparava DOIS runs por workflow enquanto houvesse PR
 # aberto da branch, dobrando a fila. Em `main` NUNCA cancela (um release em andamento não é abortado).
+# 2026-08-20 — sem `permissions:` o job herdava o default do REPOSITORIO, que pode ser write-all.
+# Medido: era o caso em quatro dos dez workflows. Este só lê a árvore.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.ref_name != 'main' }}

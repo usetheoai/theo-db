@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-82 items — **Open** 40 · **In flight** 36 · **Closed** 6
+83 items — **Open** 41 · **In flight** 36 · **Closed** 6
 
-### Open (40)
+### Open (41)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -114,6 +114,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-077`](#b-077--a-tabela-de-roteamento-é-a-do-ecossistema-inteiro-e-os-dois-repos-que-existem-não-roteiam----) | A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam | `triaged` | — |
 | [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar----) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `triaged` | — |
 | [`B-082`](#b-082--o-primeiro-comando-do-readme-aponta-para-uma-org-que-não-é-a-nossa-e-a-imagem-nunca-foi-publicada----) | O primeiro comando do README aponta para uma org que não é a nossa, e a imagem nunca foi publicada | `triaged` | — |
+| [`B-083`](#b-083--42-actions-de-terceiros-fixadas-por-tag-e-nenhuma-por-sha----) | 42 actions de terceiros fixadas por TAG, e nenhuma por SHA | `triaged` | — |
 
 ### In flight (36)
 
@@ -3263,4 +3264,30 @@ dod:
   - `docker pull ghcr.io/usetheoai/theo-db:latest` funciona a partir de uma máquina sem credencial
   - a nota do README sai quando o comando funcionar, e não antes
   - a alegação do `CHANGELOG.md:1066` é retratada por acréscimo ou passa a ser verdadeira
+
+## B-083 — 42 actions de terceiros fixadas por TAG, e nenhuma por SHA   [ ]
+
+domain: governanca
+repo: theo-db
+suggested_mode: review
+source: discover-review
+evidence: medido em 2026-08-20 sobre os onze workflows, contando referências `uses: owner/repo@ref`
+cuja `ref` não casa `[0-9a-f]{40}`: **42 no total, 34 delas só no `ci.yml`**. Nenhuma action de terceiro
+está fixada por SHA. Tag é ponteiro **mutável**: quem controla o repositório da action pode reapontar
+`@v4` para outro commit, e o consumidor passa a executar código novo sem que apareça um diff em lugar
+nenhum. É o vetor que o OpenSSF e o `zizmor` tratam como o defeito de supply-chain padrão de esteiras
+GitHub, e este repositório **constrói e assina imagem** — o que torna a esteira um alvo com valor.
+Contraste medido no mesmo lugar: a imagem do `actionlint` **está** fixada por digest
+(`rhysd/actionlint@sha256:b1934ee…`), com comentário citando a política de supply-chain do repo. Ou
+seja, a política existe, foi aplicada a uma imagem Docker e nunca às actions.
+why_now: o `dependabot.yml` entrou em 2026-08-20 e resolve a metade barata — alguém passa a AVISAR que
+há versão nova. Ele **não** resolve a mutabilidade: com tag, a atualização silenciosa continua possível
+entre um aviso e outro. E o momento é agora porque a esteira acabou de ganhar um workflow que cria
+release com `contents: write` — o raio de alcance de uma action comprometida cresceu.
+status: triaged
+dod:
+  - toda `uses:` de terceiro fixada por SHA de 40 caracteres, com a tag legível ao lado em comentário
+  - `actions/*` e `docker/*` incluídas — pertencer ao GitHub não as torna imutáveis
+  - o dependabot mantém os SHAs atualizados (ele reescreve SHA + comentário quando configurado assim)
+  - a política fica escrita onde um autor de workflow a encontre, não só neste item
 

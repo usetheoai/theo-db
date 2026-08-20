@@ -1,0 +1,22 @@
+# dependabot — mantém as actions atualizadas. Ausente até 2026-08-20.
+#
+# POR QUE. Medido nos onze workflows: 42 referências a actions de terceiros fixadas por TAG
+# (`@v4`), não por SHA. Tag é mutável — quem controla o repositório da action pode reapontá-la, e o
+# consumidor recebe código novo sem diff. Fixar por SHA é o estado da arte; manter 42 SHAs à mão sem
+# ninguém avisando de atualização é como eles envelhecem até virarem risco por outro caminho.
+#
+# Esta é a metade barata e ela vem primeiro: alguém precisa AVISAR que há versão nova. A fixação por
+# SHA está registrada como item de backlog com a contagem medida, em vez de feita às pressas em 724
+# linhas de `ci.yml`.
+#
+# `github-actions` só. Cargo e Python deste repositório têm gates próprios (`license-gate` via
+# cargo-deny, e o `deps-audit` do ciclo) — acrescentar aqui duplicaria o dono do problema.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(actions)"

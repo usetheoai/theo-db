@@ -13,6 +13,26 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **A esteira passa a criar a release.** Nenhum workflow fazia isso — medido: zero ocorrências de
+  `gh release`, gatilho `release:` ou equivalente nos nove arquivos existentes, e é por isso que
+  `main` ficou em 0.158.0 desde julho com duas versões escritas no changelog e nunca cortadas. O
+  novo `release.yml` dispara na tag `v*`, extrai as notas **do CHANGELOG** (não do log de commits,
+  porque o changelog é o texto que alguém revisou) e recusa publicar quando a versão não tem seção —
+  uma release de corpo vazio afirma que não houve mudança (#B-082)
+- `runner-probe`: sonda sob demanda que mede se os jobs pesados cabem num runner GitHub-hosted, em
+  vez de decidir isso por leitura de documentação (#B-083)
+- `dependabot.yml` para as actions — até aqui ninguém avisava que havia versão nova (#B-083)
+
+### Changed
+- **Os gates leves saem da máquina paga.** `actionlint`, `license-gate` e `schema-drift-gate` passam a
+  rodar em runner GitHub-hosted, que é grátis e ilimitado em repositório público. O runner próprio é
+  único e serial, e o custo disso estava medido: `lint-rust` levou de 66 a 120 minutos para rodar um
+  `cargo fmt --check`, quase tudo fila atrás de outros nove workflows. Os jobs que compilam continuam
+  na máquina grande até a sonda dizer que cabem (#B-083)
+- Quatro workflows não declaravam `permissions` e herdavam o default do repositório, que pode ser
+  write-all. Agora os dez declaram o mínimo que usam (#B-083)
+
 ## [0.160.1] - 2026-08-20
 
 ### Added

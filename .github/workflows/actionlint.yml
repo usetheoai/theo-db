@@ -49,7 +49,16 @@ concurrency:
 
 jobs:
   actionlint:
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — runner GITHUB-HOSTED, não o self-hosted da frota. Medido antes de trocar:
+    # este repositório é PÚBLICO, e runner padrão do GitHub é grátis e ilimitado em repo público —
+    # enquanto o `theodb-do` é uma máquina paga. Pior: ela é ÚNICA e SERIAL, então os dez workflows
+    # disparados pelo mesmo push enfileiram. Medição do custo real disso: `lint-rust` levou de 66 a
+    # 120 minutos para rodar um `cargo fmt --check`, quase tudo fila.
+    #
+    # Este job cabe aqui porque NÃO precisa da máquina grande: nada de Rust, nada de pgrx, nada de
+    # `pg_config`. Os jobs que compilam continuam em `vars.CI_RUNNER` — a troca é por job e por
+    # necessidade medida, não por decreto.
+    runs-on: ubuntu-latest
     # Medido: o scan dos 10 workflows leva segundos. 10 min é folga para o pull da imagem num
     # runner frio, não uma estimativa do trabalho.
     timeout-minutes: 10
