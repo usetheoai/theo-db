@@ -14,6 +14,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **A imagem do TheoDB passa a ser construída UMA vez por corrida, e não onze.** Cada job fazia o
+  próprio `docker build` e nenhum declarava dependência, então o único job que publicava cache e os
+  oito que o liam partiam no mesmo instante: em cache fria — isto é, sempre que o `Dockerfile` muda —
+  os nove compilavam Rust + pgrx do zero em paralelo. O ganho maior não é tempo: oito builds
+  independentes produzem oito imagens que só se **presume** idênticas, e agora todo job exercita o
+  mesmo artefato, publicado uma vez e puxado por digest (#B-085)
 - **A esteira do banco para de rodar o avaliador, que virou projeto próprio.** O harness Python foi
   removido em 2026-08-12 e hoje é o repositório irmão `theodb-bench`, independente, que consome o
   TheoDB como sistema sob teste — mas o `ci.yml` continuava instalando um `requirements.txt` que não

@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-84 items — **Open** 42 · **In flight** 36 · **Closed** 6
+85 items — **Open** 43 · **In flight** 36 · **Closed** 6
 
-### Open (42)
+### Open (43)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -116,6 +116,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-082`](#b-082--o-primeiro-comando-do-readme-aponta-para-uma-org-que-não-é-a-nossa-e-a-imagem-nunca-foi-publicada----) | O primeiro comando do README aponta para uma org que não é a nossa, e a imagem nunca foi publicada | `triaged` | — |
 | [`B-083`](#b-083--42-actions-de-terceiros-fixadas-por-tag-e-nenhuma-por-sha----) | 42 actions de terceiros fixadas por TAG, e nenhuma por SHA | `triaged` | — |
 | [`B-084`](#b-084--a-esteira-do-banco-rodava-o-avaliador-e-três-constantes-fixavam-uma-versão-que-o-upstream-move----) | A esteira do banco rodava o avaliador, e três constantes fixavam uma versão que o upstream move | `triaged` | — |
+| [`B-085`](#b-085--a-imagem-era-construída-onze-vezes-por-corrida-e-nenhum-job-dependia-de-outro----) | A imagem era construída onze vezes por corrida, e nenhum job dependia de outro | `triaged` | — |
 
 ### In flight (36)
 
@@ -3330,4 +3331,36 @@ dod:
   - nenhuma versão de patch de dependência upstream fixada como constante em workflow ou script
   - a fronteira entre produto e avaliador está declarada onde um autor de workflow a encontre
   - existe verificação que reprova quando um job instala requisito de árvore inexistente
+
+## B-085 — A imagem era construída onze vezes por corrida, e nenhum job dependia de outro   [ ]
+
+domain: governanca
+repo: theo-db
+suggested_mode: review
+source: human
+evidence: medido em 2026-08-20, a partir de pergunta do owner (*"fazemos o build do nosso theodb em
+todos os steps?"*). Contagem no `ci.yml`: **11 invocações de `docker build`/`build-push-action` em 9
+jobs**, e `needs:` em **nenhum**. Oito jobs liam `cache-from: type=gha` e **um só** escrevia
+`cache-to` — mas, sem dependência declarada, produtor e consumidores **partem no mesmo instante**.
+Em cache fria (toda vez que o `Dockerfile` muda) nenhum consumidor tem o que ler, e os nove compilam
+Rust + pgrx do zero, em paralelo. Observado ao vivo na corrida `32397442641`: nove jobs iniciados no
+mesmo segundo, **seis ainda construindo nove minutos depois**.
+O custo em tempo é o menor dos dois. O outro é de **corretude**: oito builds independentes produzem
+oito imagens que só se PRESUME idênticas. Se o build não for perfeitamente reprodutível, os jobs
+reprovam e aprovam artefatos diferentes sob o mesmo nome — e nada na esteira diria isso.
+why_now: a esteira acabou de migrar para runner GitHub-hosted, onde os jobs rodam em máquinas
+DISTINTAS e a imagem local não atravessa. Manter o padrão anterior ali significa nove máquinas
+compilando a mesma coisa.
+status: triaged
+consertado: 2026-08-20 — job `build` único publica `ghcr.io/usetheoai/theo-db:ci-<sha>` (tag por SHA
+  porque duas corridas simultâneas não podem disputar a mesma), e os oito consumidores declaram
+  `needs: build` e puxam por digest. **De 11 builds para 4**, e os três que sobraram são imagens
+  legitimamente diferentes: o runner de regressão (`FROM theo-db:dev`), a imagem descartável de BM25
+  (`pg_textsearch`) e a de colunar de terceiro. Removido também o `setup-buildx` pendurado em seis
+  jobs que não constroem mais nada, e o `image-and-bench` virou `image-guards` — ele não constrói e
+  não faz bench desde que o harness saiu ([[B-084]]); o nome mentia sobre a função.
+dod:
+  - a imagem do produto é construída uma vez por corrida, e todo job a consome por digest
+  - nenhum job declara `cache-from` de um cache que ninguém garantiu ter escrito antes
+  - as imagens de CI publicadas no GHCR têm política de retenção, ou está escrito por que não têm
 

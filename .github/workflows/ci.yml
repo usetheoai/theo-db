@@ -81,13 +81,59 @@ concurrency:
 # (`publish-image.yml`) declaram seus próprios `packages: write` / `id-token: write`.
 permissions:
   contents: read
+  packages: write   # a imagem de CI é publicada UMA vez no GHCR e consumida pelos demais jobs
 
 jobs:
+  # CONSTRUÍDA UMA VEZ, CONSUMIDA POR TODOS. Antes de 2026-08-20 cada job fazia o seu próprio
+  # `docker build` — onze invocações em nove jobs — e NENHUM declarava `needs:`. Como todos partiam
+  # ao mesmo tempo, o único produtor de cache (`cache-to`) e os oito consumidores corriam juntos:
+  # numa cache fria, isto é, sempre que o `Dockerfile` muda, os nove compilavam Rust + pgrx do zero
+  # em paralelo. Medido em 2026-08-20: nove jobs iniciados no mesmo segundo, seis ainda construindo
+  # nove minutos depois.
+  #
+  # O ganho maior não é tempo, é CORRETUDE. Oito builds independentes produzem oito imagens que só se
+  # PRESUME idênticas; um único artefato publicado por digest é o mesmo em todos os jobs, e o que um
+  # deles reprovar é o que os outros exercitaram.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login no GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag desta corrida
+        id: meta
+        run: |
+          # Minúsculas porque o registry as exige; SHA porque duas corridas simultâneas não podem
+          # disputar a mesma tag — seria um job testando a imagem de outro commit sem dizer.
+          echo "image=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]'):ci-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build e push da imagem de CI
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: ${{ steps.meta.outputs.image }}
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   # #181/#182 — GATE de compatibilidade pgvector. Roda contra a IMAGEM (o artefato que o usuário
   # realmente baixa), não contra um cluster montado à mão: é o caminho do README, e foi justamente a
   # ausência desse caminho no CI que deixou passar (a) `CREATE EXTENSION vector` inexistente e (b) o AM
   # `hnsw` / opclasses `vector_*_ops` ausentes — dois bugs que só apareceram ao apontar uma app real.
   pgvector-compat:
+    needs: build
     # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: grátis e ilimitado, e sobretudo PARALELO —
     # a máquina paga era ÚNICA e SERIAL, e os dez workflows do mesmo push enfileiravam.
     #
@@ -104,20 +150,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build TheoDB image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: theo-db:dev
-          load: true
-          cache-from: type=gha
-          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
-          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
-          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
-
+      - name: Puxar a imagem construída uma vez pelo job `build`
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+          docker pull '${{ needs.build.outputs.image }}'
+          docker tag '${{ needs.build.outputs.image }}' theo-db:dev
+          docker tag '${{ needs.build.outputs.image }}' theo-db:ci
       - name: Bootstrap de uma app pgvector contra a imagem (o fluxo do README)
         run: |
           set -euo pipefail
@@ -169,7 +207,8 @@ jobs:
         if: always()
         run: docker rm -f theodb_compat 2>/dev/null || true
 
-  image-and-bench:
+  image-guards:
+    needs: build
     # Builds the TheoDB image, proves M0 (smoke) + M2 vectorscale, then runs the benchmark harness
     # in CI over the real glove-25-angular reference dataset (DoD-1) + the integration suite.
     # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: grátis e ilimitado, e sobretudo PARALELO —
@@ -187,18 +226,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build TheoDB image (pgvector + pgvectorscale)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: theo-db:ci
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
+      - name: Puxar a imagem construída uma vez pelo job `build`
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+          docker pull '${{ needs.build.outputs.image }}'
+          docker tag '${{ needs.build.outputs.image }}' theo-db:dev
+          docker tag '${{ needs.build.outputs.image }}' theo-db:ci
       - name: Start TheoDB
         run: |
           # EPHEMERAL host port (`-p 5432`, NOT `-p 5432:5432`). A fixed host port made every job
@@ -260,6 +293,7 @@ jobs:
         run: docker rm -f theo-db-ci || true
 
   migration-smoke:
+    needs: build
     # M3 DoD-1/DoD-2: standard pg_dump/pg_restore migration from a vanilla pgvector source into TheoDB,
     # asserting data + indexes are preserved. Every step here has been run locally first.
     # 2026-08-20 — runner GitHub-hosted. Repo PÚBLICO: grátis e ilimitado, e sobretudo PARALELO —
@@ -276,20 +310,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build TheoDB image (cache from image-and-bench)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: theo-db:dev
-          load: true
-          cache-from: type=gha
-          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
-          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
-          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
-
+      - name: Puxar a imagem construída uma vez pelo job `build`
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+          docker pull '${{ needs.build.outputs.image }}'
+          docker tag '${{ needs.build.outputs.image }}' theo-db:dev
+          docker tag '${{ needs.build.outputs.image }}' theo-db:ci
       - name: Start source (vanilla pgvector, pinned by digest) + target (TheoDB)
         run: |
           # pinned by digest for reproducibility, consistent with the repo's supply-chain policy
@@ -311,6 +337,7 @@ jobs:
         run: docker rm -f m3-src m3-dst || true
 
   pg-regression:
+    needs: build
     timeout-minutes: 25
     # M1 DoD-1: the upstream PostgreSQL 17 regression suite passes 100% on the TheoDB distribution.
     # Throwaway runner (FROM theo-db:dev) builds pg_regress from REL_17_10 and runs `make installcheck`.
@@ -328,17 +355,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build TheoDB base image (cache from image-and-bench)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: theo-db:dev
-          load: true
-          cache-from: type=gha
-          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
-          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
-          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
-
+      - name: Puxar a imagem construída uma vez pelo job `build`
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+          docker pull '${{ needs.build.outputs.image }}'
+          docker tag '${{ needs.build.outputs.image }}' theo-db:dev
+          docker tag '${{ needs.build.outputs.image }}' theo-db:ci
       - name: Build regression runner (pg_regress + regress.so, tag DERIVADO do engine)
         run: |
           set -euo pipefail
@@ -354,6 +376,7 @@ jobs:
         run: docker run --rm theo-db-regress
 
   hybrid-search:
+    needs: build
     timeout-minutes: 20
     # M7-S1: hybrid search (FTS + vector + RRF) — contract tests + smoke + capped BEIR-style eval.
     # Every step here has been run locally first (deterministic lexical embedder; no external endpoint).
@@ -368,23 +391,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build TheoDB image (cache from image-and-bench)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: theo-db:dev
-          load: true
-          cache-from: type=gha
-          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
-          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
-          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
-
+      - name: Puxar a imagem construída uma vez pelo job `build`
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+          docker pull '${{ needs.build.outputs.image }}'
+          docker tag '${{ needs.build.outputs.image }}' theo-db:dev
+          docker tag '${{ needs.build.outputs.image }}' theo-db:ci
       - name: Start TheoDB
         run: |
-          # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
+          # Ephemeral host port — rationale in the image-guards "Start TheoDB" step.
           docker rm -f theo-db-hyb 2>/dev/null || true
           docker run -d --name theo-db-hyb -e POSTGRES_PASSWORD=postgres -p 5432 theo-db:dev
           for _ in $(seq 1 30); do
@@ -407,6 +422,7 @@ jobs:
         run: docker rm -f theo-db-hyb || true
 
   ai-sql:
+    needs: build
     timeout-minutes: 20
     # M7-S3: generative ai.* functions — offline deterministic contract suite (stub server; NO external API).
     # The real-OpenAI test is opt-in and runs out-of-CI (key from gitignored .env). Run locally first.
@@ -421,23 +437,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build TheoDB image (cache from image-and-bench)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: theo-db:dev
-          load: true
-          cache-from: type=gha
-          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
-          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
-          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
-
+      - name: Puxar a imagem construída uma vez pelo job `build`
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+          docker pull '${{ needs.build.outputs.image }}'
+          docker tag '${{ needs.build.outputs.image }}' theo-db:dev
+          docker tag '${{ needs.build.outputs.image }}' theo-db:ci
       - name: Start TheoDB (host-gateway so the in-DB function reaches the host stub)
         run: |
-          # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
+          # Ephemeral host port — rationale in the image-guards "Start TheoDB" step.
           docker rm -f theo-db-ai 2>/dev/null || true
           # M134/#117 fecharam a classe de SSRF em ai._chat: o guard recusa endpoints que resolvem
           # para loopback/privado/link-local. Estas suites usam um STUB OFFLINE no host
@@ -469,6 +477,7 @@ jobs:
         run: docker rm -f theo-db-ai || true
 
   bm25-measure:
+    needs: build
     timeout-minutes: 25
     # M7-S2: permissive BM25 (pg_textsearch) — build the throwaway image + MEASURE recall vs ts_rank_cd.
     # measurement-first (ADR 0002/0003): pg_textsearch is NOT in the shipped image; this job builds it only to
@@ -487,17 +496,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build TheoDB base image (cache from image-and-bench)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: theo-db:dev
-          load: true
-          cache-from: type=gha
-          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
-          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
-          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
-
+      - name: Puxar a imagem construída uma vez pelo job `build`
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+          docker pull '${{ needs.build.outputs.image }}'
+          docker tag '${{ needs.build.outputs.image }}' theo-db:dev
+          docker tag '${{ needs.build.outputs.image }}' theo-db:ci
       - name: License sweep — BM25 candidates permissive/barred verdict (reproducible, ADR 0003)
         run: bash packaging/license-sweep.sh
 
@@ -506,7 +510,7 @@ jobs:
 
       - name: Start BM25 image (shared_preload_libraries=pg_textsearch)
         run: |
-          # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
+          # Ephemeral host port — rationale in the image-guards "Start TheoDB" step.
           docker rm -f theo-db-bm25c 2>/dev/null || true
           docker run -d --name theo-db-bm25c -e POSTGRES_PASSWORD=postgres -p 5432 \
             theo-db-bm25 -c shared_preload_libraries=pg_textsearch
@@ -527,6 +531,7 @@ jobs:
         run: docker rm -f theo-db-bm25c || true
 
   nl-sql:
+    needs: build
     timeout-minutes: 20
     # M7-S4: safe NL→SQL (anti-prompt-injection) — offline deterministic injection suite (stub; NO external API).
     # The stub "complies" with each injection so the test proves the GUARDS (L2 validation / L3 read-only
@@ -541,21 +546,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build TheoDB image (cache from image-and-bench)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: theo-db:dev
-          load: true
-          cache-from: type=gha
-          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
-          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
-          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
+      - name: Puxar a imagem construída uma vez pelo job `build`
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+          docker pull '${{ needs.build.outputs.image }}'
+          docker tag '${{ needs.build.outputs.image }}' theo-db:dev
+          docker tag '${{ needs.build.outputs.image }}' theo-db:ci
       - name: Start TheoDB (host-gateway so the in-DB function reaches the host stub)
         run: |
-          # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
+          # Ephemeral host port — rationale in the image-guards "Start TheoDB" step.
           docker rm -f theo-db-nl 2>/dev/null || true
           # M134/#117 fecharam a classe de SSRF em ai._chat: o guard recusa endpoints que resolvem
           # para loopback/privado/link-local. Estas suites usam um STUB OFFLINE no host
@@ -604,7 +603,7 @@ jobs:
         run: docker build -f packaging/Dockerfile.columnar -t theo-db-columnar .
       - name: Start columnar image
         run: |
-          # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
+          # Ephemeral host port — rationale in the image-guards "Start TheoDB" step.
           docker rm -f theo-db-col 2>/dev/null || true
           docker run -d --name theo-db-col -e POSTGRES_PASSWORD=postgres -p 5432 theo-db-columnar
           for _ in $(seq 1 40); do docker exec theo-db-col pg_isready -U postgres -q && break; sleep 2; done
