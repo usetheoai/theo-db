@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-85 items — **Open** 43 · **In flight** 4 · **Closed** 38
+85 items — **Open** 43 · **In flight** 3 · **Closed** 39
 
 ### Open (43)
 
@@ -118,16 +118,15 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-084`](#b-084--a-esteira-do-banco-rodava-o-avaliador-e-três-constantes-fixavam-uma-versão-que-o-upstream-move----) | A esteira do banco rodava o avaliador, e três constantes fixavam uma versão que o upstream move | `triaged` | — |
 | [`B-085`](#b-085--a-imagem-era-construída-onze-vezes-por-corrida-e-nenhum-job-dependia-de-outro----) | A imagem era construída onze vezes por corrida, e nenhum job dependia de outro | `triaged` | — |
 
-### In flight (4)
+### In flight (3)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
-| [`B-079`](#b-079--o-tooling-escrito-em-claude-protege-uma-máquina-até-chegar-ao-repo-do-kit----) | O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit | `planned` | — |
 
-### Closed (38)
+### Closed (39)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -168,6 +167,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala----) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `shipped` | — |
 | [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina----) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `shipped` | — |
 | [`B-078`](#b-078--seis-módulos-de-teste-do-kit-não-coletam-um-símbolo-removido-levou-as-suítes-junto----) | Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto | `killed` | — |
+| [`B-079`](#b-079--o-tooling-escrito-em-claude-protege-uma-máquina-até-chegar-ao-repo-do-kit----) | O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit | `killed` | — |
 | [`B-080`](#b-080--o-renumbered-do-revisor-de-backlog-é-blocker-e-afirma-um-dano-que-a-evidência-não-mostra----) | O `renumbered` do revisor de backlog é BLOCKER e afirma um dano que a evidência não mostra | `killed` | — |
 
 <!-- BACKLOG-INDEX:END -->
@@ -3246,7 +3246,24 @@ passa a descrever um estado conhecido; o que sobra é a decisão de sincronizar 
 existe até chegar ao repositório do kit"*.
 why_now: o trabalho está feito e verde. O custo de portar cresce com cada ciclo que roda por cima dele, e o
 `.claude/` deste repo recebe atualização do instalador — uma reinstalação sobrescreve o que não foi portado.
-status: planned
+status: killed
+kill_reason: 2026-08-20 — **a hipótese estava ao contrário, e a medição mostrou isso antes de a decisão
+  do owner encerrar o resto.** O item afirmava que o tooling escrito em `.claude/` "protege uma máquina até
+  chegar ao repo do kit". Medido: o kit existe em `/home/paulo/Projetos/squad`, e dos 36 arquivos do commit
+  `11581e2` **27 já eram idênticos** a ele. Dos 9 que divergiam, **7 tinham o kit à FRENTE** — o
+  `run_validation.py` com zero linhas exclusivas do consumidor, o que é conclusivo. Este `.claude/` era um
+  checkout **defasado**, não um adiantado. Sincronizados os 7 (mais `_layout.py` e seu teste, dependência
+  transitiva ausente), trazendo dois consertos de correção real: o `_layout.py`, que impede o knowledge-base
+  dividido, e o `#343`, em que todo achado D5 de arquitetura era estruturalmente inallowlistável.
+  **Residual, declarado e não escondido:** dois arquivos seguem existindo só aqui — o encaminhamento do
+  `--rule` em `check_intake_gates.py` (+15 linhas) e seus testes herméticos (+26). O owner decidiu em
+  2026-08-20 que o repo do kit **não é tocado**, e essa decisão encerra o terceiro bullet do DoD.
+  **A condição em que o residual morde é estreita e está nomeada:** o `install.sh` **recusa** sobrescrever um
+  `.claude/` existente e exige `--force` explícito (que ainda faz snapshot antes). Só uma reinstalação
+  deliberadamente destrutiva perde os dois arquivos; se isso acontecer, os três testes de intake voltam a
+  falhar e o G1 volta a rotear pela tabela instalada. Não abro item novo para um risco que exige um flag
+  destrutivo intencional — abrir seria transformar uma decisão consciente do owner em dívida perpétua.
+
 sincronizado: 2026-08-20 — a metade que faltava foi executada, com leitura arquivo a arquivo e NUNCA por
   cópia cega. Trazidos do kit **13 arquivos** estritamente atrasados, mais `_layout.py` e seu teste, que eram
   **dependência transitiva ausente** (o `check_phase_review.py` novo importa `_layout` e a primeira tentativa
