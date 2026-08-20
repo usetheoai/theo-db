@@ -16,11 +16,14 @@ on:
   # A TROCA É REAL e fica dita: sem gate no PR, um defeito só aparece quando já está em `develop`, e
   # quem descobre é o próximo a integrar. A proteção não some, muda de lugar — passa a depender de
   # rodar os gates LOCALMENTE antes de promover, no contêiner com o toolchain pinado:
-  #   docker run --rm -v $PWD/theodb_rs:/src theodb-builder:latest bash -c '
-  #     rustup component add clippy rustfmt --toolchain 1.97.0-x86_64-unknown-linux-gnu
-  #     mkdir -p /tmp/b && cp -r /src/. /tmp/b/ && cd /tmp/b
-  #     cargo fmt -- --check && cargo clippy --features pg18 --no-deps -- $(grep -v "^#" .clippy_args | tr "\n" " ")
-  #     cargo pgrx test pg18'
+  #   bash scripts/dev-test.sh --lint     # cargo fmt --check + clippy com o baseline
+  #   bash scripts/dev-test.sh            # a suite inteira
+  #   bash scripts/dev-test.sh lexical    # so o modulo tocado, em segundos
+  #
+  # A receita estava COPIADA AQUI E EM MAIS SETE cabecalhos, e fazia `cp -r` do codigo para dentro
+  # do conteiner — o que nao preserva mtime e fazia o cargo recompilar 363 crates a cada corrida.
+  # Medido: `cp -r` 363 recompilacoes / ~8 min, montagem direta **0** / 53s. Detalhe e numeros no
+  # cabecalho do script (B-054).
   # `workflow_dispatch` continua disponível para rodar sob demanda num PR específico quando valer a pena.
   workflow_dispatch:
   # B-052 / ADR-0062 — o portao passou a olhar ANTES do merge.

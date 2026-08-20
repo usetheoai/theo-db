@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-87 items — **Open** 30 · **In flight** 8 · **Closed** 49
+87 items — **Open** 29 · **In flight** 9 · **Closed** 49
 
-### Open (30)
+### Open (29)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -92,7 +92,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-046`](#b-046--paridade-de-qps-com-o-pgvector-a-recall-casado-hoje-o-déficit-medido-é-163----) | Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3% | `triaged` | — |
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `triaged` | — |
 | [`B-050`](#b-050--o-conserto-do-cliente-opensearch-é-do-upstream-e-o-fork-tem-saída-declarada----) | O conserto do cliente OpenSearch é do upstream, e o fork tem saída declarada | `triaged` | — |
-| [`B-054`](#b-054--toda-iteração-em-rust-custa-8-minutos-e-2m34s-deles-eram-um-cp--r----) | Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r` | `triaged` | — |
 | [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança----) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `triaged` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `triaged` | — |
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
@@ -105,13 +104,14 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar----) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `triaged` | — |
 | [`B-087`](#b-087--o-pacote-do-arnês-diz-010dev0-enquanto-as-releases-dizem-v010-e-v020----) | O pacote do arnês diz `0.1.0.dev0` enquanto as releases dizem `v0.1.0` e `v0.2.0` | `triaged` | — |
 
-### In flight (8)
+### In flight (9)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-037`](#b-037--o-am-ivfflat-não-existe-metade-do-shim-pgvector-está-ausente----) | O AM `ivfflat` não existe: metade do shim pgvector está ausente | `planned` | — |
 | [`B-051`](#b-051--nada-compara-o-checkbox-com-o-status-e-a-divergência-sobreviveu-meses----) | Nada compara o checkbox com o `status`, e a divergência sobreviveu meses | `planned` | — |
 | [`B-052`](#b-052--workspace-não-tem-portão-73-commits-e-13-arquivos-rust-sem-um-gate-olhar----) | `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar | `planned` | — |
+| [`B-054`](#b-054--toda-iteração-em-rust-custa-8-minutos-e-2m34s-deles-eram-um-cp--r----) | Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r` | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
@@ -2271,7 +2271,16 @@ autoinfligidos pelo `cp -r`; (c) **o pior é de método** — eu rodava os **480
 em **um** módulo, quando `cargo pgrx test pg18 lexical` filtra e roda em segundos. O ciclo lento não é só
 desconfortável: ele empurra para usar gates mais baratos e errados, que foi exatamente o achado R-8 do ciclo
 anterior.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — os três bullets fecharam. (1) `scripts/dev-test.sh` usa **montagem direta** em vez
+  de cópia, então não há mtime a perder: medido em duas corridas consecutivas sem mudança de código,
+  **0 crates recompilados** nas duas (53s e 75s) — o critério exato que o DoD pede. (2) O filtro
+  posicional (`dev-test.sh lexical`) é o caminho documentado para rodar só o módulo tocado, e o
+  cabeçalho do script diz que a suíte completa é o gate de ENTREGA e não o de iteração. (3) Tempos
+  publicados no cabeçalho, combinando a medição de 2026-08-13 (`cp -r` 363 recompilações/~8 min,
+  `cp -a` 109) com a de hoje (direta: 0). Verificado executando: `dev-test.sh b037_pgvector_probes`
+  = 81s com zero recompilação; `dev-test.sh --lint` = 102s, exit 0. E a receita saiu de **oito**
+  cabeçalhos de workflow para um script — era a mesma duplicação de sempre.
 dod:
   - o comando de execução preserva mtime (`cp -a`, `rsync -a` ou montagem direta) — provado por
     `grep -c "^   Compiling"` numa segunda corrida consecutiva sem mudança de código, que deve dar **0**
@@ -2920,6 +2929,15 @@ a passagem: o `statement_timeout` único cancelava o build de 1M (consertado —
 `over_fetch` não era varrível (consertado). Enquanto medições saírem por fora, defeitos assim não aparecem —
 o script contorna o arnês e o arnês nunca é exercitado no caminho que o usuário final vai percorrer.
 status: triaged
+status_nota: 2026-08-20 — **PARCIAL, e o que falta está bloqueado por infraestrutura, não por esquecimento.**
+  Bullet 4 entregue no commit `7f6fb9e` do theodb-bench: `docs/methodology/PUBLICATION.md` passou a
+  dizer que medição fora do arnês não é publicável, com a razão que se subestima — um script que
+  contorna o arnês contorna também os defeitos dele, e os três bugs de 2026-08-17 só apareceram
+  porque o trabalho foi forçado de volta pelo `theodb-bench run`.
+  Bullets 1 e 2 exigem **servidor vivo** e o droplet foi destruído ([[B-073]], [[B-075]]).
+  Bullet 3 depende de existir um store de bundles: medido em 2026-08-20, `wiki/benchmarks/` tem
+  **171 documentos e apenas 3 citam bundle** — um gate exigindo bundle reprovaria 168 de 171, e gate
+  que nunca passa é gate que alguém desliga. Construir o gate antes do que ele fiscaliza seria teatro.
 status_nota_evidencia: 2026-08-20 — campo misto: abre com uma DECISÃO do owner (que não é medição) e
   fecha com a medição que a sustenta — três medições do dia saíram de scripts fora do arnês, nomeados.
   É a segunda parte que o torna `triaged`.

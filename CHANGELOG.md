@@ -13,6 +13,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`scripts/dev-test.sh` — o ciclo de iteração em Rust caiu de ~8 min para ~80s.** A receita
+  documentada copiava o código para dentro do contêiner com `cp -r`, que **não preserva mtime**: o
+  cargo decide o que recompilar por mtime, então o DataFusion inteiro era novo a cada corrida.
+  Medido: `cp -r` → **363 crates recompilados**; montagem direta → **0**, em duas corridas
+  consecutivas. E a receita estava copiada em **oito** cabeçalhos de workflow, sem que ninguém
+  pudesse executá-la sem colar à mão. Um filtro posicional roda só o módulo tocado, em segundos. (#B-054)
+
 ### Fixed
 - **O teste que provava o efeito do `hnsw.ef_search` media o índice contra ele mesmo.** A CTE que
   ele chamava de "verdade exata" era a mesma query da aproximada, com `enable_seqscan = off` na
