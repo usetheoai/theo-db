@@ -51,7 +51,10 @@ concurrency:
 
 jobs:
   canary:
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — segue a frota para `ubuntu-latest`. Um canário que roda numa classe de runner
+    # DIFERENTE da frota não prova nada sobre ela: ele existe para separar "os workflows estão
+    # quebrados" de "o Actions não roda para esta conta", e isso só vale no mesmo ambiente.
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Prove a runner executed a step

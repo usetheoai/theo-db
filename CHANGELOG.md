@@ -13,6 +13,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **A esteira inteira passa a rodar em runner GitHub-hosted.** Os doze workflows saíram da máquina
+  própria: em repositório público o runner padrão é grátis e ilimitado, e sobretudo **paralelo** — a
+  máquina paga era única e serial, e os dez workflows do mesmo push enfileiravam. A primeira medição
+  já apareceu: `actionlint` fechou em **11 segundos**, contra os 66 a 120 minutos que o `lint-rust`
+  levava para rodar um `cargo fmt --check` — quase tudo fila (#B-083)
+- Os jobs que compilam ganharam o preparo que a máquina quente dispensava: PostgreSQL 18 do PGDG
+  como `pg_config`, `cargo-pgrx` e `pgrx init` **com cache**, seguindo o mesmo caminho barato que o
+  `Dockerfile` já usava (usar o `pg_config` do sistema em vez de compilar PostgreSQL) (#B-083)
+
 ### Added
 - **A esteira passa a criar a release.** Nenhum workflow fazia isso — medido: zero ocorrências de
   `gh release`, gatilho `release:` ou equivalente nos nove arquivos existentes, e é por isso que
