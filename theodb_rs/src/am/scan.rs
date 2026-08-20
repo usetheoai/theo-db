@@ -1250,7 +1250,8 @@ mod tests {
         use std::collections::HashSet;
 
         // A superfície do shim, criada aqui como o `vector--0.7.0.sql` a cria.
-        Spi::run("CREATE ACCESS METHOD ivfflat TYPE INDEX HANDLER theodb_ivfflat_amhandler").unwrap();
+        Spi::run("CREATE ACCESS METHOD ivfflat TYPE INDEX HANDLER theodb_ivfflat_amhandler")
+            .unwrap();
         Spi::run(
             "CREATE OPERATOR CLASS vector_l2_ops DEFAULT FOR TYPE vector USING ivfflat AS \
              OPERATOR 1 <-> (vector, vector) FOR ORDER BY float_ops",
@@ -1266,7 +1267,8 @@ mod tests {
              ||(g*997%1000)||']')::vector FROM generate_series(1,2000) g",
         )
         .unwrap();
-        Spi::run("CREATE INDEX ivfp_e ON ivfp USING ivfflat (e vector_l2_ops) WITH (lists = 64)").unwrap();
+        Spi::run("CREATE INDEX ivfp_e ON ivfp USING ivfflat (e vector_l2_ops) WITH (lists = 64)")
+            .unwrap();
         Spi::run("ANALYZE ivfp").unwrap();
 
         let q = "[500,500,500,500,500,500,500,500]";
@@ -1283,12 +1285,19 @@ mod tests {
             })
         }
 
-        let exato = topk("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on", q);
+        let exato =
+            topk("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on", q);
         assert_eq!(exato.len(), K, "a verdade-terreno por seqscan deve devolver os {K} exatos");
 
         let idx = "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on";
-        let poucos = topk(&format!("{idx}; SET theodb_ivfflat.probes TO DEFAULT; SET ivfflat.probes = 1"), q);
-        let muitos = topk(&format!("{idx}; SET theodb_ivfflat.probes TO DEFAULT; SET ivfflat.probes = 64"), q);
+        let poucos = topk(
+            &format!("{idx}; SET theodb_ivfflat.probes TO DEFAULT; SET ivfflat.probes = 1"),
+            q,
+        );
+        let muitos = topk(
+            &format!("{idx}; SET theodb_ivfflat.probes TO DEFAULT; SET ivfflat.probes = 64"),
+            q,
+        );
 
         let recall = |got: &HashSet<i32>| got.intersection(&exato).count() as f64 / K as f64;
         let (r1, r64) = (recall(&poucos), recall(&muitos));
@@ -1299,7 +1308,9 @@ mod tests {
              com probes=64 foi {r64:.3}. Iguais significa que o knob nunca alcançou o scan — o alias propaga \
              o valor e não tem efeito, que é exatamente o que este teste existe para distinguir."
         );
-        assert!(r1 < 1.0, "probes=1 lê uma célula; por contagem não pode conter os {K} exatos (recall {r1:.3})");
+        assert!(
+            r1 < 1.0,
+            "probes=1 lê uma célula; por contagem não pode conter os {K} exatos (recall {r1:.3})"
+        );
     }
-
 }
