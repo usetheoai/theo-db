@@ -13,6 +13,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Os oito portões pesados passaram a olhar o código ANTES do merge, e custam menos fazendo isso.**
+  O gatilho de `pull_request` fora removido em 2026-08-12 porque o runner era único, serial e pago;
+  os runners migraram para GitHub-hosted num repositório público, onde são grátis, ilimitados e
+  paralelos — a premissa inteira caiu. Não é acrescentar gatilho, é **trocar**: `push` fica só em
+  `main`. Medido em 9 dias: **30 corridas pesadas por push em `develop` para 13 integrações**; com o
+  gate no PR são ~13. Menos corridas, e olhando enquanto ainda dá para recusar. Decisão em
+  `wiki/decisions/0062-portao-antes-do-merge.md`, porque desfaz uma decisão explícita do owner. (#B-052)
+
 ### Security
 - **As 39 referências a actions de terceiros passaram a ser fixadas por SHA imutável**, com a tag
   legível ao lado em comentário. Uma tag é um ponteiro mutável: quem controla o repositório da

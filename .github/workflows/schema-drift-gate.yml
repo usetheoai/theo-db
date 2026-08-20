@@ -33,8 +33,34 @@ on:
   #     cargo pgrx test pg18'
   # `workflow_dispatch` continua disponível para rodar sob demanda num PR específico quando valer a pena.
   workflow_dispatch:
-  push:
+  # B-052 / ADR-0062 — o portao passou a olhar ANTES do merge.
+  #
+  # `pull_request` roda contra `refs/pull/N/merge`, ou seja, contra a arvore MERGEADA — a mesma
+  # coisa que o `push` para `develop` testava, um passo antes. E `push: [develop]` saiu junto: sem
+  # isso a mudanca DOBRARIA as corridas pesadas, e a restricao de capacidade que removeu o gatilho
+  # de PR em 2026-08-12 e premissa deste item, nao obstaculo.
+  #
+  # Custo MEDIDO na janela de 9 dias (2026-08-11..20), nao estimado: 30 corridas pesadas por push
+  # em `develop` (1410 min) para 13 PRs `workspace -> develop` mergeados. Com o gate no PR e
+  # `cancel-in-progress` colapsando pushes sucessivos, sao ~13 corridas — MENOS que as 30 de hoje,
+  # e olhando o codigo enquanto ele ainda pode ser recusado.
+  #
+  # `push: [main]` fica: e a verificacao pos-release, e `main` so avanca por PR de release.
+  pull_request:
     branches: [develop, main]
+    # #211 — NÃO adicione `paths-ignore:` aqui. O GitHub proíbe `paths` e `paths-ignore` no MESMO
+    # evento e rejeita o arquivo no parse (`startup_failure`, zero jobs): este gate marcou 100 de
+    # 100 runs falhos até 27/07. A economia de fila que #187 buscava se expressa DENTRO do `paths:`,
+    # via padrão negado — um filtro só, sem conflito. `.claude/**` e `wiki/**` já estão fora por
+    # construção; o `!**/*.md` é guarda de futuro (hoje não há `.md` sob `theodb_rs/src|sql/`).
+    paths:
+      - 'theodb_rs/src/**'
+      - 'theodb_rs/theodb_rs.control'
+      - 'theodb_rs/sql/**'
+      - '!**/*.md'
+
+  push:
+    branches: [main]
     # #211 — NÃO adicione `paths-ignore:` aqui. O GitHub proíbe `paths` e `paths-ignore` no MESMO
     # evento e rejeita o arquivo no parse (`startup_failure`, zero jobs): este gate marcou 100 de
     # 100 runs falhos até 27/07. A economia de fila que #187 buscava se expressa DENTRO do `paths:`,
