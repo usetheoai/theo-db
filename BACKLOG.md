@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-80 items — **Open** 43 · **In flight** 33 · **Closed** 4
+80 items — **Open** 41 · **In flight** 33 · **Closed** 6
 
-### Open (43)
+### Open (41)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -87,7 +87,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-015`](#b-015--cinco-testes-falham-com-contador-em-zero-instrumentação-ou-o-chunk-skip-não-poda----) | Cinco testes falham com contador em zero: instrumentação ou o chunk-skip não poda? | `triaged` | — |
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
 | [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off----) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `triaged` | — |
-| [`B-021`](#b-021--o-diagnóstico-não-enxerga-índice-criado-pela-sintaxe-pgvector-e-o-opclass-default-não-serve-----) | O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>` | `triaged` | — |
 | [`B-026`](#b-026--resíduo-do-symqg-função-morta-com-null-deref-latente-e-o-gate-de-clippy-está-vermelho-por-ela----) | Resíduo do SymQG: função morta com null-deref latente, e o gate de clippy está vermelho por ela | `triaged` | — |
 | [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `triaged` | — |
 | [`B-037`](#b-037--o-am-ivfflat-não-existe-metade-do-shim-pgvector-está-ausente----) | O AM `ivfflat` não existe: metade do shim pgvector está ausente | `triaged` | — |
@@ -116,7 +115,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-077`](#b-077--a-tabela-de-roteamento-é-a-do-ecossistema-inteiro-e-os-dois-repos-que-existem-não-roteiam----) | A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam | `triaged` | — |
 | [`B-078`](#b-078--seis-módulos-de-teste-do-kit-não-coletam-um-símbolo-removido-levou-as-suítes-junto----) | Seis módulos de teste do kit não coletam: um símbolo removido levou as suítes junto | `triaged` | — |
 | [`B-079`](#b-079--o-tooling-escrito-em-claude-protege-uma-máquina-até-chegar-ao-repo-do-kit----) | O tooling escrito em `.claude/` protege uma máquina até chegar ao repo do kit | `triaged` | — |
-| [`B-080`](#b-080--o-renumbered-do-revisor-de-backlog-é-blocker-e-afirma-um-dano-que-a-evidência-não-mostra----) | O `renumbered` do revisor de backlog é BLOCKER e afirma um dano que a evidência não mostra | `triaged` | — |
 
 ### In flight (33)
 
@@ -156,14 +154,16 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-074`](#b-074--o-teste-pareado-cancela-variância-de-query-e-não-cancela-deriva-temporal-da-máquina----) | O teste pareado cancela variância de query, e não cancela deriva temporal da máquina | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 
-### Closed (4)
+### Closed (6)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-019`](#b-019--create-index-de-hnsw-não-é-idempotente-estoura-em-vez-de-ser-no-op----) | `CREATE INDEX` de HNSW não é idempotente: estoura em vez de ser no-op | `killed` | — |
 | [`B-020`](#b-020--create-index-de-hnsw-é-93-mais-lento-que-inserir-as-mesmas-linhas----) | `CREATE INDEX` de HNSW é 93× mais lento que inserir as mesmas linhas | `killed` | — |
+| [`B-021`](#b-021--o-diagnóstico-não-enxerga-índice-criado-pela-sintaxe-pgvector-e-o-opclass-default-não-serve-----) | O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>` | `shipped` | — |
 | [`B-024`](#b-024--o-autotune-recomendou-ef_search-sobre-contadores-em-zero-e-ninguém-mediu-o-alcance----) | O autotune recomendou `ef_search` sobre contadores em ZERO, e ninguém mediu o alcance | `killed` | — |
 | [`B-028`](#b-028--o-harness-de-upgrade-declarou-todos-os-cenários-passaram-com-um-cenário-pulado---x) | O harness de upgrade declarou "TODOS OS CENÁRIOS PASSARAM" com um cenário PULADO | `killed` | — |
+| [`B-080`](#b-080--o-renumbered-do-revisor-de-backlog-é-blocker-e-afirma-um-dano-que-a-evidência-não-mostra----) | O `renumbered` do revisor de backlog é BLOCKER e afirma um dano que a evidência não mostra | `killed` | — |
 
 <!-- BACKLOG-INDEX:END -->
 
@@ -1019,7 +1019,12 @@ suggested_mode: bug
 source: discover-bug
 evidence: medido em 2026-08-11 contra `ghcr.io/usetheoai/theo-db:0.140.0`. (a) `theodb.explain_scan` sobre uma tabela cujo índice foi criado com `USING hnsw` (o alias do shim, `sql/vector--0.6.0.sql:49`) devolve `(no theodb_hnsw index on this table)` — o alias é uma segunda entrada em `pg_am` (OID `hnsw=19173` vs `theodb_hnsw=16568`) e a resolução casa pelo nome do AM. (b) um índice criado com o opclass **default** do AM (`theodb_hnsw_l2_ops`, `opcdefault=t`) não serve o operador `<=>`: o plano medido cai em `Limit → Sort → Seq Scan`, enquanto `theodb_hnsw_cosine_ops` produz `Index Scan ... Order By`.
 why_now: os dois se somam contra o consumidor real. **Todo** índice que o `theo-rag` cria usa `USING hnsw` — portanto é invisível ao `explain_scan` e ao autotune, justamente nas consultas que o dogfood exercita. E `scan_stats` hardcoda `<=>` (`autotune.rs:210`), então quem cria o índice sem nomear o opclass (aceitando o default L2) nunca é medido e não recebe aviso — o diagnóstico devolve zeros silenciosos em vez de dizer "este índice não responde a este operador".
-status: triaged
+status: shipped
+status_nota_release: 2026-08-20 — resolvida a divergência que o `status_nota_dedup` abaixo registrou como
+  minha de não resolver. O trabalho **saiu em release**: `CHANGELOG.md § [0.160.0] - 2026-08-12` traz duas
+  entradas com referência `(#B-021)` — o diagnóstico que passou a enxergar índice criado pela sintaxe do
+  pgvector, e o que passou a recusar com erro tipado em vez de devolver zero silencioso. `shipped` descreve
+  isso; `triaged` dizia que a medição rodou e mais nada.
 status_nota_dedup: 2026-08-20 — o bloco declarava `status` duas vezes (`raw`, depois `triaged`). Removida a
   PRIMEIRA — resto de uma edição que acrescentou sem apagar —, mantendo o valor que todo leitor já tomava.
   **Divergência que permanece e não é minha de resolver:** o `resolvido:` abaixo registra as três partes do
@@ -3099,7 +3104,22 @@ why_now: o `SKILL.md` do `backlog-review` separa `deterministic` ("a máquina te
 gasta essa distinção: das duas uma, ou alguém reordena 79 blocos para satisfazer um invariante que a regra
 não pede, ou aprende a ignorar o relatório — e o relatório carrega 17 blockers verdadeiros ([[B-077]]) que
 ninguém pode se dar ao luxo de ignorar junto.
-status: triaged
+status: killed
+kill_reason: consertado em 2026-08-20, no mesmo ciclo em que foi registrado — mesmo desfecho e mesma razão
+  do [[B-028]]: o valor está no PADRÃO, não no conserto. As quatro partes do DoD, por TDD (3 testes RED
+  antes do conserto, 45 verdes depois):
+  (1) o `renumbered` deixou de existir como blocker — reuso de id já era pego por `duplicate_id`, que é
+  determinístico e conta de verdade, então posição no arquivo não tinha nada de próprio a provar;
+  (2) virou `ids_out_of_order`, `heuristic`/`minor`, com mensagem que afirma o que é verdade (ids
+  ascendentes leem-se melhor) em vez de um dano que não ocorreu;
+  (3) há teste com backlog fora de ordem SEM id repetido provando a ausência do blocker, e teste de que
+  ordem ascendente não produz achado nenhum;
+  (4) `cycle-backlog.md § Item schema` passa a dizer que "monotonic" governa **alocação**, não posição no
+  arquivo, com a medição que forçou a distinção.
+  A segunda instância também: `thin_dod` deixou de disparar em item `killed`, com teste dos dois lados —
+  isento quando fechado por `kill_reason`, exigido quando aberto. `shipped` segue NÃO isento, porque sem
+  DoD não há como saber contra o quê ele entregou.
+  Medido depois: `/backlog-review` em **SHIPPABLE** — 0 blockers, 0 majors, 0 minors.
 dod:
   - o checador distingue id REUSADO (blocker, e verificável por contagem) de ordem de aparição no arquivo
   - se ordem de aparição virar achado, ele é `minor`/`heuristic` e a mensagem descreve o que de fato acontece

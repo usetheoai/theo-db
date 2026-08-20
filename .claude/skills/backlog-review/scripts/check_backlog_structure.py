@@ -18,11 +18,11 @@ What it checks instead — the ways a maintenance registry actually rots:
     raw_with_evidence       raw but carrying evidence — status never advanced
     unroutable_repo         repo in no domain (gate G1)
     invalid_mode            suggested_mode outside the four
-    renumbered              ids not monotonic — a reused id destroys traceability
 
   HEURISTIC (a reader decides; labelled as such in every finding)
     vague_dod               a DoD bullet nothing could falsify
-    thin_dod                zero DoD bullets
+    thin_dod                zero DoD bullets (exempt when `killed`)
+    ids_out_of_order        ids do not ascend in file order — cosmetic, never a blocker
     stale_raw               raw for longer than the staleness window
     possible_duplicate      two open items whose titles overlap heavily
 
@@ -246,7 +246,12 @@ def check_backlog(backlog_path: Path, today: date | None = None) -> dict[str, An
             findings.append(Finding("unroutable_repo", "deterministic", "blocker", iid,
                 f"`{repo}` is in no domain — the item routes to nobody (gate G1)"))
 
-        if not item.dod:
+        if not item.dod and status != "killed":
+            # `killed` is exempt: the item closed by `kill_reason`, so a closing criterion
+            # is moot. The finding's own consequence ("it never closes") is contradicted by
+            # the block, and the only way to satisfy it would be to write a criterion after
+            # the close — grading a moved target. `shipped` is NOT exempt: without a DoD
+            # there is no way to know what it shipped against.
             findings.append(Finding("thin_dod", "heuristic", "major", iid,
                 "no DoD bullet — nothing states when this item is done, so it never closes"))
         else:
@@ -263,9 +268,10 @@ def check_backlog(backlog_path: Path, today: date | None = None) -> dict[str, An
                     "does not and it should be killed with that as the reason."))
 
     if numeric_ids and numeric_ids != sorted(numeric_ids):
-        findings.append(Finding("renumbered", "deterministic", "blocker", "-",
-            "ids are not monotonic. Ids are never reused and never reordered — a reused "
-            "id makes every earlier reference ambiguous."))
+        findings.append(Finding("ids_out_of_order", "heuristic", "minor", "-",
+            "ids do not ascend in file order. Nothing is broken by it — every reference "
+            "still resolves to exactly one block — but a registry read top to bottom is "
+            "easier when they ascend."))
 
     open_items = [i for i in items if i.fields.get("status") in OPEN_STATUS]
     for idx, a in enumerate(open_items):

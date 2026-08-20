@@ -36,11 +36,54 @@ def test_duplicate_id_is_a_blocker(tmp_path: Path) -> None:
     assert report["verdict"] == "INVALID"
 
 
-def test_non_monotonic_ids_are_a_blocker(tmp_path: Path) -> None:
-    """A reused or reordered id makes every earlier reference ambiguous."""
+def test_ids_out_of_file_order_are_not_a_blocker(tmp_path: Path) -> None:
+    """Position in the file is not reuse, and only reuse breaks traceability.
+
+    The check used to be `renumbered`, a deterministic BLOCKER whose message said a
+    reused id "makes every earlier reference ambiguous". Measured on this project's own
+    registry on 2026-08-20: no id was reused (`uniq -d` empty) and three pairs merely sat
+    out of ascending order, because blocks had been inserted next to related items. Every
+    `[[B-NNN]]` reference still resolved to exactly one block, so the harm the message
+    asserted had not occurred. Reuse is already caught deterministically by
+    `duplicate_id`, which leaves position with nothing of its own to prove.
+    """
     report = check_backlog(write_backlog(tmp_path, item_block("B-005"), item_block("B-002", "Outro")))
-    assert "renumbered" in _checks(report)
-    assert report["verdict"] == "INVALID"
+    assert "renumbered" not in _checks(report)
+    assert report["verdict"] != "INVALID", report["findings"]
+
+
+def test_ids_out_of_file_order_are_reported_as_a_heuristic_minor(tmp_path: Path) -> None:
+    """Still worth saying — a registry read top to bottom is easier when ids ascend."""
+    report = check_backlog(write_backlog(tmp_path, item_block("B-005"), item_block("B-002", "Outro")))
+    finding = _find(report, "ids_out_of_order")
+    assert finding["severity"] == "minor"
+    assert finding["kind"] == "heuristic"
+    assert "reused" not in finding["message"], "the message must not assert a harm that did not occur"
+
+
+def test_ascending_ids_produce_no_order_finding(tmp_path: Path) -> None:
+    report = check_backlog(write_backlog(tmp_path, item_block("B-002"), item_block("B-005", "Outro")))
+    assert "ids_out_of_order" not in _checks(report)
+
+
+def test_a_killed_item_needs_no_dod(tmp_path: Path) -> None:
+    """It closed by `kill_reason`; a closing criterion is moot after the close.
+
+    `thin_dod` says "nothing states when this item is done, so it never closes". For an
+    item that already closed, the consequence is contradicted by the block itself — and
+    the only way to satisfy the check would be to invent a closing criterion after the
+    fact, which is grading a moved target.
+    """
+    killed = item_block("B-002", "Morto no mesmo ciclo", status="killed", dod=[],
+                        extra="kill_reason: consertado no ciclo em que foi descoberto\n")
+    report = check_backlog(write_backlog(tmp_path, item_block("B-001"), killed))
+    assert "thin_dod" not in _checks(report)
+
+
+def test_an_open_item_still_needs_a_dod(tmp_path: Path) -> None:
+    """The exemption is for closed items only — an open one without a criterion never closes."""
+    report = check_backlog(write_backlog(tmp_path, item_block("B-001", dod=[])))
+    assert "thin_dod" in _checks(report)
 
 
 def test_triaged_without_evidence_is_a_blocker(tmp_path: Path) -> None:

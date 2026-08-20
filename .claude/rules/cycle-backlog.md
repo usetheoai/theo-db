@@ -57,6 +57,10 @@ One file, one schema, two entry paths. A sweep finding skips intake because it a
 
 Every item is one `## B-NNN` block. Ids are monotonic, never reused, never renumbered — a killed item keeps its number so the audit trail survives.
 
+**"Monotonic" governs ALLOCATION, not position in the file.** The next item takes the next unused number; an id is never handed out twice and never renamed. Where its block physically sits is a readability matter — inserting a new block next to the items it relates to is normal and breaks nothing, because every `[[B-NNN]]` reference resolves by id.
+
+This needed saying because it was read the other way. `check_backlog_structure.py` emitted a deterministic BLOCKER named `renumbered` whenever ids did not ascend in file order, with the message *"a reused id makes every earlier reference ambiguous"*. Measured on this registry on 2026-08-20: no id was reused, three pairs merely sat out of order, and every reference still resolved. Reuse is already caught by `duplicate_id`, which is deterministic and actually counts — so position had nothing of its own to prove. The check is now `ids_out_of_order`: heuristic, minor, and its message says what is true (ascending ids read more easily) instead of a harm that did not occur.
+
 ```markdown
 ## B-014 — Reduce the theo-lens trace explorer p95   [ ]
 
