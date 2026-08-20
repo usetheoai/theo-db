@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-87 items — **Open** 29 · **In flight** 9 · **Closed** 49
+87 items — **Open** 28 · **In flight** 9 · **Closed** 50
 
-### Open (29)
+### Open (28)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -102,7 +102,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 | [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar----) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `triaged` | — |
-| [`B-087`](#b-087--o-pacote-do-arnês-diz-010dev0-enquanto-as-releases-dizem-v010-e-v020----) | O pacote do arnês diz `0.1.0.dev0` enquanto as releases dizem `v0.1.0` e `v0.2.0` | `triaged` | — |
 
 ### In flight (9)
 
@@ -118,7 +117,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-083`](#b-083--42-actions-de-terceiros-fixadas-por-tag-e-nenhuma-por-sha----) | 42 actions de terceiros fixadas por TAG, e nenhuma por SHA | `planned` | — |
 | [`B-086`](#b-086--o-teste-que-prova-o-alias-do-ef_search-passa-quando-o-guc-está-inerte----) | O teste que prova o alias do `ef_search` passa quando o GUC está inerte | `planned` | — |
 
-### Closed (49)
+### Closed (50)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -171,6 +170,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-082`](#b-082--o-primeiro-comando-do-readme-aponta-para-uma-org-que-não-é-a-nossa-e-a-imagem-nunca-foi-publicada---x) | O primeiro comando do README aponta para uma org que não é a nossa, e a imagem nunca foi publicada | `shipped` | — |
 | [`B-084`](#b-084--a-esteira-do-banco-rodava-o-avaliador-e-três-constantes-fixavam-uma-versão-que-o-upstream-move---x) | A esteira do banco rodava o avaliador, e três constantes fixavam uma versão que o upstream move | `shipped` | — |
 | [`B-085`](#b-085--a-imagem-era-construída-onze-vezes-por-corrida-e-nenhum-job-dependia-de-outro---x) | A imagem era construída onze vezes por corrida, e nenhum job dependia de outro | `shipped` | — |
+| [`B-087`](#b-087--o-pacote-do-arnês-diz-010dev0-enquanto-as-releases-dizem-v010-e-v020---x) | O pacote do arnês diz `0.1.0.dev0` enquanto as releases dizem `v0.1.0` e `v0.2.0` | `shipped` | — |
 
 <!-- BACKLOG-INDEX:END -->
 
@@ -3693,7 +3693,7 @@ dod:
 > Registrado 2026-08-20 pela leitura do código durante o [[B-037]]. **Não retrata nenhum número publicado**:
 > a suíte roda verde e o `ef_search` demonstravelmente funciona (481 testes passam, e o M60/M69/M70 mediram
 > recall). O defeito é de COBERTURA — o teste não protegeria a regressão que ele existe para proteger.
-## B-087 — O pacote do arnês diz `0.1.0.dev0` enquanto as releases dizem `v0.1.0` e `v0.2.0`   [ ]
+## B-087 — O pacote do arnês diz `0.1.0.dev0` enquanto as releases dizem `v0.1.0` e `v0.2.0`   [x]
 
 domain: arnes
 repo: theodb-bench
@@ -3708,7 +3708,13 @@ por essa via registra a errada.
 why_now: o corte da `v0.2.0` é o segundo em que a discrepância passa, e é o primeiro em que ela
 divergiria em MINOR e não só em sufixo. Enquanto era `0.1.0.dev0` vs `v0.1.0` dava para ler como
 sufixo de desenvolvimento; `0.1.0.dev0` vs `v0.2.0` é outra versão.
-status: triaged
+status: shipped
+status_nota: 2026-08-20 — os três bullets fecharam; commit `e499d4f` no theodb-bench, lançado em `v0.3.0`. A versão passou a ter fonte única (`importlib.metadata`, que lê o que o pip
+  instalou do `pyproject.toml`) — eram DOIS literais, e literais iguais hoje divergem amanhã. O
+  portão roda no `release.yml` **antes** de criar a release, que é o que o bullet 2 pede por "no
+  corte e não depois". Bullet 3 medido em vez de suposto: **nenhum bundle publicado registrou a
+  versão errada** — não há `environment.json`/`manifest.json` fora das fixtures nos dois repos, e
+  nenhum documento de `wiki/benchmarks/` carrega o campo. A exposição era latente.
 dod:
   - a versão que o pacote reporta e a tag da release não podem divergir — ou o corte atualiza o
     `pyproject.toml`, ou a versão passa a ser derivada da tag (`setuptools-scm` ou equivalente)
