@@ -76,15 +76,20 @@ def test_unicode_in_table(tmp_path: Path) -> None:
 def test_empty_file(tmp_path: Path) -> None:
     plan = tmp_path / "empty.md"
     plan.write_text("", encoding="utf-8")
-    with pytest.raises(ValueError, match="Coverage Matrix"):
-        check_coverage_matrix(plan)
+    # B-081: a ausencia da secao e o hard cap `coverage_lt_100`, nao uma falha da ferramenta.
+    # Estes tres testes pinavam o crash como contrato — e um teste que pina um defeito e o que
+    # torna o defeito caro de consertar.
+    report = check_coverage_matrix(plan)
+    assert report.is_complete is False
+    assert any("Coverage Matrix" in e for e in report.parse_errors)
 
 
 def test_only_whitespace(tmp_path: Path) -> None:
     plan = tmp_path / "ws.md"
     plan.write_text("   \n\n\t\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="Coverage Matrix"):
-        check_coverage_matrix(plan)
+    report = check_coverage_matrix(plan)
+    assert report.is_complete is False
+    assert any("Coverage Matrix" in e for e in report.parse_errors)
 
 
 def test_huge_plan_does_not_timeout(tmp_path: Path) -> None:
@@ -234,5 +239,6 @@ def test_very_long_single_line(tmp_path: Path) -> None:
     huge_line = "word " * 20000  # ~100KB
     plan = tmp_path / "longline.md"
     plan.write_text(huge_line + "\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="Coverage Matrix"):
-        check_coverage_matrix(plan)
+    report = check_coverage_matrix(plan)
+    assert report.is_complete is False
+    assert any("Coverage Matrix" in e for e in report.parse_errors)

@@ -13,6 +13,71 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.161.0] - 2026-08-20
+
+### Added
+- **`scripts/dev-test.sh` — o ciclo de iteração em Rust caiu de ~8 min para ~80s.** A receita
+  documentada copiava o código para dentro do contêiner com `cp -r`, que **não preserva mtime**: o
+  cargo decide o que recompilar por mtime, então o DataFusion inteiro era novo a cada corrida.
+  Medido: `cp -r` → **363 crates recompilados**; montagem direta → **0**, em duas corridas
+  consecutivas. E a receita estava copiada em **oito** cabeçalhos de workflow, sem que ninguém
+  pudesse executá-la sem colar à mão. Um filtro posicional roda só o módulo tocado, em segundos. (#B-054)
+
+- **`SET ivfflat.probes` tem efeito medido, e agora há prova disso.** O alias pgvector tinha teste
+  de propagação de valor — que o GUC devolve o que foi setado —, o que é diferente de ter efeito:
+  um alias pode propagar certo e nunca alcançar o scan. O teste novo mede recall@200 contra
+  verdade-terreno por seqscan em `probes=1` e `probes=64`, e a diferença é forçada por contagem
+  (uma célula de Voronoi não cabe 200 vizinhos), não por amostragem. (#B-037)
+- **O registro de manutenção passou a se contradizer em voz alta.** `BACKLOG.md` tinha dois campos por
+  bloco — o checkbox e o `status` — e nada os comparava: cada um está correto isolado, e só a comparação
+  revela a divergência. Ao ligar o portão, **30 dos 39 itens lançados** estavam com o checkbox para trás.
+  O gate também exige que `shipped` aponte para um commit contido em tag semver, e **declara** quantos
+  blocos não têm ponteiro verificável em vez de contá-los como limpos. Roda no Stop hook quando o
+  `BACKLOG.md` é tocado. (#B-051)
+
+### Changed
+- **Os oito portões pesados passaram a olhar o código ANTES do merge, e custam menos fazendo isso.**
+  O gatilho de `pull_request` fora removido em 2026-08-12 porque o runner era único, serial e pago;
+  os runners migraram para GitHub-hosted num repositório público, onde são grátis, ilimitados e
+  paralelos — a premissa inteira caiu. Não é acrescentar gatilho, é **trocar**: `push` fica só em
+  `main`. Medido em 9 dias: **30 corridas pesadas por push em `develop` para 13 integrações**; com o
+  gate no PR são ~13. Menos corridas, e olhando enquanto ainda dá para recusar. Decisão em
+  `wiki/decisions/0062-portao-antes-do-merge.md`, porque desfaz uma decisão explícita do owner. (#B-052)
+
+### Fixed
+- **Um plano sem `## Coverage Matrix` reprova em vez de derrubar a ferramenta.** `run_structural`
+  levantava `ValueError` para a condição exata que o golden rule cobre com o hard cap
+  `coverage_lt_100` — e quem chama não distinguia "plano inválido" de "skill quebrada", que exigem
+  ações opostas. Quatro testes pinavam o crash como contrato, e eram o que tornava o defeito caro. (#B-081)
+- **Um ponteiro para o ecossistema deixou de ser acusado de evidência fabricada em layout de
+  plugin.** Três checadores resolviam caminho só do jeito do kit (`rules/` na raiz), de modo que em
+  qualquer consumidor uma oportunidade legítima disparava o hard cap mais severo da skill. A
+  resolução virou uma implementação só, em `scripts/ecosystem_utils.py`. (#B-081)
+- **O teste que provava o efeito do `hnsw.ef_search` media o índice contra ele mesmo.** A CTE que
+  ele chamava de "verdade exata" era a mesma query da aproximada, com `enable_seqscan = off` na
+  sessão — recall 1.0 por construção, e a asserção `>=` nunca podia falhar. Medido: com a
+  verdade-terreno antiga, `ef=1` e `ef=400` davam ambos 1.0; com verdade-terreno por varredura
+  sequencial, dão **0.1 e 1.0**. Nenhum número publicado é retratado — o knob funciona, e o efeito é
+  de 10×; o que não funcionava era a medição dele. (#B-086)
+
+- **`docker pull ghcr.io/usetheoai/theo-db:latest` funciona.** O primeiro comando do README nunca
+  havia funcionado: as oito execuções do workflow de publicação desde 2026-07-29 falharam, e o
+  manifesto respondia `403`. A causa estava em três níveis acima do que os logs mostravam — a
+  organização **proibia pacotes públicos**, o que forçava o pacote a privado, o que impedia
+  vinculá-lo a um repositório público, o que tirava o acesso do workflow. Verificado do jeito que um
+  usuário faz: `docker logout` e `docker pull`, sem credencial (#B-082)
+- A nota do README que declarava a imagem indisponível foi removida — ela era verdadeira quando
+  escrita hoje de manhã, e mantê-la depois de a medição mudar seria o mesmo defeito com o sinal
+  invertido (#B-082)
+
+### Security
+- **As 39 referências a actions de terceiros passaram a ser fixadas por SHA imutável**, com a tag
+  legível ao lado em comentário. Uma tag é um ponteiro mutável: quem controla o repositório da
+  action pode reapontá-la, e o consumidor executa código novo sem um diff em lugar nenhum — nem no
+  PR, nem no histórico, nem na revisão. `actions/*` e `docker/*` incluídas, porque pertencer ao
+  GitHub não torna uma tag imutável. O dependabot já em vigor reescreve SHA e comentário juntos, e
+  a política ficou em `.github/CONTRIBUTING-workflows.md`. (#B-083)
+
 ## [0.160.1] - 2026-08-20
 
 ### Added

@@ -40,15 +40,48 @@ on:
   # A TROCA É REAL e fica dita: sem gate no PR, um defeito só aparece quando já está em `develop`, e
   # quem descobre é o próximo a integrar. A proteção não some, muda de lugar — passa a depender de
   # rodar os gates LOCALMENTE antes de promover, no contêiner com o toolchain pinado:
-  #   docker run --rm -v $PWD/theodb_rs:/src theodb-builder:latest bash -c '
-  #     rustup component add clippy rustfmt --toolchain 1.97.0-x86_64-unknown-linux-gnu
-  #     mkdir -p /tmp/b && cp -r /src/. /tmp/b/ && cd /tmp/b
-  #     cargo fmt -- --check && cargo clippy --features pg18 --no-deps -- $(grep -v "^#" .clippy_args | tr "\n" " ")
-  #     cargo pgrx test pg18'
+  #   bash scripts/dev-test.sh --lint     # cargo fmt --check + clippy com o baseline
+  #   bash scripts/dev-test.sh            # a suite inteira
+  #   bash scripts/dev-test.sh lexical    # so o modulo tocado, em segundos
+  #
+  # A receita estava COPIADA AQUI E EM MAIS SETE cabecalhos, e fazia `cp -r` do codigo para dentro
+  # do conteiner — o que nao preserva mtime e fazia o cargo recompilar 363 crates a cada corrida.
+  # Medido: `cp -r` 363 recompilacoes / ~8 min, montagem direta **0** / 53s. Detalhe e numeros no
+  # cabecalho do script (B-054).
   # `workflow_dispatch` continua disponível para rodar sob demanda num PR específico quando valer a pena.
   workflow_dispatch:
-  push:
+  # B-052 / ADR-0062 — o portao passou a olhar ANTES do merge.
+  #
+  # `pull_request` roda contra `refs/pull/N/merge`, ou seja, contra a arvore MERGEADA — a mesma
+  # coisa que o `push` para `develop` testava, um passo antes. E `push: [develop]` saiu junto: sem
+  # isso a mudanca DOBRARIA as corridas pesadas, e a restricao de capacidade que removeu o gatilho
+  # de PR em 2026-08-12 e premissa deste item, nao obstaculo.
+  #
+  # Custo MEDIDO na janela de 9 dias (2026-08-11..20), nao estimado: 30 corridas pesadas por push
+  # em `develop` (1410 min) para 13 PRs `workspace -> develop` mergeados. Com o gate no PR e
+  # `cancel-in-progress` colapsando pushes sucessivos, sao ~13 corridas — MENOS que as 30 de hoje,
+  # e olhando o codigo enquanto ele ainda pode ser recusado.
+  #
+  # `push: [main]` fica: e a verificacao pos-release, e `main` so avanca por PR de release.
+  pull_request:
     branches: [develop, main]
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      # B-030: `Makefile` e `theodb.control` saíram com o umbrella `theodb`, absorvido pelo `theodb_rs`.
+      # A superfície SQL que eles construíam agora vive em `theodb_rs/sql/surface/`, já coberta pelo
+      # `theodb_rs/**` abaixo. O shim `vector` continua separado e virou unidade autocontida em `vector/`
+      # (control + script de instalação juntos), então o `sql/` de topo deixou de existir.
+      - 'vector/**'
+      - 'theodb_rs/**'
+      - 'scripts/**'
+      - 'packaging/**'
+      - '.github/workflows/ci.yml'
+      # Um README dentro de qualquer um dos diretórios acima não muda resultado de teste.
+      - '!**/*.md'
+
+  push:
+    branches: [main]
     paths:
       - 'Dockerfile'
       - '.dockerignore'
@@ -97,13 +130,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build da imagem de CI (uma vez, para todos)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           tags: theo-db:ci
@@ -125,7 +158,7 @@ jobs:
       - name: Salvar a imagem
         run: docker save theo-db:ci | zstd -T0 -3 -o /tmp/theodb-ci.tar.zst
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: theodb-ci-image
           path: /tmp/theodb-ci.tar.zst
@@ -148,10 +181,10 @@ jobs:
     # declaravam timeout (pg-regression 25, hybrid-search 20).
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -228,10 +261,10 @@ jobs:
     # é ~2x o observado — folga para variação de download do dataset sem virar refém de um hang.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -316,10 +349,10 @@ jobs:
     # do `pg-regression` (25), que também sobe container e roda suíte externa.
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -362,13 +395,13 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -405,10 +438,10 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -455,10 +488,10 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -515,13 +548,13 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -573,9 +606,9 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Carregar a imagem construída uma vez pelo job `build`
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: theodb-ci-image
           path: /tmp
@@ -628,7 +661,7 @@ jobs:
     # de remover toolchains pré-instaladas não foi necessária — e não entra sem número que a peça.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: License sweep — columnar candidates permissive verdict (reproducible)
         run: bash packaging/license-sweep.sh || true   # § (a)/(b) need the theo-db image; § (c)/(e) curl-only verdicts always print
       - name: Build throwaway columnar image (canonical pg_mooncake distribution, MIT)

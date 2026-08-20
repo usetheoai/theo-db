@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -83,6 +84,13 @@ class Item:
     #: Fields declared more than once in the block. `fields` keeps the LAST value, so without
     #: this the earlier ones vanish and nothing says the block held two answers.
     duplicated: dict[str, list[str]] = field(default_factory=dict)
+    #: `x`, ` ` ou None quando o cabeçalho não traz marca. B-051: o checkbox e o `status`
+    #: são dois campos do mesmo bloco que podem discordar em silêncio, e comparar os dois
+    #: é a única coisa que revela a divergência — cada um isolado está correto.
+    checkbox: str | None = None
+    #: Corpo bruto do bloco. O parser guarda campos e DoD; a evidência de release é
+    #: citada em PROSA, e reconstruí-la a partir dos campos perderia justamente ela.
+    body: str = ""
 
 
 def _parse_items(content: str) -> list[Item]:
@@ -97,6 +105,8 @@ def _parse_items(content: str) -> list[Item]:
             item_id=match.group(1),
             title=match.group(2).strip(),
             line=content[: match.start()].count("\n") + 1,
+            checkbox=match.group(3),
+            body=body,
         )
         seen_values: dict[str, list[str]] = {}
         for fmatch in FIELD_RE.finditer(body):
@@ -174,6 +184,48 @@ def _known_repos(backlog_dir: Path) -> set[str] | None:
         return None
 
 
+
+#: Ponteiro de commit citado no corpo de um bloco: 7 a 40 hex entre crases. Formato deliberadamente
+#: estreito — `\`develop\`` e `\`main\`` não casam, e um hex solto em prosa também não.
+COMMIT_RE = re.compile(r"`([0-9a-f]{7,40})`")
+
+
+def _repo_path(backlog_dir: Path, repo: str) -> Path | None:
+    """Onde procurar o git de `repo`. O registro governa um ESCOPO que pode ter repos irmãos.
+
+    Resolve o próprio diretório quando o nome bate com ele, senão um irmão de mesmo nome. Devolve
+    `None` quando nada resolve — e nesse caso o check não roda, em vez de reprovar por não achar.
+    """
+    for cand in (backlog_dir, backlog_dir / repo, backlog_dir.parent / repo):
+        if cand.name == repo or (cand / ".git").exists():
+            if (cand / ".git").exists():
+                return cand
+    return None
+
+
+def _semver_tags_containing(repo_path: Path | None, sha: str) -> list[str] | None:
+    """Tags semver que contêm `sha`. `None` = não foi possível perguntar (o check não roda).
+
+    A distinção entre `[]` e `None` é o ponto: lista vazia significa "perguntei e não há release",
+    e `None` significa "não perguntei". Colapsar as duas transformaria git ausente em defeito.
+    """
+    if repo_path is None:
+        return None
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo_path), "tag", "--contains", sha],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return [t.strip() for t in out.stdout.splitlines() if SEMVER_TAG_RE.match(t.strip())]
+
+
+SEMVER_TAG_RE = re.compile(r"^v?\d+\.\d+\.\d+")
+
+
 def check_backlog(backlog_path: Path, today: date | None = None) -> dict[str, Any]:
     today = today or date.today()
     content = backlog_path.read_text(encoding="utf-8-sig")
@@ -184,6 +236,7 @@ def check_backlog(backlog_path: Path, today: date | None = None) -> dict[str, An
     known_repos = _known_repos(project_root)
 
     seen_ids: dict[str, Item] = {}
+    unverified_shipped = 0
     numeric_ids: list[int] = []
 
     for item in items:
@@ -240,6 +293,45 @@ def check_backlog(backlog_path: Path, today: date | None = None) -> dict[str, An
             findings.append(Finding("raw_with_evidence", "deterministic", "major", iid,
                 f"raw but carries evidence (`{evidence}`) — measurement happened and the "
                 "status was never advanced"))
+
+        # B-051 — checkbox × status. `killed` fica de fora nos dois sentidos: o contrato não diz
+        # qual marca um item morto carrega, e inventar a regra produziria veredito sobre convenção.
+        if item.checkbox == "x" and status in ("raw", "triaged", "planned"):
+            findings.append(Finding("checkbox_status_divergent", "deterministic", "blocker", iid,
+                f"checkbox `[x]` says closed and `status: {status}` says open. Neither field is "
+                "wrong on its own, which is why the divergence survives: only the comparison "
+                "shows it."))
+        if item.checkbox == " " and status == "shipped":
+            findings.append(Finding("checkbox_status_divergent", "deterministic", "blocker", iid,
+                "`status: shipped` says the work was released and the checkbox `[ ]` was left "
+                "behind. Same divergence, opposite direction."))
+
+        # `raw → planned` is forbidden in text and unobservable from the file — history is not
+        # here. What IS observable is the trace it leaves: `triaged` requires evidence, so a
+        # `planned` block still at `none-yet` proves the measurement step was skipped.
+        if status == "planned" and evidence in ("", "none-yet"):
+            findings.append(Finding("planned_without_evidence", "deterministic", "major", iid,
+                "planned but evidence is still `none-yet` — the item reached a plan without "
+                "passing the measurement `triaged` requires (`raw → planned` is forbidden)"))
+
+        # B-051 bullet 2 — `shipped` é uma alegação de RELEASE, e a palavra não a sustenta.
+        if status == "shipped":
+            sha = None
+            for cand in COMMIT_RE.findall(item.body):
+                sha = cand
+                break
+            tags = None
+            if sha:
+                tags = _semver_tags_containing(
+                    _repo_path(backlog_path.resolve().parent, item.fields.get("repo", "")), sha
+                )
+            if tags == []:
+                findings.append(Finding("shipped_without_release_evidence", "deterministic", "major", iid,
+                    f"shipped, but the commit it cites (`{sha}`) is in no semver tag. Marking "
+                    "shipped on implementation day, while the release is still awaiting "
+                    "approval, is the error this check exists to catch."))
+            elif tags is None:
+                unverified_shipped += 1
 
         repo = item.fields.get("repo", "")
         if repo and known_repos is not None and repo not in known_repos:
@@ -315,6 +407,10 @@ def check_backlog(backlog_path: Path, today: date | None = None) -> dict[str, An
             s: sum(1 for i in items if i.fields.get("status") == s) for s in sorted(LEGAL_STATUS)
         },
         "routing_table_read": known_repos is not None,
+        #: Blocos `shipped` sem ponteiro verificável (sem SHA citado, ou sem git
+        #: alcançável para o repo deles). NÃO são achados — são cobertura que não
+        #: houve, e alegá-la seria pior que declará-la.
+        "shipped_without_verifiable_pointer": unverified_shipped,
         "findings": [f.__dict__ for f in findings],
         "severity_counts": counts,
         "verdict": verdict,

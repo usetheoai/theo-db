@@ -151,6 +151,38 @@ if [ -f "CHANGELOG.md" ]; then
 fi
 
 # ----------------------------------------------------------------------------
+# 2a. Backlog registry integrity (HARD GATE — B-051)
+# ----------------------------------------------------------------------------
+# POR QUE AQUI. O DoD do B-051 pedia "no mesmo lugar em que o `okf-validate` roda". Medido em
+# 2026-08-20: o `okf-validate` NÃO é invocado em lugar nenhum — nem hook, nem workflow, nem
+# script. Seguir a letra significaria rodar em lugar nenhum, que é o oposto da intenção escrita
+# no mesmo bullet ("não num passo que alguém precise lembrar"). Este hook é o lugar mecanizado
+# que existe: já BLOQUEIA por CHANGELOG e por segredo.
+#
+# Só roda quando o BACKLOG.md foi TOCADO na sessão. Validar um registro que ninguém mexeu
+# transformaria dívida herdada em bloqueio de toda sessão — e um portão que reprova sempre é um
+# portão que alguém desliga.
+if echo "$ALL_FILES" | grep -qE '(^|/)BACKLOG\.md$' && [ -f "BACKLOG.md" ]; then
+  BL_CHECKER=""
+  for c in ".claude/skills/backlog-review/scripts/check_backlog_structure.py" \
+           "skills/backlog-review/scripts/check_backlog_structure.py"; do
+    [ -f "$c" ] && { BL_CHECKER="$c"; break; }
+  done
+  if [ -n "$BL_CHECKER" ]; then
+    BL_OUT=$(python3 "$BL_CHECKER" BACKLOG.md 2>&1) || true
+    # Exit 1 = blocker (INVALID). Exit 3 = major (NEEDS_REVISION) — WARN, não bloqueia: um major
+    # é "alguém olhe", e escalá-lo a bloqueio apagaria a distinção que o próprio checador faz.
+    BL_RC=$(python3 "$BL_CHECKER" BACKLOG.md >/dev/null 2>&1; echo $?)
+    if [ "$BL_RC" = "1" ]; then
+      msg="BACKLOG.md failed its structural gate (B-051). Blockers found — the registry contradicts itself:\n$(echo "$BL_OUT" | grep BLOCKER | head -10)"
+      if [ "$WARN_ONLY" = "1" ]; then WARNINGS+=("$msg"); else BLOCKERS+=("$msg"); fi
+    elif [ "$BL_RC" = "3" ]; then
+      WARNINGS+=("BACKLOG.md has major findings (B-051 gate):\n$(echo "$BL_OUT" | grep MAJOR | head -10)")
+    fi
+  fi
+fi
+
+# ----------------------------------------------------------------------------
 # 2b. Secret leak (HARD GATE — cycle-review BLOCKER)
 # ----------------------------------------------------------------------------
 SECRET_HITS=$(echo "$ALL_FILES" \

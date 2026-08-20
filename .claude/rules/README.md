@@ -72,6 +72,25 @@ Each `cycle-{name}.md` defines:
 | `audit-trail-rotation.md` | When to archive/delete artifacts |
 | `loop-engine-convention.md` | Skill vs Agent vs ralph-loop |
 
+## Consertos que vivem só aqui, e quem fica exposto
+
+Este `.claude/` é um **checkout do kit `squad`**, versionado dentro deste repositório. Um conserto
+escrito aqui protege exatamente este projeto. O repositório do kit
+(`git@github.com:paulohenriquevn/squad.git`) **não** é atualizado a partir daqui — decisão do owner
+em 2026-08-20, com o custo declarado em vez de implícito.
+
+O registro abaixo existe porque a alternativa é pior: um conserto não portado e não anotado vira um
+defeito que alguém reencontra do zero, sem saber que já foi diagnosticado.
+
+| Conserto | Item | Quem fica exposto |
+|---|---|---|
+| Resolução de caminho ciente de layout nos três checadores de evidência (`check_evidence_pointers.py`, `check_evidence_citations.py`, `check_measurement_targets.py`), delegando ao `scripts/ecosystem_utils.py` | [[B-081]] | **Todo consumidor do kit em layout de plugin.** Sem isto, uma oportunidade ou plano que cite um arquivo do ecossistema (`rules/…`) é acusado de **evidência fabricada** — o hard cap mais severo da skill, disparado sobre trabalho legítimo. Invisível no kit, porque lá `rules/` está na raiz. |
+| `check_coverage_matrix` reporta `coverage_lt_100` em vez de levantar `ValueError` | [[B-081]] | Todo consumidor: um plano sem `## Coverage Matrix` **derruba** o `run_structural` em vez de reprovar, e quem chama não distingue "plano inválido" de "ferramenta quebrada". |
+| `check_intake_gates.py` repassa `--rule` ao `route_domain.py` | [[B-077]] | Consumidor cuja tabela de roteamento não está no caminho default: o gate G1 recusa todo item filado. |
+
+**Como isto sai daqui, se um dia sair:** os diffs estão nos commits que citam o item entre parênteses
+no `CHANGELOG.md`. Nenhum deles depende de nada específico deste projeto.
+
 ## Modifying Rules
 
 - Cycle contracts and golden rules are **locked** — changes require team discussion

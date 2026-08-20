@@ -92,3 +92,42 @@ def resolve_ecosystem_dir(project_dir: Path) -> Path | None:
         if c.is_dir() and is_ecosystem_layout(c):
             return c
     return None
+
+
+def resolve_ecosystem_path(
+    project_root: Path, rel_path: str | Path, *, files_only: bool = True
+) -> Path | None:
+    """O arquivo do ecossistema que ``rel_path`` nomeia, em QUALQUER layout suportado.
+
+    ``rel_path`` é escrito como o ecossistema o vê — ``rules/cycle-discover.md``,
+    ``skills/implement/SKILL.md`` — porque é assim que uma regra, um plano e uma oportunidade
+    o citam. Onde esse caminho aterrissa depende do layout, e é exatamente isso que quem cita
+    não deveria precisar saber.
+
+    Devolve ``None`` quando não resolve em nenhum layout, e a distinção importa: "não resolve
+    em lugar nenhum" é um ponteiro fabricado, enquanto "não resolve no layout que eu
+    presumi" era o falso positivo (B-081).
+
+    ``files_only=False`` aceita diretório. Não é conveniência: um *target de medição* pode ser
+    ``knowledge-base/references/{projeto}``, que É um diretório, enquanto um *ponteiro de
+    evidência* (``arquivo.md:42``) só faz sentido sobre arquivo. Quem chama sabe de que tipo
+    precisa; esta função só sabe onde procurar.
+
+    POR QUE ESTA FUNÇÃO EXISTE. O docstring no topo deste módulo já dizia que todo script
+    deveria importar daqui em vez de duplicar a detecção. Três checadores duplicavam mesmo
+    assim, e a duplicação divergiu do jeito previsível: `check_measurement_targets.py`
+    carregava as duas candidatas para o `live-target.txt` (linhas 53-54) e **não** para os
+    targets do plano (linha 86), no mesmo arquivo. Uma cópia consertada, a irmã não — que é a
+    forma que a duplicação sempre toma antes de virar defeito.
+    """
+    exists = (lambda p: p.is_file()) if files_only else (lambda p: p.exists())
+    rel = Path(rel_path)
+    if rel.is_absolute():
+        return rel if exists(rel) else None
+    # Ordem: standalone primeiro (é onde o kit é mantido), depois plugin. As duas são
+    # tentadas SEMPRE — decidir pelo layout detectado tornaria a resolução dependente de um
+    # palpite sobre a raiz, e a raiz é justamente o que estava errado.
+    for candidate in (project_root / rel, project_root / ".claude" / rel):
+        if exists(candidate):
+            return candidate
+    return None

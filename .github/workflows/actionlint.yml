@@ -27,14 +27,35 @@ on:
   # A TROCA É REAL e fica dita: sem gate no PR, um defeito só aparece quando já está em `develop`, e
   # quem descobre é o próximo a integrar. A proteção não some, muda de lugar — passa a depender de
   # rodar os gates LOCALMENTE antes de promover, no contêiner com o toolchain pinado:
-  #   docker run --rm -v $PWD/theodb_rs:/src theodb-builder:latest bash -c '
-  #     rustup component add clippy rustfmt --toolchain 1.97.0-x86_64-unknown-linux-gnu
-  #     mkdir -p /tmp/b && cp -r /src/. /tmp/b/ && cd /tmp/b
-  #     cargo fmt -- --check && cargo clippy --features pg18 --no-deps -- $(grep -v "^#" .clippy_args | tr "\n" " ")
-  #     cargo pgrx test pg18'
+  #   bash scripts/dev-test.sh --lint     # cargo fmt --check + clippy com o baseline
+  #   bash scripts/dev-test.sh            # a suite inteira
+  #   bash scripts/dev-test.sh lexical    # so o modulo tocado, em segundos
+  #
+  # A receita estava COPIADA AQUI E EM MAIS SETE cabecalhos, e fazia `cp -r` do codigo para dentro
+  # do conteiner — o que nao preserva mtime e fazia o cargo recompilar 363 crates a cada corrida.
+  # Medido: `cp -r` 363 recompilacoes / ~8 min, montagem direta **0** / 53s. Detalhe e numeros no
+  # cabecalho do script (B-054).
   # `workflow_dispatch` continua disponível para rodar sob demanda num PR específico quando valer a pena.
-  push:
+  # B-052 / ADR-0062 — o portao passou a olhar ANTES do merge.
+  #
+  # `pull_request` roda contra `refs/pull/N/merge`, ou seja, contra a arvore MERGEADA — a mesma
+  # coisa que o `push` para `develop` testava, um passo antes. E `push: [develop]` saiu junto: sem
+  # isso a mudanca DOBRARIA as corridas pesadas, e a restricao de capacidade que removeu o gatilho
+  # de PR em 2026-08-12 e premissa deste item, nao obstaculo.
+  #
+  # Custo MEDIDO na janela de 9 dias (2026-08-11..20), nao estimado: 30 corridas pesadas por push
+  # em `develop` (1410 min) para 13 PRs `workspace -> develop` mergeados. Com o gate no PR e
+  # `cancel-in-progress` colapsando pushes sucessivos, sao ~13 corridas — MENOS que as 30 de hoje,
+  # e olhando o codigo enquanto ele ainda pode ser recusado.
+  #
+  # `push: [main]` fica: e a verificacao pos-release, e `main` so avanca por PR de release.
+  pull_request:
     branches: [develop, main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/actionlint.yaml'
+  push:
+    branches: [main]
     paths:
       - '.github/workflows/**'
       - '.github/actionlint.yaml'
@@ -63,7 +84,7 @@ jobs:
     # runner frio, não uma estimativa do trabalho.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: actionlint (workflows + shellcheck dos blocos run:)
         # Imagem fixada por digest, consistente com a política de supply-chain do repo (mesmo

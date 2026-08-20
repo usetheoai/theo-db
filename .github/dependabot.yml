@@ -5,9 +5,10 @@
 # consumidor recebe código novo sem diff. Fixar por SHA é o estado da arte; manter 42 SHAs à mão sem
 # ninguém avisando de atualização é como eles envelhecem até virarem risco por outro caminho.
 #
-# Esta é a metade barata e ela vem primeiro: alguém precisa AVISAR que há versão nova. A fixação por
-# SHA está registrada como item de backlog com a contagem medida, em vez de feita às pressas em 724
-# linhas de `ci.yml`.
+# As duas metades estão em vigor desde 2026-08-20: as 39 referências foram fixadas por SHA de 40
+# caracteres com a tag ao lado em comentário (B-083), e o dependabot mantém as duas coisas em dia —
+# quando ele atualiza, reescreve SHA E comentário juntos. A política está em
+# `.github/CONTRIBUTING-workflows.md`, onde um autor de workflow a encontra sem ler o backlog.
 #
 # `github-actions` só. Cargo e Python deste repositório têm gates próprios (`license-gate` via
 # cargo-deny, e o `deps-audit` do ciclo) — acrescentar aqui duplicaria o dono do problema.
