@@ -42,6 +42,11 @@ on:
 # Duas medidas: a suíte roda uma vez por promoção (no push para `develop` — desde 2026-08-12 não roda
 # mais em PR nem em cada push de workspace), e cede a vez — `group` global entre workflows não existe no
 # Actions, então o que dá para fazer é não concorrer com o próprio push.
+# 2026-08-20 — sem `permissions:` o job herdava o default do REPOSITORIO, que pode ser write-all.
+# Medido: era o caso em quatro dos dez workflows. Este só lê a árvore.
+permissions:
+  contents: read
+
 concurrency:
   group: rust-suite-${{ github.ref }}
   cancel-in-progress: true

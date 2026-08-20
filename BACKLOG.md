@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-81 items — **Open** 39 · **In flight** 36 · **Closed** 6
+83 items — **Open** 41 · **In flight** 36 · **Closed** 6
 
-### Open (39)
+### Open (41)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -113,6 +113,8 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 | [`B-077`](#b-077--a-tabela-de-roteamento-é-a-do-ecossistema-inteiro-e-os-dois-repos-que-existem-não-roteiam----) | A tabela de roteamento é a do ecossistema inteiro, e os dois repos que existem não roteiam | `triaged` | — |
 | [`B-081`](#b-081--dois-portões-resolviam-caminho-só-no-layout-standalone-e-o-plan-confidence-quebra-em-vez-de-reprovar----) | Dois portões resolviam caminho só no layout standalone, e o `plan-confidence` quebra em vez de reprovar | `triaged` | — |
+| [`B-082`](#b-082--o-primeiro-comando-do-readme-aponta-para-uma-org-que-não-é-a-nossa-e-a-imagem-nunca-foi-publicada----) | O primeiro comando do README aponta para uma org que não é a nossa, e a imagem nunca foi publicada | `triaged` | — |
+| [`B-083`](#b-083--42-actions-de-terceiros-fixadas-por-tag-e-nenhuma-por-sha----) | 42 actions de terceiros fixadas por TAG, e nenhuma por SHA | `triaged` | — |
 
 ### In flight (36)
 
@@ -3227,4 +3229,65 @@ dod:
   - existe teste que roda um checador de pointers a partir de um layout de plugin e prova que um caminho do
     ecossistema resolve
   - os consertos chegam ao kit, ou está registrado por escrito que não chegam e qual consumidor fica exposto
+
+## B-082 — O primeiro comando do README aponta para uma org que não é a nossa, e a imagem nunca foi publicada   [ ]
+
+domain: governanca
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: medido em 2026-08-20, três fatos por execução.
+**(1) A org do README estava errada.** `README.md:93-94` mandava
+`docker pull ghcr.io/usetheodev/theo-db:latest`. `gh api orgs/usetheodev` → **404**; `gh api users/usetheodev`
+→ existe, `type=User`. A organização que hospeda os repositórios é `usetheoai`. O [[B-010]] já havia
+corrigido exatamente esta grafia no `uses:` do workflow em 2026-08-10 e **não olhou para o README**.
+**(2) O `publish` nunca teve sucesso.** As **8** execuções registradas do workflow `publish-image.yml` desde
+2026-07-29 estão em `failure` — incluindo a do tag **`v0.158.0`**, o que prova que este gate **não bloqueia
+release**: a versão foi cortada com ele vermelho. As falhas não são de uma causa só: a de 2026-08-16 chegou ao
+passo do Trivy e reprovou por CVE; a de 2026-08-20 morreu no carregamento do workflow, com **0 jobs** e
+*"This run likely failed because of a workflow file issue"*. O reutilizável (`usetheoai/theo@develop`) existe,
+aceita todos os inputs que passamos, tem todos os secrets `required: false`, e não muda desde 2026-07-31 —
+ou seja, a causa da falha de carregamento **não foi identificada** e continua aberta.
+**(3) O manifesto não responde.** `GET /v2/{org}/theo-db/manifests/latest` no `ghcr.io`, com token anônimo,
+devolve **HTTP 403** em `usetheodev` **e** em `usetheoai`. Limite honesto: 403 não distingue "não existe" de
+"privado" — mas somado a 8/8 falhas de publicação, a leitura de que nunca foi publicada é a sustentada.
+**(4) Uma alegação publicada que os fatos contradizem.** `CHANGELOG.md:1066` afirma que *"a imagem Docker do
+TheoDB passa a ser publicada no GitHub Container Registry a cada release"*.
+why_now: é o **primeiro comando** que um usuário executa, na seção `## Instalação`. Ele falhava por dois
+motivos independentes e nenhum dizia isso a quem tentasse. A org foi corrigida em 2026-08-20 e o README passa
+a declarar que a imagem não está publicada, com este número — mas declarar não publica.
+status: triaged
+dod:
+  - a causa da falha de CARREGAMENTO do `publish-image.yml` está identificada por medição, não por hipótese
+  - o gate do Trivy tem desfecho decidido pela ordem do grill `release-train-restart` (rebuild, depois
+    allowlist com sunset e ADR por alcançabilidade medida, nunca afrouxar a severidade)
+  - `docker pull ghcr.io/usetheoai/theo-db:latest` funciona a partir de uma máquina sem credencial
+  - a nota do README sai quando o comando funcionar, e não antes
+  - a alegação do `CHANGELOG.md:1066` é retratada por acréscimo ou passa a ser verdadeira
+
+## B-083 — 42 actions de terceiros fixadas por TAG, e nenhuma por SHA   [ ]
+
+domain: governanca
+repo: theo-db
+suggested_mode: review
+source: discover-review
+evidence: medido em 2026-08-20 sobre os onze workflows, contando referências `uses: owner/repo@ref`
+cuja `ref` não casa `[0-9a-f]{40}`: **42 no total, 34 delas só no `ci.yml`**. Nenhuma action de terceiro
+está fixada por SHA. Tag é ponteiro **mutável**: quem controla o repositório da action pode reapontar
+`@v4` para outro commit, e o consumidor passa a executar código novo sem que apareça um diff em lugar
+nenhum. É o vetor que o OpenSSF e o `zizmor` tratam como o defeito de supply-chain padrão de esteiras
+GitHub, e este repositório **constrói e assina imagem** — o que torna a esteira um alvo com valor.
+Contraste medido no mesmo lugar: a imagem do `actionlint` **está** fixada por digest
+(`rhysd/actionlint@sha256:b1934ee…`), com comentário citando a política de supply-chain do repo. Ou
+seja, a política existe, foi aplicada a uma imagem Docker e nunca às actions.
+why_now: o `dependabot.yml` entrou em 2026-08-20 e resolve a metade barata — alguém passa a AVISAR que
+há versão nova. Ele **não** resolve a mutabilidade: com tag, a atualização silenciosa continua possível
+entre um aviso e outro. E o momento é agora porque a esteira acabou de ganhar um workflow que cria
+release com `contents: write` — o raio de alcance de uma action comprometida cresceu.
+status: triaged
+dod:
+  - toda `uses:` de terceiro fixada por SHA de 40 caracteres, com a tag legível ao lado em comentário
+  - `actions/*` e `docker/*` incluídas — pertencer ao GitHub não as torna imutáveis
+  - o dependabot mantém os SHAs atualizados (ele reescreve SHA + comentário quando configurado assim)
+  - a política fica escrita onde um autor de workflow a encontre, não só neste item
 

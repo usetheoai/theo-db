@@ -52,13 +52,27 @@ on:
 # de uma branch importa. `head_ref || ref_name` faz o evento `push` e o `pull_request` do MESMO commit
 # caírem no MESMO grupo — sem isso cada commit disparava DOIS runs por workflow enquanto houvesse PR
 # aberto da branch, dobrando a fila. Em `main` NUNCA cancela (um release em andamento não é abortado).
+# Sem `permissions:` o job herdava o default do repositório, que pode ser write-all.
+# Este gate só lê a árvore (2026-08-20).
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.ref_name != 'main' }}
 
 jobs:
   drift:
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # 2026-08-20 — runner GITHUB-HOSTED, não o self-hosted da frota. Medido antes de trocar:
+    # este repositório é PÚBLICO, e runner padrão do GitHub é grátis e ilimitado em repo público —
+    # enquanto o `theodb-do` é uma máquina paga. Pior: ela é ÚNICA e SERIAL, então os dez workflows
+    # disparados pelo mesmo push enfileiram. Medição do custo real disso: `lint-rust` levou de 66 a
+    # 120 minutos para rodar um `cargo fmt --check`, quase tudo fila.
+    #
+    # Este job cabe aqui porque NÃO precisa da máquina grande: nada de Rust, nada de pgrx, nada de
+    # `pg_config`. Os jobs que compilam continuam em `vars.CI_RUNNER` — a troca é por job e por
+    # necessidade medida, não por decreto.
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

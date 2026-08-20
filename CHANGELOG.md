@@ -13,34 +13,27 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Fixed
-- **O corte de release volta a ser possível.** O portão de lint reprovava por formatação em quatro
-  arquivos do crate, e com ele vermelho nenhuma versão saía: duas já estavam escritas no changelog
-  (0.159.0 e 0.160.0) e nenhuma chegou a `main`, que segue em 0.158.0 desde julho. Sem mudança de
-  comportamento — `rustfmt` não altera semântica (#B-052)
-- **Os portões de confiança deixam de acusar evidência legítima de ser fabricada.** Numa instalação
-  como plugin — que é o caso deste repositório — o ecossistema vive sob `.claude/`, e os dois
-  resolvedores de pointer procuravam apenas a partir da raiz do projeto. Consequência medida: a
-  fixture de exemplo da própria skill pontuava `INVALID` por `fabricated_evidence`, com todos os
-  pointers lidos como arquivo inexistente. Qualquer oportunidade que citasse um arquivo do
-  ecossistema era reprovada pelo mesmo motivo (#B-081)
-- **A revisão do backlog deixa de emitir um bloqueio que afirmava um dano inexistente.** O achado
-  `renumbered` dizia que "um id reusado torna ambígua toda referência anterior" sempre que os ids não
-  subiam na ordem do arquivo — sem que houvesse id reusado, e com todas as referências resolvendo.
-  Reuso já era detectado por outro achado. Virou aviso de menor severidade, com a mensagem correta
-  (#B-080)
-- **Item já fechado deixa de ser cobrado por critério de fechamento.** `thin_dod` disparava em item
-  `killed` dizendo que ele "nunca fecha", sobre item que já fechou (#B-080)
-- **Achados de arquitetura voltam a poder ser dispensados via allowlist.** Eles gravavam `architecture`
-  na chave e a tabela de tipos válidos nunca foi atualizada, então todo achado dessa classe resolvia
-  para tipo vazio, não casava nenhuma entrada e era estruturalmente indispensável (#B-079)
-- **A configuração de linguagens do audit de qualidade deixa de descrever um formato que o leitor não
-  aceita.** O cabeçalho do arquivo era do formato antigo; a configuração real (`rust`, apontando para
-  `theodb_rs/Cargo.toml`) já estava correta, então nenhum audit deixou de rodar (#B-078)
-- Corrigida a projeção de memória do build de `theodb_hnsw`: a medição direta a 20M dá ~13,0 GB de
-  memória privada (0,65 GB/milhão), e não os ~34,7 GB que a extrapolação linear previa (#230)
-- Documentado que o build de `theodb_hnsw` mantém ~1,7 GB por milhão de vetores em memória do
-  backend e é morto pelo OOM killer a 20M — o teto de escala do build é RAM, não disco (#230)
+### Added
+- **A esteira passa a criar a release.** Nenhum workflow fazia isso — medido: zero ocorrências de
+  `gh release`, gatilho `release:` ou equivalente nos nove arquivos existentes, e é por isso que
+  `main` ficou em 0.158.0 desde julho com duas versões escritas no changelog e nunca cortadas. O
+  novo `release.yml` dispara na tag `v*`, extrai as notas **do CHANGELOG** (não do log de commits,
+  porque o changelog é o texto que alguém revisou) e recusa publicar quando a versão não tem seção —
+  uma release de corpo vazio afirma que não houve mudança (#B-082)
+- `runner-probe`: sonda sob demanda que mede se os jobs pesados cabem num runner GitHub-hosted, em
+  vez de decidir isso por leitura de documentação (#B-083)
+- `dependabot.yml` para as actions — até aqui ninguém avisava que havia versão nova (#B-083)
+
+### Changed
+- **Os gates leves saem da máquina paga.** `actionlint`, `license-gate` e `schema-drift-gate` passam a
+  rodar em runner GitHub-hosted, que é grátis e ilimitado em repositório público. O runner próprio é
+  único e serial, e o custo disso estava medido: `lint-rust` levou de 66 a 120 minutos para rodar um
+  `cargo fmt --check`, quase tudo fila atrás de outros nove workflows. Os jobs que compilam continuam
+  na máquina grande até a sonda dizer que cabem (#B-083)
+- Quatro workflows não declaravam `permissions` e herdavam o default do repositório, que pode ser
+  write-all. Agora os dez declaram o mínimo que usam (#B-083)
+
+## [0.160.1] - 2026-08-20
 
 ### Added
 - **Os 14 planos de implementação deste projeto passam a ser medidos contra o avaliador de planos**, e
@@ -79,6 +72,41 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Índices lexicais **já construídos não mudam de comportamento e não precisam de migração**: o Tantivy serializa o nome do tokenizer no schema de cada índice, então os antigos continuam resolvendo `default`. Para ganhar stemming, rode `bm25_build` de novo (B-044)
 
 ### Fixed
+- **O primeiro comando do README apontava para uma conta que não hospeda o pacote.** A seção de
+  instalação mandava `docker pull ghcr.io/usetheodev/theo-db:latest`; `usetheodev` existe como
+  **usuário**, não como a organização (`usetheoai`) que hospeda os repositórios. A mesma grafia já
+  havia sido corrigida no workflow em 2026-08-10 e ninguém olhou para o README (#B-082)
+- **O README passa a dizer que a imagem não está publicada**, em vez de deixar o leitor descobrir
+  sozinho: as oito execuções do workflow de publicação desde 2026-07-29 falharam — inclusive a do
+  release `v0.158.0` — e o manifesto responde `403`. Enquanto isso, a instrução é construir a partir
+  do fonte (#B-082)
+- **O corte de release volta a ser possível.** O portão de lint reprovava por formatação em quatro
+  arquivos do crate, e com ele vermelho nenhuma versão saía: duas já estavam escritas no changelog
+  (0.159.0 e 0.160.0) e nenhuma chegou a `main`, que segue em 0.158.0 desde julho. Sem mudança de
+  comportamento — `rustfmt` não altera semântica (#B-052)
+- **Os portões de confiança deixam de acusar evidência legítima de ser fabricada.** Numa instalação
+  como plugin — que é o caso deste repositório — o ecossistema vive sob `.claude/`, e os dois
+  resolvedores de pointer procuravam apenas a partir da raiz do projeto. Consequência medida: a
+  fixture de exemplo da própria skill pontuava `INVALID` por `fabricated_evidence`, com todos os
+  pointers lidos como arquivo inexistente. Qualquer oportunidade que citasse um arquivo do
+  ecossistema era reprovada pelo mesmo motivo (#B-081)
+- **A revisão do backlog deixa de emitir um bloqueio que afirmava um dano inexistente.** O achado
+  `renumbered` dizia que "um id reusado torna ambígua toda referência anterior" sempre que os ids não
+  subiam na ordem do arquivo — sem que houvesse id reusado, e com todas as referências resolvendo.
+  Reuso já era detectado por outro achado. Virou aviso de menor severidade, com a mensagem correta
+  (#B-080)
+- **Item já fechado deixa de ser cobrado por critério de fechamento.** `thin_dod` disparava em item
+  `killed` dizendo que ele "nunca fecha", sobre item que já fechou (#B-080)
+- **Achados de arquitetura voltam a poder ser dispensados via allowlist.** Eles gravavam `architecture`
+  na chave e a tabela de tipos válidos nunca foi atualizada, então todo achado dessa classe resolvia
+  para tipo vazio, não casava nenhuma entrada e era estruturalmente indispensável (#B-079)
+- **A configuração de linguagens do audit de qualidade deixa de descrever um formato que o leitor não
+  aceita.** O cabeçalho do arquivo era do formato antigo; a configuração real (`rust`, apontando para
+  `theodb_rs/Cargo.toml`) já estava correta, então nenhum audit deixou de rodar (#B-078)
+- Corrigida a projeção de memória do build de `theodb_hnsw`: a medição direta a 20M dá ~13,0 GB de
+  memória privada (0,65 GB/milhão), e não os ~34,7 GB que a extrapolação linear previa (#230)
+- Documentado que o build de `theodb_hnsw` mantém ~1,7 GB por milhão de vetores em memória do
+  backend e é morto pelo OOM killer a 20M — o teto de escala do build é RAM, não disco (#230)
 - **`bm25_search` recusa índice que nunca foi construído** (B-041), em vez de devolver zero linhas. Num pilar de busca, zero é resposta legítima — então o silêncio era indistinguível de "nada casou", e a aplicação que esqueceu o `bm25_build` concluía que o corpus não tinha o documento. O erro nomeia o `index_id`. **Mudança de comportamento observável:** onde antes havia zero linhas agora há erro; o caso legítimo de índice construído sobre corpus vazio **continua** devolvendo zero sem erro, e tem teste próprio para provar que não trocamos um falso-silêncio por um falso-alarme
 - **`bm25_build` conta apenas documentos acháveis** (B-048). Uma tabela de 3 linhas com um `body` NULL devolvia **3**, mas só 2 apareciam em qualquer busca: o `unwrap_or_default()` transformava o NULL num documento vazio que contava e nunca casava. Quem conferia o valor de retorno acreditava que os 3 estavam buscáveis
 - `read_generation` deixa de transformar erro do SPI em `0` (B-048). Um catálogo inacessível e um índice não construído produziam o mesmo valor, e o chamador não tinha como distinguir — o valor mágico que `rules/error-handling.md § 2` proíbe

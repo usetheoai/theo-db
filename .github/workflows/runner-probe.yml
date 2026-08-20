@@ -1,0 +1,81 @@
+# runner-probe — mede se os jobs PESADOS cabem num runner GitHub-hosted. Sonda, não gate.
+#
+# POR QUE EXISTE. A migração dos workflows leves para `ubuntu-latest` foi decidida por medição
+# (repo público → runner padrão grátis e ilimitado; o `theodb-do` é pago, único e serial, e o
+# `lint-rust` levou de 66 a 120 min para um `cargo fmt --check`, quase tudo fila). Os jobs pesados
+# NÃO foram migrados junto, e a razão é um número: `theodb_rs/target` mede **13 GB** na máquina de
+# desenvolvimento, contra o disco livre que o runner padrão oferece.
+#
+# Cabe apertado ou não cabe. A diferença entre as duas respostas não se decide por leitura de
+# documentação — decide-se rodando. Este workflow é essa corrida, e o que ele produz é o dado que
+# falta para migrar `ci.yml` e `rust-suite.yml` com evidência em vez de esperança.
+#
+# MEDE O AMBIENTE PADRÃO, de propósito. Existe receita conhecida para liberar dezenas de GB
+# removendo toolchains pré-instaladas, e ela pode ser necessária — mas aplicá-la ANTES de medir
+# responderia "cabe com truque" a uma pergunta que ainda não sabemos se precisa de truque. Se a
+# sonda apertar, o passo seguinte é medir de novo com a limpeza; nessa ordem.
+#
+# `workflow_dispatch` APENAS: uma sonda que roda sozinha vira custo recorrente sem leitor.
+name: runner-probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-probe
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linha de base — o que o runner oferece antes de qualquer coisa
+        run: |
+          df -h / | tail -1
+          echo "CPUs: $(nproc)   RAM: $(free -g | awk '/^Mem:/{print $2}') GB"
+          echo "livre_inicial_gb=$(df --output=avail -BG / | tail -1 | tr -dc '0-9')" >> "$GITHUB_ENV"
+
+      - name: A imagem constrói? (é o que `ci.yml` faz seis vezes)
+        id: build
+        run: |
+          start=$(date +%s)
+          set +e
+          docker build -t theodb-probe:latest . 2>&1 | tail -30
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "duracao_s=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          # A sonda REPORTA; ela não reprova. Sair não-zero aqui esconderia o número que ela
+          # existe para produzir — e um build que falha por disco é exatamente o dado buscado.
+          exit 0
+
+      - name: Veredito da sonda
+        run: |
+          livre_final=$(df --output=avail -BG / | tail -1 | tr -dc '0-9')
+          consumido=$(( livre_inicial_gb - livre_final ))
+          veredito=$([ '${{ steps.build.outputs.rc }}' = '0' ] && echo 'PASSOU' || echo 'FALHOU (rc=${{ steps.build.outputs.rc }})')
+          {
+            echo "## Sonda de runner GitHub-hosted"
+            echo ""
+            echo "| medida | valor |"
+            echo "|---|---|"
+            echo "| build da imagem | ${veredito} |"
+            echo "| duração | ${{ steps.build.outputs.duracao_s }}s |"
+            echo "| disco livre no início | ${livre_inicial_gb} GB |"
+            echo "| disco livre no fim | ${livre_final} GB |"
+            echo "| consumido pelo build | ${consumido} GB |"
+            echo "| CPUs | $(nproc) |"
+            echo ""
+            echo "Referência: \`theodb_rs/target\` mede **13 GB** na máquina de desenvolvimento."
+            echo ""
+            echo "**Leitura:** se PASSOU com folga, \`ci.yml\` e \`rust-suite.yml\` migram como estão."
+            echo "Se PASSOU raspando ou FALHOU, a próxima medição é a mesma com limpeza de toolchains"
+            echo "pré-instaladas — e aí o número dirá se o truque basta ou se a máquina paga se justifica."
+          } >> "$GITHUB_STEP_SUMMARY"
+          df -h / | tail -1
