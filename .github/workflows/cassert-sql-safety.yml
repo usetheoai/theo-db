@@ -80,12 +80,12 @@ jobs:
       - name: Compilar o PG cassert (só quando o cache erra)
         if: steps.pgrx-cache.outputs.cache-hit != 'true'
         env:
-          # INCERTEZA DECLARADA (2026-08-20): esta é a via do pgrx para repassar flags ao `configure`
-          # do PostgreSQL, e NÃO foi verificada contra a 0.19.0 antes de escrever — o repositório não
-          # guardava a receita usada na máquina paga. Se estiver errada, o guard do passo seguinte
-          # (`pg_config --configure | grep --enable-cassert`) REPROVA nomeando a causa, que é o
-          # comportamento certo: o smoke sob Assert() seria vacuoso sem cassert, e vacuidade
-          # silenciosa é pior que falha barulhenta.
+          # VERIFICADO em 2026-08-20, e por isso a marca de incerteza saiu. Esta é a via do pgrx para
+          # repassar flags ao `configure`; ela foi escrita sem confirmação contra a 0.19.0 (o
+          # repositório não guardava a receita usada na máquina antiga), e a corrida decidiu: o guard
+          # do passo seguinte — `pg_config --configure | grep --enable-cassert` — PASSOU, logo a flag
+          # chegou. O guard fica: ele é quem prova, a cada corrida, que o smoke sob Assert() não é
+          # vacuoso.
           CONFIGURE_FLAGS: --enable-cassert
         run: |
           set -euo pipefail
