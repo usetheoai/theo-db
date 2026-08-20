@@ -85,7 +85,7 @@ jobs:
       # `~/.cargo/bin` e `~/.pgrx` cacheados juntos: sem isso, cada corrida reinstala o
       # `cargo-pgrx` (compilação longa) para rodar um `cargo fmt` de segundos.
       - name: Cache do cargo-pgrx e do pgrx init
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/bin

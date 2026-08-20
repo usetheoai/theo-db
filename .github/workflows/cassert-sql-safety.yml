@@ -70,7 +70,7 @@ jobs:
       # é exatamente o perfil que cache resolve. Primeira corrida paga; as seguintes, não.
       - name: Cache do PG cassert do pgrx
         id: pgrx-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/bin
