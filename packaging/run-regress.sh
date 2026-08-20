@@ -17,10 +17,19 @@ fi
 REG=/src/src/test/regress
 OUT=/tmp/regress_out
 
-# Prove the engine-under-test IS the distribution (PGDG 18.4), matching the source tag REL_18_4.
+# Prove the engine-under-test matches the SOURCE TAG this image cloned. Comparado contra `$PG_TAG`
+# (exportado pelo Dockerfile) e não contra uma constante escrita aqui: a versão de patch é decisão do
+# upstream, e duas constantes independentes divergem no dia em que a imagem base avança — foi o que
+# aconteceu em 2026-08-20 (`engine is not 18.4 (got 18.6)`), com o gate reprovando por desatualização
+# própria e não por defeito do produto.
+EXPECTED="${PG_TAG:?PG_TAG ausente — a imagem de regressão deve exportá-lo}"
+EXPECTED="${EXPECTED#REL_}"; EXPECTED="${EXPECTED//_/.}"
 VER="$("$BIN/postgres" --version)"
-echo "engine under test: $VER"
-echo "$VER" | grep -q "18\.4" || { echo "ERROR: engine is not 18.4 (got: $VER) — source tag mismatch"; exit 2; }
+echo "engine under test: $VER   (source tag: $PG_TAG -> esperado $EXPECTED)"
+echo "$VER" | grep -q "$EXPECTED" || {
+  echo "ERROR: engine is not $EXPECTED (got: $VER) — o fonte da suíte e o engine divergem" >&2
+  echo "Se a imagem base subiu de patch, derive PG_TAG do engine no caller em vez de editar aqui." >&2
+  exit 2; }
 
 rm -rf "$PGDATA"; mkdir -p "$PGDATA" "$OUT"
 "$BIN/initdb" -D "$PGDATA" -U postgres -E UTF8 >/tmp/initdb.log 2>&1 || { tail -20 /tmp/initdb.log; exit 2; }

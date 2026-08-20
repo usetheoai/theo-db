@@ -14,6 +14,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **A esteira do banco para de rodar o avaliador, que virou projeto próprio.** O harness Python foi
+  removido em 2026-08-12 e hoje é o repositório irmão `theodb-bench`, independente, que consome o
+  TheoDB como sistema sob teste — mas o `ci.yml` continuava instalando um `requirements.txt` que não
+  existe mais, em **sete** jobs. A esteira do produto passa a guardar só o que vive com o produto:
+  smokes, presença de superfície SQL, regressão upstream, migração e licença. Recall, QPS, nDCG e
+  comparação com concorrente são avaliação, e avaliação é do bench (#B-084)
+- **Versões de patch do PostgreSQL deixam de ser constantes nossas.** Três lugares fixavam `18.4` — a
+  versão que a máquina antiga por acaso tinha — enquanto a imagem base já servia **18.6**: o caminho
+  do pgrx, o `source tag` da suíte de regressão e a checagem que os compara. Todos derivados agora,
+  e o erro passa a dizer o que fazer em vez de só recusar (#B-084)
 - **A esteira inteira passa a rodar em runner GitHub-hosted.** Os doze workflows saíram da máquina
   própria: em repositório público o runner padrão é grátis e ilimitado, e sobretudo **paralelo** — a
   máquina paga era única e serial, e os dez workflows do mesmo push enfileiravam. A primeira medição
