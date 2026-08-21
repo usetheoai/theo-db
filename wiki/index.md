@@ -18,7 +18,7 @@ Se você quer **avaliar as alegações**, todo número vive em [benchmarks](benc
 
 ## O que dá caráter a este acervo
 
-Ele registra **tanto o que funcionou quanto o que foi refutado**, com o mesmo cuidado. Uma parte grande dos artefatos são *honest-negatives*: hipóteses do próprio projeto que a medição derrubou — [quantização não traz QPS](decisions/0018-m57-sbq-inline-not-superior.md), [o quantizador não era o gargalo](benchmarks/m40-ceiling-probe.md), [o rerank degradou a qualidade](benchmarks/archive/m65-rerank.md), [o grafo perde para o vetor na tarefa que motivou o pilar](benchmarks/archive/m111-m112-graphrag-retrieval.md).
+Ele registra **tanto o que funcionou quanto o que foi refutado**, com o mesmo cuidado. Uma parte grande dos artefatos são *honest-negatives*: hipóteses do próprio projeto que a medição derrubou — [quantização não traz QPS](decisions/0018-m57-sbq-inline-not-superior.md), [o quantizador não era o gargalo](benchmarks/m40-ceiling-probe.md), [o rerank degradou a qualidade](benchmarks/archive/m65-rerank.md), [o grafo perde para o vetor na tarefa que motivou o pilar](benchmarks/archive/m111-m112-graphrag-retrieval.md), [dois perfis do próprio arnês estavam mortos por construção, e três alegações minhas sobre o teto de veredito caíram por medição](benchmarks/b098-host-de-bench-medido.md).
 
 Há também **retratações preservadas** — um [veredito de superioridade](benchmarks/sift1m-carrier-verdict.md) que não sobreviveu a medição rigorosa, e [números invalidados por dados degenerados](decisions/0012-benchmark-data-degeneracy.md) — mantidos com o aviso no topo, porque apagá-los esconderia que foram citados.
 

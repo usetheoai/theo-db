@@ -9,6 +9,10 @@ generated: { by: claude-code/opus-5, at: 2026-08-21T00:00:00Z }
 Conceito irmão: [b018 — o planner larga o HNSW na junção](../benchmarks/b018-planner-hnsw-juncao.md),
 a primeira medição feita por este procedimento.
 
+**Os números deste runbook — e os nove defeitos que só a execução revelou — vivem em
+[b098](../benchmarks/b098-host-de-bench-medido.md).** Aqui está *como se faz*; lá está *o que foi
+medido*, inclusive por que dois perfis do arnês estavam mortos por construção.
+
 # O que já existiu
 
 **Sim, houve servidor dedicado — várias vezes, e sempre efêmero.** A prática, declarada pelo owner em
