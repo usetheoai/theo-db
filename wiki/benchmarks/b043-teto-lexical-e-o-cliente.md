@@ -1,13 +1,57 @@
 ---
 type: Measurement
 title: b043 — o teto de vazão lexical é o CLIENTE do arnês, não o servidor
-description: pgbench estabiliza em ~4.150 TPS e fica lá; o arnês colapsa 61%. A 80 clientes o arnês é 6,5× mais lento que o gerador externo. A saturação que publicamos era do instrumento.
+description: RETRATADO. O colapso de 61% e os 6,5× eram artefato do MEU desenho de medição — contagem de operações fixa independente do número de clientes. Corrigido, a curva sobe e satura, e a razão é ~1,27×.
 tags: [lexical, vazao, concorrencia, arnes, gap, b-043, honest-negative]
 item: B-043
 generated: { by: claude-code/opus-5, at: 2026-08-21T00:00:00Z }
 ---
 
 Peça: [runbook do droplet](../runbooks/droplet-de-medicao.md).
+
+> # ⚠ RETRATAÇÃO — 2026-08-21, poucas horas depois de publicar (e depois de lançar em `v0.166.0`)
+>
+> **A conclusão deste documento está errada, e o erro é meu.** Ele afirma que o arnês colapsa 61% e
+> é 6,5× mais lento que o `pgbench`, e conclui que o teto de vazão lexical é o cliente. **O colapso
+> era artefato do desenho da medição.**
+>
+> O `run_concurrent` que escrevi emitia um total **FIXO** de operações — 300 — independente do número
+> de clientes. A 80 clientes isso são **3,75 consultas por cliente**, e a abertura de conexão domina
+> a janela medida inteira. Medido lado a lado, no mesmo processo:
+>
+> | clientes | total **fixo** em 300 | 300 **por** cliente |
+> |---|---|---|
+> | 5 | 598,6 | 646,1 |
+> | 20 | 570,2 | 801,8 |
+> | **80** | **277,7** | **827,0** |
+>
+> Com a contagem escalando, a curva **sobe e satura** em vez de colapsar. Re-medido pelo benchmark
+> corrigido: 354 · 1.020 · 1.262 · 1.225 · **1.302** · 1.281 — pico em 40 clientes e queda de 2% até
+> 80. **Isso é saturação, e é a mesma forma que o `pgbench` mostra.**
+>
+> **O número correto da razão é ~1,27×**, não 6,5×: o `pgbench` satura em ~1.630 na mesma máquina.
+>
+> **O que isso faz com a pergunta do [[B-043]].** O item perguntava se a saturação em ~20 clientes
+> era do servidor ou do cliente. A resposta que este documento deu — "do cliente" — não se sustenta:
+> os dois geradores saturam, e a distância entre eles é de 27%. **O platô é real e é do servidor.**
+>
+> **Duas coisas que também caíram no caminho:**
+>
+> - **O GIL está REFUTADO como causa.** Processos não são mais rápidos que threads: 0,98× a 20
+>   clientes, 1,00× a 40. Se o GIL fosse o teto, processos escalariam e threads não.
+> - **Os "dois relógios" que acrescentei não discriminam em laço fechado.** `response` e `service`
+>   saem IDÊNTICOS em todos os pontos, porque sem agendamento não há atraso contra o qual medir. Eu
+>   afirmei que eles separariam fila de servidor lento; eles só o fazem em laço aberto.
+>
+> **Por que isto fica escrito em vez de reescrito.** O documento foi citado no `BACKLOG.md`, no
+> `CHANGELOG.md` e lançado em `v0.166.0`; apagar esconderia que a alegação circulou. E o defeito é
+> instrutivo: eu fixei a contagem de operações para "comparar o mesmo trabalho" entre populações de
+> cliente — e comparar o mesmo trabalho total entre populações diferentes é justamente o que **não**
+> se pode fazer em laço fechado.
+>
+> O corpo abaixo fica como estava. Os números do `pgbench` nele são válidos; os do arnês, não.
+
+
 
 # A pergunta que o item fez, e por que ela era boa
 
