@@ -3287,6 +3287,18 @@ status_nota_2026_08_21: **Bullet 3 ENTREGUE, e a nota acima partia de uma dicoto
 status_nota_evidencia: 2026-08-20 — campo misto: abre com uma DECISÃO do owner (que não é medição) e
   fecha com a medição que a sustenta — três medições do dia saíram de scripts fora do arnês, nomeados.
   É a segunda parte que o torna `triaged`.
+status_nota_2026_08_21_b: **Bullet 1 ENTREGUE.** O crossover do colunar rodou pelo `theodb-bench run`
+  nas duas imagens do [[B-097]] (benchmark registrado `analytical/crossover/row-count`, perfil
+  `research`, bundle com validação de schema e registro de ambiente), e o conceito
+  [[b058-crossover-colunar]] passou a citar os três bundles, que estão no repositório sob
+  `benchmarks/artifacts/b097/`.
+  .
+  **E o item se pegou a si mesmo:** o adendo publicado no b058 foi escrito SEM citar bundle, e só a
+  releitura deste item o expôs — exatamente o defeito que o gate do bullet 3 existe para detectar.
+  Corrigido; `check_bundle_citations.py` passa.
+  .
+  Restam: **bullet 2**, bloqueado por [[B-057]] (a varredura do `pre_reordering_num_neighbors` exige o
+  AlloyDB Omni, que exige o adapter do [[B-059]]). Bullets 3 e 4 já estavam entregues.
 dod:
   - o crossover do colunar sai de `theodb-bench run` com bundle válido, e o número publicado cita o bundle
   - o efeito do `pre_reordering_num_neighbors` do ScaNN é uma varredura registrada, não um script

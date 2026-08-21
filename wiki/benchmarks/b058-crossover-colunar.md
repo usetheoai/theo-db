@@ -174,6 +174,20 @@ a limpeza do `partial_pathlist`), **um `SELECT count(*)` comum viraria ERRO** a 
 centenas de milhares de linhas. Medido depois da correção: `total_rows` roda nos seis pontos, inclusive
 a 2 milhões. A estimativa zerada estava **mascarando uma capacidade não implementada**.
 
+## Artefatos desta re-corrida
+
+Os dois bundles saíram do `theodb-bench run` — benchmark registrado, validação de schema, registro de
+ambiente e artefato imutável — e estão no repositório:
+
+- baseline (`HEAD~1`): `benchmarks/artifacts/b097/base/20260821T212045Z-analytical-crossover-row-count-theodb-5a158dde/`
+- corrigida (`HEAD`): `benchmarks/artifacts/b097/fix/20260821T213041Z-analytical-crossover-row-count-theodb-69c03e02/`
+- smoke de validação do pipeline: `benchmarks/artifacts/b097/smoke/20260821T212008Z-analytical-synthetic-paths-theodb-865ec86a/`
+
+Isto fecha o primeiro bullet do [[B-069]]: *"o crossover do colunar sai de `theodb-bench run` com
+bundle válido, e o número publicado cita o bundle"*. A corrida original deste conceito citava bundle;
+o adendo acima, escrito antes desta seção, **não citava** — que é precisamente o defeito que o gate do
+próprio B-069 existe para pegar, e ele o pegaria.
+
 ## Ressalvas desta re-corrida
 
 - Veredito do arnês **`EXPLORATORY`** nas duas corridas, pela mesma razão da original: código enviado

@@ -141,8 +141,93 @@ async fn read_parquet_impl(path: String) -> Result<Vec<pgrx::JsonB>, String> {
     batches_to_jsonb(&batches)
 }
 
-/// Serializa os RecordBatches em NDJSON (uma linha por row) via arrow-json e converte cada linha num `pgrx::JsonB`.
+/// Converte RecordBatches em `pgrx::JsonB`, um documento por linha, **sem passar por texto**.
+///
+/// B-096 — MEDIDO em 2026-08-21 sobre 2M linhas do mesmo arquivo: o parser Parquet lê e agrega em
+/// **25 ms**, o Postgres constrói 2M `jsonb` nativos em **435 ms**, e esta função levava **4650 ms**.
+/// Os ~4200 ms de diferença eram a travessia `Arrow → texto NDJSON → serde_json::Value → JsonB`:
+/// cada linha era serializada em JSON e imediatamente re-parseada. Nem o parser nem o `jsonb` eram o
+/// gargalo — a travessia era.
+///
+/// A conversão agora vai direto do array Arrow para `serde_json::Value`. `batches_to_jsonb_via_texto`
+/// permanece como ORÁCULO dos testes de equivalência: a mudança é de implementação, e um ganho de
+/// tempo que altere o documento entregue ao usuário não é ganho, é defeito com benchmark.
 fn batches_to_jsonb(batches: &[RecordBatch]) -> Result<Vec<pgrx::JsonB>, String> {
+    use datafusion::arrow::array::{
+        BooleanArray, Float32Array, Int32Array, LargeStringArray, UInt32Array, UInt64Array,
+    };
+    use serde_json::{Map, Value};
+
+    let mut out: Vec<pgrx::JsonB> = Vec::new();
+    for b in batches {
+        if b.num_rows() == 0 {
+            continue;
+        }
+        let esquema = b.schema();
+        let campos: Vec<String> =
+            esquema.fields().iter().map(|f| f.name().clone()).collect();
+
+        // Uma closure por COLUNA, resolvida uma vez, em vez de um `match` de tipo por celula.
+        // Com 2M linhas a diferenca entre resolver o tipo 4 vezes e 8 milhoes de vezes e o ponto.
+        type Extrator<'a> = Box<dyn Fn(usize) -> Value + 'a>;
+        let mut extratores: Vec<Extrator> = Vec::with_capacity(b.num_columns());
+        for c in 0..b.num_columns() {
+            let col = b.column(c).as_ref();
+            let nulos = col.logical_nulls();
+            let nulo = move |r: usize| nulos.as_ref().is_some_and(|n| n.is_null(r));
+
+            macro_rules! numerico {
+                ($t:ty) => {{
+                    let a = col.as_any().downcast_ref::<$t>().expect("downcast conferido acima");
+                    Box::new(move |r: usize| {
+                        if nulo(r) { Value::Null } else { Value::from(a.value(r)) }
+                    }) as Extrator
+                }};
+            }
+
+            let e: Extrator = if col.as_any().is::<Int64Array>() {
+                numerico!(Int64Array)
+            } else if col.as_any().is::<Int32Array>() {
+                numerico!(Int32Array)
+            } else if col.as_any().is::<UInt64Array>() {
+                numerico!(UInt64Array)
+            } else if col.as_any().is::<UInt32Array>() {
+                numerico!(UInt32Array)
+            } else if col.as_any().is::<Float64Array>() {
+                numerico!(Float64Array)
+            } else if col.as_any().is::<Float32Array>() {
+                numerico!(Float32Array)
+            } else if col.as_any().is::<BooleanArray>() {
+                numerico!(BooleanArray)
+            } else if let Some(a) = col.as_any().downcast_ref::<StringArray>() {
+                Box::new(move |r| if nulo(r) { Value::Null } else { Value::from(a.value(r)) })
+            } else if let Some(a) = col.as_any().downcast_ref::<StringViewArray>() {
+                Box::new(move |r| if nulo(r) { Value::Null } else { Value::from(a.value(r)) })
+            } else if let Some(a) = col.as_any().downcast_ref::<LargeStringArray>() {
+                Box::new(move |r| if nulo(r) { Value::Null } else { Value::from(a.value(r)) })
+            } else {
+                // FAIL-CLOSED, e deliberado: um tipo nao coberto (nested, temporal, decimal) cai na
+                // via por TEXTO, que os cobre via arrow-json. Inventar uma representacao aqui daria
+                // um documento diferente do que o usuario recebia — silenciosamente.
+                return batches_to_jsonb_via_texto(batches);
+            };
+            extratores.push(e);
+        }
+
+        for r in 0..b.num_rows() {
+            let mut m = Map::with_capacity(campos.len());
+            for (c, nome) in campos.iter().enumerate() {
+                m.insert(nome.clone(), extratores[c](r));
+            }
+            out.push(pgrx::JsonB(Value::Object(m)));
+        }
+    }
+    Ok(out)
+}
+
+/// A via por texto original, preservada como ORÁCULO dos testes de equivalência e como fallback para
+/// tipos que a conversão direta não cobre (nested, temporal, decimal — arrow-json os cobre).
+fn batches_to_jsonb_via_texto(batches: &[RecordBatch]) -> Result<Vec<pgrx::JsonB>, String> {
     let mut out: Vec<pgrx::JsonB> = Vec::new();
     for b in batches {
         if b.num_rows() == 0 {
@@ -524,4 +609,96 @@ mod tests {
             );
         }
     }
+
+    // B-096 — a conversão Arrow→jsonb não pode passar por texto.
+    //
+    // MEDIDO em 2026-08-21 (máquina de desenvolvimento, contêiner, 2M linhas, mesmo arquivo):
+    //   parser Parquet + agregação no DataFusion .......   25 ms
+    //   piso de 2M linhas por SRF no PG ................  315 ms
+    //   piso de 2M jsonb construídos pelo próprio PG ...  435 ms
+    //   `read_parquet` → 2M jsonb ...................... 4650 ms
+    //
+    // O parser NÃO é o gargalo, e `jsonb` em si também não. Os ~4200 ms restantes são a travessia
+    // Arrow → texto NDJSON → `serde_json::Value` → `JsonB`: 90% do tempo num round-trip por TEXTO,
+    // serializando e re-parseando cada linha.
+    //
+    // Estes testes fixam a EQUIVALÊNCIA: a conversão direta tem de produzir exatamente o mesmo valor
+    // que a via texto produzia. A mudança é de implementação, e um ganho de tempo que altere o que o
+    // usuário recebe não é um ganho — é um defeito com benchmark.
+    #[pgrx::pg_test]
+    fn batch_para_jsonb_preserva_escalares() {
+        use datafusion::arrow::array::{Float64Array, Int64Array, StringArray};
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        use std::sync::Arc;
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("amount", DataType::Float64, false),
+            Field::new("category", DataType::Utf8, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(vec![1i64, 2])),
+                Arc::new(Float64Array::from(vec![1.5f64, 2.5])),
+                Arc::new(StringArray::from(vec!["alfa", "beta"])),
+            ],
+        )
+        .expect("batch válido");
+
+        let direto = batches_to_jsonb(&[batch.clone()]).expect("conversão direta");
+        let via_texto = batches_to_jsonb_via_texto(&[batch]).expect("conversão por texto");
+
+        assert_eq!(direto.len(), 2, "uma linha por row");
+        let a: Vec<serde_json::Value> = direto.iter().map(|j| j.0.clone()).collect();
+        let b: Vec<serde_json::Value> = via_texto.iter().map(|j| j.0.clone()).collect();
+        assert_eq!(a, b, "a conversão direta tem de produzir o MESMO valor que a via texto");
+    }
+
+    // Nulo é o caso onde as duas vias divergem com mais facilidade: `null` no JSON, `None` no Arrow.
+    // Uma via que omitisse a chave e outra que a emitisse como `null` dariam documentos diferentes —
+    // e o consumidor extrai colunas por chave.
+    #[pgrx::pg_test]
+    fn batch_para_jsonb_preserva_nulos() {
+        use datafusion::arrow::array::{Int64Array, StringArray};
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        use std::sync::Arc;
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, true),
+            Field::new("nome", DataType::Utf8, true),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(vec![Some(1i64), None])),
+                Arc::new(StringArray::from(vec![None, Some("beta")])),
+            ],
+        )
+        .expect("batch válido");
+
+        let direto = batches_to_jsonb(&[batch.clone()]).expect("conversão direta");
+        let via_texto = batches_to_jsonb_via_texto(&[batch]).expect("conversão por texto");
+
+        let a: Vec<serde_json::Value> = direto.iter().map(|j| j.0.clone()).collect();
+        let b: Vec<serde_json::Value> = via_texto.iter().map(|j| j.0.clone()).collect();
+        assert_eq!(a, b, "nulos divergindo entre as duas vias mudaria o documento do usuário");
+    }
+
+    // Borda: batch sem linhas continua sendo válido e não pode virar linha fantasma.
+    #[pgrx::pg_test]
+    fn batch_vazio_nao_produz_linha() {
+        use datafusion::arrow::array::Int64Array;
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        use std::sync::Arc;
+
+        let schema =
+            Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        let batch =
+            RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(Vec::<i64>::new()))])
+                .expect("batch vazio é válido");
+
+        assert!(batches_to_jsonb(&[batch]).expect("vazio é válido").is_empty());
+    }
+
 }

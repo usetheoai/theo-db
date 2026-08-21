@@ -13,6 +13,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **`read_parquet` converte Arrow→`jsonb` direto, sem round-trip por texto.** MEDIDO em 2026-08-21
+  (máquina de desenvolvimento, 2M linhas, mesmo arquivo): o parser Parquet lê e agrega em **25 ms**, o
+  Postgres constrói 2M `jsonb` nativos em **435 ms**, e `read_parquet` levava **4 650 ms** — ou seja,
+  ~90% do tempo era a travessia `Arrow → texto NDJSON → serde_json::Value → JsonB`, serializando e
+  re-parseando cada linha. **Nem o parser nem o `jsonb` eram o gargalo.** A via por texto permanece
+  como oráculo dos testes de equivalência e como fallback para tipos que a conversão direta não cobre
+  (nested, temporal, decimal). **O ganho ainda NÃO foi medido** — quando for, entra aqui com o número
+  e sai do arnês (B-096, B-069)
+
 ### Fixed
 - **O planner via ZERO linha em toda tabela colunar.** `columnar_relation_estimate_size` devolvia
   `*tuples = 0.0` fixo, então uma tabela de 200.000 linhas era planejada como se tivesse ~1: forma de
