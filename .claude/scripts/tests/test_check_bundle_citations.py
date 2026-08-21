@@ -129,3 +129,53 @@ def test_the_real_wiki_passes(tmp_path: Path) -> None:
     del tmp_path
     r = _roda(RAIZ, RAIZ / "wiki")
     assert r.returncode == 0, r.stdout
+
+def test_a_shallow_clone_reports_what_it_could_not_check(tmp_path: Path) -> None:
+    """"Nao deu para perguntar" NAO e "a resposta e nao".
+
+    O CI clona RASO (`actions/checkout` com fetch-depth 1), entao `git cat-file` sobre um commit
+    antigo responde ausencia quando a verdade e que esta copia nao tem a historia. A primeira versao
+    deste gate colapsou as duas e **reprovou o proprio PR que o introduziu**, acusando 557 ponteiros
+    validos de mortos.
+
+    E a MESMA distincao que o B-051 construiu (`[]` = perguntei e nao ha, `None` = nao deu para
+    perguntar) e que o B-088 violou. Terceira vez. Fica pinada aqui.
+    """
+    origem = _repo(tmp_path / "origem")
+    alvo = origem / "benchmarks" / "artifacts" / "b1"
+    alvo.mkdir(parents=True)
+    (alvo / "x.json").write_text("{}", encoding="utf-8")
+    (origem / "w").mkdir()
+    subprocess.run(["git", "-C", str(origem), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(origem), "commit", "-qm", "com o artefato"], check=True)
+    sha = subprocess.run(
+        ["git", "-C", str(origem), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()[:8]
+
+    import shutil
+
+    shutil.rmtree(origem / "benchmarks")
+    (origem / "w" / "d.md").write_text(
+        f"ver git:{sha}:benchmarks/artifacts/b1/x.json\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "-C", str(origem), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(origem), "commit", "-qm", "remove e cita por sha"], check=True)
+
+    raso = tmp_path / "raso"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", f"file://{origem}", str(raso)], check=True
+    )
+    assert (
+        subprocess.run(
+            ["git", "-C", str(raso), "rev-parse", "--is-shallow-repository"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        == "true"
+    ), "o clone precisa ser raso para o teste medir o que se propoe"
+
+    r = _roda(raso, raso / "w")
+    assert r.returncode == 0, r.stdout
+    assert "NAO foram verificadas" in r.stdout, "o que nao foi checado tem de ser DITO"
+    assert "BLOQUEADO" not in r.stdout

@@ -34,21 +34,44 @@ DISCO = re.compile(r"\bbenchmarks/artifacts/[A-Za-z0-9._/\-]+")
 NO_GIT = re.compile(r"\bgit:([0-9a-f]{7,40}\^?):([A-Za-z0-9._/\-]+)")
 
 
-def _existe_no_git(raiz: Path, sha: str, caminho: str) -> bool:
+def _clone_raso(raiz: Path) -> bool:
+    r = subprocess.run(
+        ["git", "-C", str(raiz), "rev-parse", "--is-shallow-repository"],
+        capture_output=True,
+        text=True,
+    )
+    return r.stdout.strip() == "true"
+
+
+def _existe_no_git(raiz: Path, sha: str, caminho: str) -> bool | None:
+    """`True` existe, `False` nao existe, **`None` nao deu para perguntar**.
+
+    A distincao e a que este projeto ja pagou para aprender duas vezes (B-051, B-088), e ela mordeu
+    de novo aqui: no CI o `actions/checkout` clona RASO, entao um `git cat-file` sobre um commit
+    antigo responde "nao existe" quando a verdade e "esta copia nao tem essa historia". Colapsar as
+    duas faz o gate acusar de citacao morta um ponteiro perfeitamente valido — e um gate que acusa
+    trabalho correto e desligado antes de pegar o primeiro defeito real.
+    """
     r = subprocess.run(
         ["git", "-C", str(raiz), "cat-file", "-e", f"{sha}:{caminho}"],
         capture_output=True,
     )
-    return r.returncode == 0
+    if r.returncode == 0:
+        return True
+    return None if _clone_raso(raiz) else False
 
 
-def verificar(raiz: Path, alvo: Path) -> list[tuple[Path, str, str]]:
-    """Devolve `(arquivo, citacao, motivo)` para cada citação que não resolve."""
+def verificar(raiz: Path, alvo: Path) -> tuple[list[tuple[Path, str, str]], int]:
+    """`(quebradas, nao_verificaveis)` — a segunda e o que o clone raso impediu de checar."""
     quebradas: list[tuple[Path, str, str]] = []
+    nao_verificaveis = 0
     for f in sorted(alvo.rglob("*.md")):
         texto = f.read_text(encoding="utf-8")
         for m in NO_GIT.finditer(texto):
-            if not _existe_no_git(raiz, m.group(1), m.group(2)):
+            veredito = _existe_no_git(raiz, m.group(1), m.group(2))
+            if veredito is None:
+                nao_verificaveis += 1
+            elif veredito is False:
                 quebradas.append((f, m.group(0), "nao resolve no git"))
         # Só depois de tirar as formas `git:` é que sobra o que de fato aponta para disco.
         sem_git = NO_GIT.sub("", texto)
@@ -56,7 +79,7 @@ def verificar(raiz: Path, alvo: Path) -> list[tuple[Path, str, str]]:
             caminho = m.group(0).rstrip(".,;:)`'\"")
             if not (raiz / caminho).exists():
                 quebradas.append((f, caminho, "nao existe em disco"))
-    return quebradas
+    return quebradas, nao_verificaveis
 
 
 def main() -> int:
@@ -69,9 +92,17 @@ def main() -> int:
         print(f"OK: {alvo} nao existe — nada a verificar")
         return 0
 
-    quebradas = verificar(args.raiz, alvo)
+    quebradas, nao_verificaveis = verificar(args.raiz, alvo)
+    # Dito SEMPRE, e nao so quando convem: um relatorio que omite o que nao checou reporta uma
+    # cobertura que nao teve. Mesmo principio do `--max-zone-files` do detector de vazamento, que
+    # declara PARTIAL em vez de alegar completude.
+    if nao_verificaveis:
+        print(
+            f"NOTA: {nao_verificaveis} citacao(oes) `git:<sha>:` NAO foram verificadas — este clone "
+            f"e raso e nao tem essa historia. Nao e um veredito sobre elas."
+        )
     if not quebradas:
-        print("OK: toda citacao de bundle resolve (em disco ou por `git show`)")
+        print("OK: toda citacao de bundle verificavel resolve (em disco ou por `git show`)")
         return 0
 
     print(f"BLOQUEADO: {len(quebradas)} citacao(oes) de bundle nao resolve(m)\n")
