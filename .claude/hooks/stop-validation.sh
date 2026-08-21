@@ -175,6 +175,33 @@ if [ -f "CHANGELOG.md" ]; then
 fi
 
 # ----------------------------------------------------------------------------
+# 2z. Citacao de bundle resolve (HARD GATE — B-069, bullet 3)
+# ----------------------------------------------------------------------------
+# A alegacao e o artefato nao podem divergir. Um documento que cita um bundle tem de citar um que
+# EXISTE — em disco, ou sob `git:<sha>:<caminho>`, a forma que o acervo ja usa para o que foi
+# removido de proposito.
+#
+# ESTE GATE NAO EXIGE que todo documento cite bundle. Medido em 2026-08-21: 170 documentos, 13 citam.
+# Exigir de todos reprovaria a maioria, e portao que nunca passa alguem desliga — foi por isso que o
+# item ficou parado. O que ele exige e que QUEM CITA cite algo que resolve: nao ter prova e uma
+# coisa, alegar uma prova inexistente e outra, e pior, porque convida o leitor a confiar num arquivo
+# que ninguem pode abrir.
+#
+# Quando entrou, havia 26 citacoes quebradas em 9 arquivos — todas residuo de UMA remocao deliberada
+# (`7cd157d`). Nao eram fabricacoes; eram ponteiros que a limpeza deixou para tras.
+BUNDLE_CHECKER=""
+for c in "$ECO/scripts/check_bundle_citations.py" ".claude/scripts/check_bundle_citations.py"; do
+  [ -f "$c" ] && { BUNDLE_CHECKER="$c"; break; }
+done
+if [ -n "$BUNDLE_CHECKER" ] && [ -d wiki ]; then
+  BUNDLE_OUT="$(python3 "$BUNDLE_CHECKER" 2>&1)"; BUNDLE_RC=$?
+  if [ "$BUNDLE_RC" = "1" ]; then
+    msg="Citacao de bundle que nao resolve (B-069). $(echo "$BUNDLE_OUT" | head -1)"
+    if [ "$WARN_ONLY" = "1" ]; then WARNINGS+=("$msg"); else BLOCKERS+=("$msg"); fi
+  fi
+fi
+
+# ----------------------------------------------------------------------------
 # 2a. Backlog registry integrity (HARD GATE — B-051)
 # ----------------------------------------------------------------------------
 # POR QUE AQUI. O DoD do B-051 pedia "no mesmo lugar em que o `okf-validate` roda". Medido em

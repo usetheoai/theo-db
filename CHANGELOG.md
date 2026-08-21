@@ -13,6 +13,32 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **O gate de CHANGELOG vinha passando por acidente, e dois defeitos o causavam.** (1) Ele descobria
+  a seção `[Unreleased]` pelo **contexto do diff** — num hunk fundo na seção o cabeçalho não aparece,
+  então o cursor nunca entrava nela e a contagem dava **zero**. Só funcionava quando a entrada ia para
+  o topo da seção, que por acaso é como quase toda entrada foi escrita. Agora a seção é localizada por
+  **número de linha no arquivo**, que é dado que o diff sempre traz. (2) Ele exigia **bullet novo**, o
+  que reprovava emendar uma entrada ainda não lançada — e o `CLAUDE.md` proíbe editar apenas as de
+  versões **já released**. Exigir bullet novo empurrava para duas entradas para uma mudança que sai
+  uma vez. Passa a contar conteúdo; cabeçalho de categoria e linha em branco continuam não contando,
+  e editar seção já lançada continua contando zero. (#B-088)
+
+### Added
+- **Um número publicado e o artefato que o sustenta deixaram de poder divergir.** Novo gate
+  (`check_bundle_citations.py`, ligado ao `stop-validation.sh`): um documento que cita um bundle tem de
+  citar um que **existe** — em disco, ou sob `git:<sha>:<caminho>`, a forma que o acervo já usa para o
+  que foi removido de propósito. Ele **não** exige que todo documento cite bundle; exige que quem cita,
+  cite algo que resolve. Não ter prova é uma coisa; alegar uma prova inexistente é outra, e pior.
+  Ao entrar, encontrou **26 citações quebradas em 9 arquivos**, todas resíduo de uma remoção deliberada
+  (`7cd157d`) que ninguém tinha visto porque nada olhava. Convertidas para a forma `git:`.
+  .
+  O gate distingue **"não existe"** de **"não deu para perguntar"**: o CI clona raso, e ali um
+  `git cat-file` sobre commit antigo responde ausência quando a verdade é que a cópia não tem a
+  história. Ele reporta quantas citações não pôde verificar e **não emite veredito sobre elas** — a
+  primeira versão colapsou as duas e reprovou o próprio PR que a introduziu, acusando 557 ponteiros
+  válidos de mortos. (#B-069)
+
 ### Changed
 - **O nDCG@10 do pilar lexical no SciFact é 0,6864, e não os 0,6269 que publicávamos.** Re-medido
   DENTRO do arnês, com corpus verificado por sha256 e benchmark registrado: **+9,5% relativo**,

@@ -2,13 +2,13 @@
 type: Measurement
 title: m184 — por que o SymQG é mais lento: o custo é de CPU no nosso código, não do imposto do PostgreSQL
 description: O perfil mostra o SymQG gastando mais tempo em userspace e menos no kernel que o HNSW, o que contradiz a hipótese registrada de que o ganho in-memory não sobreviveu à página, ao WAL e ao MVCC.
-resource: benchmarks/artifacts/m184/symqg-profile.json
+resource: git:7cd157d^:benchmarks/artifacts/m184/symqg-profile.json
 tags: [benchmark, m184, symqg, perf, profiling, mecanismo, hipotese-contradita]
 milestone: M184
 generated: { by: claude-code/opus-5, at: 2026-08-08T07:00:00Z }
 sources:
   - id: prof
-    resource: benchmarks/artifacts/m184/symqg-profile.json
+    resource: git:7cd157d^:benchmarks/artifacts/m184/symqg-profile.json
     title: perf record durante CREATE INDEX de cada access method, CPU dedicada
 ---
 

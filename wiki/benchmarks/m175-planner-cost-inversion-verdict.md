@@ -2,13 +2,13 @@
 type: Measurement
 title: m175 — o planner escolhe um plano 91× mais lento porque o custo do índice HNSW está superestimado em 94×
 description: A 20 mil linhas o índice responde em 2 ms e o seq scan em 182 ms, mas o modelo de custo estima o índice como 94× mais caro — então ele nunca é escolhido sem intervenção manual.
-resource: benchmarks/artifacts/m175/planner-cost-inversion.json
+resource: git:7cd157d^:benchmarks/artifacts/m175/planner-cost-inversion.json
 tags: [benchmark, m175, planner, cost-model, hnsw, defeito, dogfood, bloqueia-migracao]
 milestone: M175
 generated: { by: claude-code/opus-5, at: 2026-08-09T12:00:00Z }
 sources:
   - id: inv
-    resource: benchmarks/artifacts/m175/planner-cost-inversion.json
+    resource: git:7cd157d^:benchmarks/artifacts/m175/planner-cost-inversion.json
     title: EXPLAIN ANALYZE dos dois planos, 20k linhas, vector(1536)
 ---
 

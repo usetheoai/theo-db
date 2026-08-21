@@ -2,13 +2,13 @@
 type: Measurement
 title: m177 — o caminho de embed satura em ~20 rps, e o gargalo do ADR 0007 deixa de ser hipótese
 description: Mede sob concorrência o footgun que estava registrado desde junho e nunca medido; a saturação chega a 5,7× num ideal de 16×, com a p99 quadruplicando em troca de 5% de throughput.
-resource: benchmarks/artifacts/m177/concurrency.json
+resource: git:7cd157d^:benchmarks/artifacts/m177/concurrency.json
 tags: [benchmark, m177, embedding, concorrencia, gargalo, p99, adr-0007, sota, pg-net]
 milestone: M177
 generated: { by: claude-code/opus-5, at: 2026-08-07T22:30:00Z }
 sources:
   - id: conc
-    resource: benchmarks/artifacts/m177/concurrency.json
+    resource: git:7cd157d^:benchmarks/artifacts/m177/concurrency.json
     title: Servidor de embeddings sob concorrência (1–16 clientes, 10 req cada)
   - id: pgnet
     resource: https://github.com/supabase/pg_net
@@ -149,7 +149,7 @@ conexão — não uma máquina de fila.
 # O flamegraph: 99% do tempo de requisição é o modelo, e não há gordura a cortar
 
 Perfilado com `py-spy` (4 091 amostras a 99 Hz, 8 clientes concorrentes) — artefato:
-`benchmarks/artifacts/m177/flamegraph-embed-server.svg`.
+`git:7cd157d^:benchmarks/artifacts/m177/flamegraph-embed-server.svg`.
 
 | frame | % do total amostrado | % **do caminho de requisição** |
 |---|---|---|
