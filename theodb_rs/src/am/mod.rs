@@ -97,11 +97,13 @@ pub(crate) unsafe fn tupdesc_attr(
     tupdesc: pg_sys::TupleDesc,
     i: usize,
 ) -> *const pg_sys::FormData_pg_attribute {
-    let td = pgrx::PgTupleDesc::from_pg_unchecked(tupdesc);
+    let td = unsafe { pgrx::PgTupleDesc::from_pg_unchecked(tupdesc) };
     match td.get(i) {
         Some(attr) => attr as *const pg_sys::FormData_pg_attribute,
         None => {
-            pg_sys::error!("theodb: attribute {} out of range (natts = {})", i, (*tupdesc).natts)
+            pg_sys::error!("theodb: attribute {} out of range (natts = {})", i, unsafe {
+                (*tupdesc).natts
+            })
         }
     }
 }
@@ -186,47 +188,56 @@ pub unsafe extern "C-unwind" fn amcostestimate(
     index_correlation: *mut f64,
     index_pages: *mut f64,
 ) {
-    if (*path).indexorderbys.is_null() {
-        *index_startup_cost = f64::MAX;
-        *index_total_cost = f64::MAX;
-        *index_selectivity = 0.0;
-        *index_correlation = 0.0;
-        *index_pages = 0.0;
+    if unsafe { (*path).indexorderbys.is_null() } {
+        unsafe { *index_startup_cost = f64::MAX };
+        unsafe { *index_total_cost = f64::MAX };
+        unsafe { *index_selectivity = 0.0 };
+        unsafe { *index_correlation = 0.0 };
+        unsafe { *index_pages = 0.0 };
         return;
     }
-    let mut costs: pg_sys::GenericCosts = std::mem::zeroed();
-    pg_sys::genericcostestimate(root, path, loop_count, &mut costs);
+    let mut costs: pg_sys::GenericCosts = unsafe { std::mem::zeroed() };
+    unsafe { pg_sys::genericcostestimate(root, path, loop_count, &mut costs) };
 
-    let indexinfo = (*path).indexinfo;
-    let tuples = (*indexinfo).tuples;
+    let indexinfo = unsafe { (*path).indexinfo };
+    let tuples = unsafe { (*indexinfo).tuples };
     // Open NoLock: the planner already holds a lock on this index for the query being planned (pgvector
     // `hnsw.c` / `ivfflat.c` pattern). `scan_visit_ratio` is fail-safe — any unreadable meta degrades to 1.0.
-    let rel = pg_sys::index_open((*indexinfo).indexoid, pg_sys::NoLock as pg_sys::LOCKMODE);
-    let ratio = cost::scan_visit_ratio(rel, tuples);
-    pg_sys::index_close(rel, pg_sys::NoLock as pg_sys::LOCKMODE);
+    let rel =
+        unsafe { pg_sys::index_open((*indexinfo).indexoid, pg_sys::NoLock as pg_sys::LOCKMODE) };
+    let ratio = unsafe { cost::scan_visit_ratio(rel, tuples) };
+    unsafe { pg_sys::index_close(rel, pg_sys::NoLock as pg_sys::LOCKMODE) };
 
     // M175: the TOAST startup correction pgvector applies right after this core. Omitting it made the
     // planner reject the index in every case measured (see `cost.rs` module docs). `spc_seq_page_cost` comes
     // from the tablespace, never a hardcoded constant — a tablespace on different media has different costs.
     let mut spc_seq_page_cost = 0.0f64;
-    pg_sys::get_tablespace_page_costs(
-        (*indexinfo).reltablespace,
-        std::ptr::null_mut(),
-        &mut spc_seq_page_cost,
-    );
-    let rel_pages = if (*indexinfo).rel.is_null() { 0.0 } else { (*(*indexinfo).rel).pages as f64 };
-    *index_startup_cost = cost::toast_startup_correction(
-        costs.indexTotalCost * ratio,
-        costs.numIndexPages,
-        ratio,
-        rel_pages,
-        costs.spc_random_page_cost,
-        spc_seq_page_cost,
-    );
-    *index_total_cost = costs.indexTotalCost;
-    *index_selectivity = costs.indexSelectivity;
-    *index_correlation = costs.indexCorrelation;
-    *index_pages = costs.numIndexPages;
+    unsafe {
+        pg_sys::get_tablespace_page_costs(
+            (*indexinfo).reltablespace,
+            std::ptr::null_mut(),
+            &mut spc_seq_page_cost,
+        )
+    };
+    let rel_pages = if unsafe { (*indexinfo).rel.is_null() } {
+        0.0
+    } else {
+        (unsafe { (*(*indexinfo).rel).pages }) as f64
+    };
+    unsafe {
+        *index_startup_cost = cost::toast_startup_correction(
+            costs.indexTotalCost * ratio,
+            costs.numIndexPages,
+            ratio,
+            rel_pages,
+            costs.spc_random_page_cost,
+            spc_seq_page_cost,
+        )
+    };
+    unsafe { *index_total_cost = costs.indexTotalCost };
+    unsafe { *index_selectivity = costs.indexSelectivity };
+    unsafe { *index_correlation = costs.indexCorrelation };
+    unsafe { *index_pages = costs.numIndexPages };
 }
 
 /// VACUUM bulk-delete (M26 Phase 5): rebuild the main index over only the TIDs the `callback` reports as LIVE,

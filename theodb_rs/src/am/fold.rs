@@ -38,11 +38,11 @@ pub(crate) fn free_region(cur_gen_start: u32, nblocks: u32, need: u32) -> u32 {
 /// Same pointer the scan follows (single source of truth: HNSW `elem_first`, IVF v3 `gen_base`); a divergence
 /// here would let the reclaim overwrite live data. Falls back to 1 (contiguous) for an unbuilt/legacy meta.
 pub(crate) unsafe fn cur_gen_start(rel: pg_sys::Relation) -> u32 {
-    match page::peek_magic(rel) {
-        Ok(m) if m == crate::am::hnsw_page::HNSW_STRUCT_MAGIC => {
+    match unsafe { page::peek_magic(rel) } {
+        Ok(m) if m == crate::am::hnsw_page::HNSW_STRUCT_MAGIC => unsafe {
             crate::am::hnsw_page::read_meta(rel).map(|meta| meta.elem_first).unwrap_or(1)
-        }
-        Ok(m) if m == page::IVF_STRUCT_MAGIC => page::ivf_gen_base(rel).unwrap_or(1),
+        },
+        Ok(m) if m == page::IVF_STRUCT_MAGIC => unsafe { page::ivf_gen_base(rel).unwrap_or(1) },
         _ => 1,
     }
 }
@@ -54,14 +54,17 @@ pub(crate) unsafe fn cur_gen_start(rel: pg_sys::Relation) -> u32 {
 /// because those blocks are NOT part of the live generation the current meta points at (the caller guarantees the
 /// region is free via `free_region`).
 pub(crate) unsafe fn fold(rel: pg_sys::Relation, meta: &[u8], body: &[Vec<Vec<u8>>], base: u32) {
-    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
+    let nblocks =
+        unsafe { pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM) };
     // 1. shadow-write the body — inert (block 0 still points at the old generation).
     for (i, page_items) in body.iter().enumerate() {
         let b = base + i as u32;
         if b < nblocks {
-            page::reinit_page_with_items(rel, b, page_items);
+            unsafe { page::reinit_page_with_items(rel, b, page_items) };
         } else {
-            page::extend_page_with_items(rel, pg_sys::ForkNumber::MAIN_FORKNUM, page_items);
+            unsafe {
+                page::extend_page_with_items(rel, pg_sys::ForkNumber::MAIN_FORKNUM, page_items)
+            };
         }
         // T4.1/D4: the fold runs inside VACUUM — `vacuum_delay_point` applies the cost-based throttle AND checks
         // for interrupts per page, so a VACUUM of a huge index responds to `pg_cancel_backend` (and to the cost
@@ -71,14 +74,14 @@ pub(crate) unsafe fn fold(rel: pg_sys::Relation, meta: &[u8], body: &[Vec<Vec<u8
         // fails LOUD (typed REINDEX error) and a re-VACUUM does not heal it (only REINDEX does). Closing this
         // window (cancel/crash without REINDEX) is M55's incremental fold (ADR 0014).
         // M135: PG18 added `is_analyze`; we are in VACUUM, not ANALYZE (commands/vacuum.h).
-        pg_sys::vacuum_delay_point(false);
+        unsafe { pg_sys::vacuum_delay_point(false) };
         // T2.3 crash injection: after this body page's WAL record is committed (reinit/extend already ran
         // GenericXLogFinish), before the pivot. Default GUC 0 ⇒ no-op in production.
         crate::am::guc::maybe_crash_after_body_page(i as u32 + 1);
     }
     // 2. pivot — flip the fixed meta page LAST, in its own record, as a FULL IMAGE (D2 / blueprint §Q1/§Q4:
     // a delta over a torn base page would corrupt the meta; the full image is torn-page-proof on redo).
-    page::pivot_meta_page(rel, meta);
+    unsafe { page::pivot_meta_page(rel, meta) };
     // T2.3 crash injection: right after the pivot is committed, before reclaim — proves the new generation is
     // intact on recovery (block 0 already points at it).
     crate::am::guc::maybe_crash_at_phase(crate::am::guc::CRASH_PHASE_POST_PIVOT);
@@ -90,9 +93,9 @@ pub(crate) unsafe fn fold(rel: pg_sys::Relation, meta: &[u8], body: &[Vec<Vec<u8
     // in-place) — see ROADMAP § M55; this is the conservative, non-corrupting bound.
     let gen_end = base + body.len() as u32;
     let nblocks_now =
-        pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
+        unsafe { pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM) };
     for (reclaimed, b) in (gen_end..nblocks_now).enumerate() {
-        page::reinit_page_with_items(rel, b, &[]);
+        unsafe { page::reinit_page_with_items(rel, b, &[]) };
         // T2.3 crash injection: after the first leftover page is emptied — the moment that proves the
         // crash-mid-reclaim window is FAIL-LOUD (read_pending → typed REINDEX error), never silent corruption.
         if reclaimed == 0 {

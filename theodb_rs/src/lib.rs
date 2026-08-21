@@ -15,6 +15,28 @@
 //! is now the thin composition/module root only — the crate doc, `pg_module_magic!()`, the module map,
 //! and the `pg_test` harness (M25 split the api-surface out into `api.rs`; ADR 0009).
 
+// B-032 — o lint deixa de ser aviso e passa a ser erro, no crate inteiro.
+//
+// Dentro de uma `unsafe fn` sem `unsafe {}` explicito, o corpo INTEIRO e implicitamente inseguro, e
+// some a capacidade de apontar QUAIS linhas sao as perigosas. Num banco onde um panic atravessando
+// a fronteira C derruba o backend do usuario, essa visibilidade e a diferenca entre revisar as
+// operacoes marcadas e reler o arquivo.
+//
+// MEDIDO antes de decidir: 1.444 operacoes em 18 arquivos, e a densidade — a fracao de linhas que
+// a marcacao acende — vai de 2,3% (`am/scan.rs`) a 28,8% (`am/page/mod.rs`). Mesmo no pior arquivo
+// a revisao estreita 3,5x; em `am/columnar.rs`, 18x. O argumento de visibilidade sobrevive a
+// medicao em todos os 18, e foi essa medicao que derrubou a hipotese de que num arquivo denso
+// marcar tudo equivaleria a marcar nada.
+//
+// POR QUE `deny` NO CRATE, e nao um contador com baseline: com o numero em zero, `deny` e um portao
+// que nao pode ser burlado nem crescer em silencio — o build para. Um baseline numerico so avisa
+// depois que a operacao ja entrou, e precisa de alguem para atualiza-lo.
+//
+// O QUE NAO FOI FEITO, e e deliberado: o `cargo fix` do proprio rustc envolve o CORPO da funcao. Isso
+// satisfaz o lint e destroi o sinal, porque uma deref acrescentada amanha dentro daquele corpo
+// continua sem avisar. Nenhum corpo foi envolvido aqui; a marcacao e por operacao. ADR-0065.
+#![deny(unsafe_op_in_unsafe_fn)]
+
 ::pgrx::pg_module_magic!();
 
 /// Extension load hook (M34) — registers the `theodb_ivfflat` reloption kind (`WITH (lists=N)`) and the

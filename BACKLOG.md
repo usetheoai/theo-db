@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-91 items — **Open** 18 · **In flight** 10 · **Closed** 63
+93 items — **Open** 16 · **In flight** 12 · **Closed** 65
 
-### Open (18)
+### Open (16)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -80,23 +80,23 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-006`](#b-006--colunar-43-queries-do-clickbench-medidas-a-suíte-completa-nunca----) | Colunar: 43 queries do ClickBench medidas, a suíte completa nunca | `raw` | — |
 | [`B-007`](#b-007--grafo-23-funções-expostas-e-nenhuma-medição-contra-peer-algum----) | Grafo: 23 funções expostas e nenhuma medição contra peer algum | `raw` | — |
 | [`B-008`](#b-008--lakehouse-4-funções-expostas-escala-e-formatos-nunca-medidos----) | Lakehouse: 4 funções expostas, escala e formatos nunca medidos | `raw` | — |
-| [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada----) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `raw` | — |
 | [`B-010`](#b-010--maturidade-zero-uso-real-e-é-o-gargalo-de-todos-os-pilares----) | Maturidade: zero uso real, e é o gargalo de todos os pilares | `raw` | — |
-| [`B-014`](#b-014--bm25_search-aceita-um-termo-por-chamada-consulta-de-usuário-tem-vários----) | `bm25_search` aceita um termo por chamada; consulta de usuário tem vários | `raw` | — |
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
 | [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off----) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `triaged` | — |
-| [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `triaged` | — |
 | [`B-042`](#b-042--o-build-do-hnsw-é-36-mais-lento-que-o-do-pgvector-usando-8-mais-threads-e-o-grafo-sai-pior----) | O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior | `triaged` | — |
 | [`B-043`](#b-043--o-qps-lexical-satura-em-20-clientes-numa-máquina-de-16-vcpu-e-não-sobe-mais----) | O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais | `triaged` | — |
 | [`B-046`](#b-046--paridade-de-qps-com-o-pgvector-a-recall-casado-hoje-o-déficit-medido-é-163----) | Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3% | `triaged` | — |
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
+| [`B-093`](#b-093--o-ndcg-publicado-do-pilar-lexical-foi-medido-com-agregação-que-trunca-e-o-arnês-já-não-trunca----) | O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca | `triaged` | — |
 
-### In flight (10)
+### In flight (12)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
+| [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada----) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `planned` | — |
+| [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `planned` | — |
 | [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta----) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `planned` | — |
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `planned` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `planned` | — |
@@ -108,7 +108,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
 | [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `planned` | — |
 
-### Closed (63)
+### Closed (65)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -117,6 +117,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-011`](#b-011--o-vector-join-do-hnsw-perde-exatamente-um-elemento---x) | O vector-join do HNSW perde exatamente um elemento | `shipped` | — |
 | [`B-012`](#b-012--as-outras-18-falhas-da-suíte-seguem-sem-causa-capturada---x) | As outras 18 falhas da suíte seguem sem causa capturada | `shipped` | — |
 | [`B-013`](#b-013--a-suíte-não-roda-no-ci-então-a-próxima-regressão-espera-meses---x) | A suíte não roda no CI, então a próxima regressão espera meses | `shipped` | — |
+| [`B-014`](#b-014--bm25_search-aceita-um-termo-por-chamada-consulta-de-usuário-tem-vários---x) | `bm25_search` aceita um termo por chamada; consulta de usuário tem vários | `killed` | — |
 | [`B-015`](#b-015--cinco-testes-falham-com-contador-em-zero-instrumentação-ou-o-chunk-skip-não-poda---x) | Cinco testes falham com contador em zero: instrumentação ou o chunk-skip não poda? | `shipped` | — |
 | [`B-016`](#b-016--os-testes-de-egress-esbarram-na-guarda-ssrf-do-próprio-produto---x) | Os testes de egress esbarram na guarda SSRF do próprio produto | `shipped` | — |
 | [`B-019`](#b-019--create-index-de-hnsw-não-é-idempotente-estoura-em-vez-de-ser-no-op----) | `CREATE INDEX` de HNSW não é idempotente: estoura em vez de ser no-op | `killed` | — |
@@ -175,6 +176,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-088`](#b-088--o-gate-de-changelog-checa-presença-de-arquivo-não-de-entrada---x) | O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA | `shipped` | — |
 | [`B-089`](#b-089--um-vetor-zero-na-tabela-derruba-a-busca-por-cosseno-no-índice-hnsw-no-ef_search-default---x) | Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default | `shipped` | — |
 | [`B-090`](#b-090--94-arquivos-de-teste-sob-claude-e-nenhum-workflow-os-roda---x) | 94 arquivos de teste sob `.claude/` e nenhum workflow os roda | `shipped` | — |
+| [`B-092`](#b-092--o-índice-hnsw-ocupa-178-o-disco-do-pgvector-e-é-isso-que-tira-o-índice-do-plano---x) | O índice HNSW ocupa 1,78× o disco do pgvector, e é isso que tira o índice do plano | `killed` | — |
 
 <!-- BACKLOG-INDEX:END -->
 
@@ -557,9 +559,23 @@ domain: ai-surface
 repo: theo-db
 suggested_mode: review
 source: human
-evidence: none-yet
+evidence: 2026-08-21 — remedido, e METADE da premissa envelheceu. `rerank.rs` tem hoje **6** testes (todos de erro tipado sobre um `parse_*` puro) e `egress.rs` tem **5** (SSRF/allowlist). O buraco real era só `embed.rs`: **1** teste em 236 linhas, e seis caminhos de erro tipado inalcançáveis porque viviam depois do `post_json`.
 why_now: o M184 contou **1** teste em `embed.rs` e **1** em `rerank.rs` — os dois extremos inferiores do crate inteiro. É a superfície que faz egress HTTP para provedor externo, ou seja, a que mais tem modo de falha que teste unitário pega: timeout, 5xx, resposta malformada, credencial ausente. O M177 mediu a performance desse caminho; a robustez dele não.
-status: raw
+status: planned
+resultado: 2026-08-21 — `parse_embedding_data` extraído como função PURA (molde do `parse_rerank_results` do
+  irmão `rerank.rs`, que já resolvera o mesmo problema no mesmo crate), e os seis caminhos de erro tipado
+  passaram a ter teste que assere a MENSAGEM INTEIRA: `data` ausente, tamanho divergente (N-entra/N-sai),
+  índice fora de faixa, índice duplicado, vetor ausente, elemento não-numérico. Mais o caminho de entrada
+  (`validate_inputs` com NULL) e — o que mais importa e nenhum erro sinaliza — **resposta fora de ordem
+  mapeada por `index` e não por posição**, que sem teste sairia trocada em silêncio. Extração pura, sem
+  mudança de comportamento: **496 testes verdes**, `fmt` e `clippy` limpos.
+  RESSALVA DECLARADA: timeout, 5xx e credencial ausente NÃO estão cobertos — eles moram no `post_json`
+  (`http.rs`), não em `embed.rs`, e cobri-los exige um servidor HTTP de teste. O bullet 1 do DoD está
+  parcialmente entregue, e dizer o contrário seria a alegação de cobertura sem execução que este projeto
+  documenta como classe de defeito.
+  ACHADO DE PLATAFORMA: `#[pg_test]` gera símbolo ACHATADO por nome de teste, então nomes colidem entre
+  módulos — três dos meus batiam com os do `rerank.rs` e o link falhava com `symbol ... is already defined`.
+  Daí o prefixo `b009_embed_`.
 dod:
   - cada modo de falha do egress (timeout, 5xx, corpo malformado, credencial ausente) tem teste que assere o erro **tipado**, não apenas que lança
   - nenhum segredo aparece em log ou mensagem de erro — verificado por teste
@@ -723,7 +739,7 @@ dod:
 >
 > **O que este item NÃO cobre, e virou [[B-052]]:** a suíte só roda em `push` para `develop`/`main`. Sobre
 > `workspace`, onde todo trabalho nasce, ela não roda — 73 commits desde a última execução.
-## B-014 — `bm25_search` aceita um termo por chamada; consulta de usuário tem vários   [ ]
+## B-014 — `bm25_search` aceita um termo por chamada; consulta de usuário tem vários   [x]
 
 domain: lexical
 repo: theo-db
@@ -731,7 +747,18 @@ suggested_mode: evolve
 source: human
 evidence: none-yet
 why_now: descoberto ao medir a qualidade do pilar contra o BEIR (`wiki/benchmarks/m186-lexical-ndcg-scifact-verdict.md`). Para avaliar uma consulta multi-termo eu tive de **somar os scores por termo do lado de fora** — aproximação grosseira que o BM25 real não faz, porque ele normaliza uma vez sobre a consulta inteira. O pilar entrou no binário default em 2026-08-09 expondo `bm25_search(index, termo, k)`: **nenhuma consulta real de usuário é um termo só.**
-status: raw
+status: killed
+kill_reason: 2026-08-21 — **a premissa é falsa, e sempre foi.** Medido num TheoDB real:
+  `bm25_search(900, 'machine learning', 5)` devolve `doc1 = 1,0599`, que é exatamente `0,5300 + 0,5300` —
+  as duas contribuições somadas NUMA passagem pelo `QueryParser` do Tantivy. O `git log` mostra que a
+  assinatura é `bm25_search(index_id, query: &str, k)` **desde a introdução** (M140.3, `3bb6ddb`,
+  2026-07-22). O limite era do SCRIPT de medição do m186, não da superfície — e o adapter atual
+  (`theodb-bench/src/adapters/postgres.py:1590`) já manda a consulta inteira numa chamada. Bullets 1 e 3
+  do DoD já estavam satisfeitos sem nenhuma mudança. **Segunda afirmação falsa, no `why_now`:** BM25
+  multi-termo É a soma das contribuições por termo; não existe normalização sobre a consulta inteira. O
+  que de fato subestimava era TRUNCAMENTO (somar top-k por termo perde o documento que não entra no top-k
+  de nenhum termo isolado), erro real com explicação errada. Bullet 2 — re-medir o nDCG do m186 — sobrevive
+  e virou [[B-093]]. `wiki/benchmarks/m186-lexical-ndcg-scifact-verdict.md`.
 dod:
   - `bm25_search` aceita uma consulta multi-termo e a pontua numa passagem, sem agregação externa
   - o nDCG@10 é re-medido nos dois corpora do m186 com a nova assinatura — a expectativa é SUBIR, já que a agregação atual subestima
@@ -950,6 +977,11 @@ source: discover-live-test
 evidence: suíte de integração do `theo-rag` contra `ghcr.io/usetheoai/theo-db:0.140.0` (2026-08-10): `o planner deveria alcançar o índice HNSW sob enable_seqscan = off`. Plano escolhido: `Limit → Sort → Nested Loop → Index Scan` — **há um `Sort` acima**, então o índice não está servindo a ordenação.
 why_now: a correção do planner de hoje ([m175](wiki/benchmarks/m175-planner-cost-inversion-verdict.md)) resolveu a busca simples e **não cobre o caminho de junção**, que é o que o `theo-rag` usa de verdade. Encontrado pela suíte do produto, não por benchmark — o quarto defeito do dia pelo mesmo mecanismo.
 status: triaged
+status_dod: bullet 2 ENTREGUE (causa determinada: o default, não o modelo de custo). Bullet 3 entregue
+  como benchmark registrado `vector/sift1m/ef-default`, que é regressão melhor que um teste — mede a troca
+  em vez de fixar um plano. Bullet 1 NÃO entregue e não será pelo caminho proposto: o teste do `theo-rag`
+  passaria baixando o default, e a medição mostrou que isso custa 7 pontos de recall. A saída para o
+  consumidor é `SET LOCAL`, e isso é mudança no `theo-rag`, não aqui.
 dod:
   - o teste `ensureHnswIndex` do `theo-rag` passa sem `Sort` acima do `Index Scan`
   - determinado se a causa é o mesmo modelo de custo (m175) num caminho não coberto, ou outra
@@ -979,10 +1011,64 @@ dod:
 > hipóteses baratas — parâmetro vs literal, generic plan, estatística ausente, ordem de criação do
 > índice — **não são o gatilho**.
 >
-> **Próxima medição, e ela é cara por natureza:** rodar a suíte do `theo-rag` em laço até a ocorrência,
-> capturando o plano (o teste já o imprime na mensagem de falha desde o #167). Um evento de 1-em-11 exige
-> repetição, não outro cenário inventado. Enquanto isso o item fica `raw`, com o espaço de busca
-> reduzido — que é o resultado honesto desta rodada.
+> **REPRODUZIDO em 2026-08-21, deterministicamente. A causa é o DEFAULT de `ef_search`.**
+> `wiki/benchmarks/b018-planner-hnsw-juncao.md`.
+>
+> **Gatilho:** um filtro seletivo na tabela juntada (`WHERE d.tenant = 't1'`) — o sétimo cenário, que os
+> seis não tocaram. Com ele a ordem de junção inverte, `embeddings` sai da posição de dirigir, e o `Sort`
+> aparece. Com `enable_sort = off` o plano não muda (`Disabled: true`): não há caminho alternativo.
+>
+> **Não é defeito de implementação nosso.** Sobre 3000 vetores DISTINTOS de 384 dims, esquema idêntico:
+>
+> | motor | `ef_search` | custo do `Limit` | plano |
+> |---|---|---|---|
+> | TheoDB | 40 | 434,34 | **HNSW** |
+> | TheoDB | **64 (nosso default)** | **567,66** | **Sort** |
+> | pgvector 0.8.6 | 40 (default dele) | 478,41 | **HNSW** |
+> | pgvector 0.8.6 | **64** | **567,66** | **Sort** |
+>
+> Em `ef=64` o pgvector dá plano e custos IDÊNTICOS aos nossos — 567,66/559,36/560,45/552,13, número por
+> número. No mesmo `ef=40`, nosso index scan custa **425,60** contra os **469,68** dele, e nosso índice
+> ocupa **680 páginas** contra **751**: somos mais baratos e menores nos dois eixos. O `am/cost.rs` é port
+> fiel do `hnsw.c` do pgvector 0.8.
+>
+> **A diferença inteira é o default:** 64 nosso (herdado do `SCAN_EF` fixo pré-M35, `am/guc.rs:22`) contra
+> 40 dele. E como a margem em `ef=40` é apertada (434,34 contra 567,66), mudanças pequenas nas estimativas
+> de linha atravessam o fio — que é a intermitência de 1-em-11 que seis cenários determinísticos não
+> pegaram.
+>
+> **MEDIDO em 2026-08-21 no droplet, e o conserto óbvio NÃO se paga.** SIFT1M completo, `theodb_hnsw`
+> m=16, k=10, 500 consultas, 3 repetições, benchmark registrado `vector/sift1m/ef-default`:
+>
+> | `ef_search` | QPS | IC95 | recall@10 |
+> |---|---|---|---|
+> | 40 | 901,2 | [884,6, 917,7] | **0,8316** |
+> | **64 (nosso)** | 654,4 | [648,0, 660,8] | **0,9018** |
+>
+> Baixar compra **1,377× de QPS** (IC95 [1,355×, 1,402×], p = 0,0003) e custa **7,02 pontos de
+> recall@10** — 7,8% relativo. O recall é determinístico (CV 2e-16); só o QPS varia, com CV de 1,6%.
+>
+> **Decisão: o default fica em 64** — [ADR-0066](wiki/decisions/0066-b018-ef-search-default-fica-em-64.md).
+> O pilar sustenta paridade de recall classe-pgvector; sete pontos não são tuning, são a alegação. E o
+> pgvector paga **o mesmo preço**: em `ef=64` ele também larga o índice, e o default de 40 dele compra o
+> plano com os mesmos 7 pontos. Não são duas escolhas diferentes — é a mesma troca com os dois projetos
+> em lados opostos.
+>
+> **A saída é por consulta:** `SET LOCAL theodb_hnsw.ef_search = 40` na transação que precisa do índice
+> numa junção filtrada. Escopo de transação, que é o que o [[B-055]] estabelece sob transaction pooling.
+>
+> Artefato: `benchmarks/artifacts/20260821T093458Z-vector-sift1m-ef-default-theodb-716a5ebd/`. Veredito
+> do arnês `EXPLORATORY` (faltaram CPU set, limite de memória e árvore git limpa) — não enfraquece a
+> decisão, porque quem decide é o recall e o recall é determinístico.
+>
+> **DUAS RETRATAÇÕES, preservadas no conceito da wiki.** (1) O primeiro controle usou pgvector **0.5.1**,
+> cujo modelo de custo é de outra geração — mediu a distância entre duas gerações, não entre duas
+> implementações. (2) A conclusão "a causa é o tamanho do índice, 1,78× depois corrigido para 1,52×" caiu
+> por **dados degenerados**: a subconsulta do `INSERT` não era correlacionada, virou InitPlan e **todos os
+> 3000 vetores eram idênticos** (`count(DISTINCT) = 1`). O pgvector deduplica vetores iguais — 854 tuplas
+> de elemento para 2000 linhas, medido por `pageinspect` —, o que fazia o índice dele parecer pequeno.
+> Refeito com vetores distintos, o resultado INVERTE.
+
 ## B-019 — `CREATE INDEX` de HNSW não é idempotente: estoura em vez de ser no-op   [ ]
 
 domain: vetorial
@@ -1492,7 +1578,15 @@ suggested_mode: review
 source: human
 evidence: medido em 2026-08-12 na saída de `cargo pgrx test pg18` (suíte completa, 446 testes). O build emite **1.460 avisos**, e o lint dominante é `unsafe_op_in_unsafe_fn` (E0133) com **2.872 ocorrências**: 1.874 chamadas a função `unsafe`, 932 desreferências de ponteiro cru, 54 usos de `static` mutável e 4 acessos a campo de `union`. A concentração é o que assusta — `src/am/columnar_agg.rs` (1.236), `src/am/page/mod.rs` (354), `src/am/columnar.rs` (286), `src/am/customscan.rs` (140), `src/am/build_stream.rs` (140), `src/am/page/ivf.rs` (138). Para contraste medido na mesma saída: código morto (`never used/read/constructed`) aparece **10** vezes. O eixo de risco deste repositório não é código morto.
 why_now: o `CLAUDE.md` do projeto declara que `unsafe`/FFI/pgrx é "a classe de defeito mais cara já encontrada em review — panic atravessando C, `TopMemoryContext`, MVCC do SPI", e manda abrir o acervo de pgrx antes de tocar em qualquer bloco `unsafe`. O que o lint diz é exatamente sobre enxergar esses blocos: dentro de uma `unsafe fn`, sem `unsafe {}` explícito, **o corpo inteiro é implicitamente inseguro** — some a capacidade de apontar QUAIS linhas são as perigosas. Num banco onde um panic atravessando a fronteira C derruba o backend do usuário, essa visibilidade é a diferença entre revisar 12 linhas marcadas e reler 1.236. O sinal já é emitido pelo compilador a cada build e ninguém o consome; ele não foi descoberto por ferramenta nova, foi descoberto por alguém ter lido a saída.
-status: triaged
+status: planned
+resultado: 2026-08-21 — **1.444 → 0**, e o lint virou erro no crate (`#![deny(unsafe_op_in_unsafe_fn)]`).
+  Primeiro achado: o número registrado era o DOBRO do real — 1.444, não 2.872, e os seis arquivos citados
+  batem em precisamente metade, porque `cargo pgrx test` compila o crate duas vezes. Segundo: o `cargo fix`
+  do rustc envolve o CORPO da função, o que satisfaz o lint e preserva o status quo exatamente — foi
+  aplicado, medido e revertido; a marcação entregue é por operação. Terceiro: a densidade (2,3% a 28,8%)
+  DERRUBOU a hipótese de adiar os dois arquivos densos — mesmo no pior a revisão estreita 3,5×. Os dois que
+  o DoD mandava tratar primeiro foram tratados (795 de 1.444). 488 testes passando, 0 falhando.
+  `wiki/decisions/0065-b032-unsafe-op-marcado-por-operacao.md`.
 dod:
   - decidido em ADR se o lint vira erro (`#![deny(unsafe_op_in_unsafe_fn)]`) de uma vez, por módulo, ou com prazo — e o ADR registra o custo escolhido
   - `src/am/columnar_agg.rs` e `src/am/page/mod.rs`, que somam 1.590 das 2.872, tratados primeiro ou explicitamente adiados com razão escrita
@@ -4024,3 +4118,52 @@ dod:
 > Registrado 2026-08-20 ao verificar a própria edição que fiz no README para o [[B-055]]. **Encontrado
 > porque eu duvidei do meu próprio "passou"**: o lint saiu 0 sem output, e 0-sem-output é ausência de
 > resposta, não resposta.
+## B-092 — O índice HNSW ocupa 1,78× o disco do pgvector, e é isso que tira o índice do plano   [x]
+
+domain: vetorial
+repo: theo-db
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-21 (`wiki/benchmarks/b018-planner-hnsw-juncao.md`), com **três builds de cada lado**. O `theodb_hnsw` ocupa **680/680/680** páginas — determinístico. O `hnsw` do pgvector 0.8.6 ocupa **444/416/482** — média 447,3, CV 7,4%, porque a atribuição de nível do HNSW é aleatória. Razão **1,52× (IC 95% [1,41×, 1,63×], p = 0,0067)** pela ferramenta do [[B-049]]. O `genericcostestimate` cobra proporcionalmente a páginas de índice, e foi essa diferença que tirou o HNSW do plano da junção filtrada do [[B-018]] (partida 425,60 contra 240,62 em `ef_search=40`).
+why_now: o [[B-018]] reproduziu e a causa dele é esta. O custo maior é VERDADEIRO — o índice é maior mesmo —, então não há conserto em `am/cost.rs`: inflar ou desinflar a fórmula seria mentir ao planner. Enquanto o índice for 1,78× maior, toda comparação de plano com `LIMIT` corre com esse handicap, e a do `theo-rag` já perde por uma margem de 24%.
+status: killed
+kill_reason: 2026-08-21, no mesmo dia em que foi aberto — **a premissa era falsa por dados degenerados**. A
+  subconsulta do `INSERT` que gerou os vetores não era correlacionada com a linha externa, então o PostgreSQL
+  a içou para InitPlan e a avaliou UMA vez: `count(DISTINCT vector) = 1` em 3000 linhas. O pgvector deduplica
+  vetores idênticos num elemento com vários heap TIDs — 854 tuplas de elemento para 2000 linhas, medido por
+  `pageinspect` —, o que fazia o índice dele parecer pequeno e produziu o "1,78×". Refeito com vetores
+  DISTINTOS, o resultado **inverte**: 680 páginas nossas contra 751 dele em N=3000, e 454 contra 501 em
+  N=2000, ambos determinísticos em três builds. **Nosso índice é menor; não há gap de tamanho a consertar.**
+  A causa real do [[B-018]] é o default de `ef_search` (64 nosso, 40 do pgvector) e está registrada lá.
+  Hipótese de compressão também testada e refutada no caminho: vetores de expoente repetido e de expoente
+  disperso dão o mesmo tamanho. `wiki/benchmarks/b018-planner-hnsw-juncao.md`.
+dod:
+  - medido POR QUE ~680 contra ~447 — o que ocupa as ~233 páginas de diferença (layout de nó, fator de preenchimento, cópia do vetor, metadados por vizinho)
+  - decidido em ADR se a diferença é essencial (o nosso nó carrega algo que o deles não carrega e que serve a um requisito) ou acidental
+  - se acidental, o índice do mesmo dado passa a caber em páginas comparáveis, e a junção filtrada do [[B-018]] escolhe o HNSW no `ef_search` default
+  - recall@10 medido antes e depois: encolher o nó não pode ser pago em recall sem que o número apareça
+
+> Registrado 2026-08-21 pelo ciclo que reproduziu o [[B-018]]. Separado dele porque o B-018 é "o
+> planner larga o índice" e este é "o índice é grande demais" — o primeiro é sintoma do segundo, e
+> fundi-los faria o conserto ser avaliado pelo sintoma.
+## B-093 — O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca   [ ]
+
+domain: lexical
+repo: theodb-bench
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-21. O `m186` publica nDCG@10 de **0,6269** no SciFact e declara tê-lo obtido somando scores por termo do lado de fora. Somar top-k por termo **trunca**: o documento que não entra no top-k de nenhum termo isolado, mas entraria no top-k combinado, é perdido. O adapter atual (`theodb-bench/src/adapters/postgres.py:1590`) já manda `query.text` inteiro numa chamada — o caminho correto existe e está pronto, e foi introduzido depois do m186 (`a8910c0`, 2026-08-17).
+why_now: o `0,6269` é citado como o número do pilar e é um PISO, não a medição. Enquanto não for re-medido, publicamos um número que sabemos estar subestimado e não sabemos por quanto.
+status: triaged
+custo_declarado: **não é um re-run.** Medido em 2026-08-21: `theodb-bench` não tem NENHUMA referência a
+  BEIR ou SciFact em `src/`, e não há manifesto em cache. O m186 rodou por script ad-hoc, fora do arnês —
+  o que o [[B-069]] já registra como o problema de método. Registrar o corpus (loader, qrels, nDCG@10) é a
+  maior parte do trabalho deste item; o adapter mandar a consulta inteira é a parte que já está pronta.
+dod:
+  - o corpus do BEIR (SciFact + o segundo do m186) registrado no arnês, com qrels e nDCG@10 — hoje não existe
+  - nDCG@10 re-medido pelo adapter atual, com N corridas e IC (a ferramenta do [[B-049]])
+  - o conceito do m186 atualizado por acréscimo com o número novo e a diferença medida
+  - se a diferença for nula, isso também é registrado — significa que o truncamento não mordia nesses corpora
+
+> Registrado 2026-08-21 pelo ciclo que matou o [[B-014]]. O bullet 2 daquele item sobreviveu à refutação
+> da premissa; os outros dois já estavam satisfeitos.

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "run_id": "20260821T093458Z-vector-sift1m-ef-default-theodb-716a5ebd",
+  "status": "EXPLORATORY",
+  "profile": "research",
+  "publishable": false,
+  "benchmark": {
+    "id": "vector/sift1m/ef-default",
+    "version": 1,
+    "commit": null
+  },
+  "system": {
+    "id": "theodb",
+    "version": null
+  },
+  "environment_digest": "sha256:aadb4cc811a7e09876f45d7632e4547a",
+  "headline": {
+    "configuration": "hnsw m=16 ef_search=40",
+    "throughput_per_second": 895.7233038769123,
+    "recall": 0.8316000000000001,
+    "latency_p50_ms": 1.0345910001205993,
+    "latency_p95_ms": 1.3106195999625925,
+    "latency_p99_ms": 1.4398173601625779
+  },
+  "limitations": [
+    "profile 'research' is not publishable",
+    "run status is EXPLORATORY",
+    "hnsw m=16 ef_search=64: unstable (latency_p99_ms cv=0.057)"
+  ],
+  "dataset": {
+    "id": "sift-128-euclidean",
+    "version": "ann-benchmarks-2018",
+    "sha256": "dd6f0a6ed6b7ebb8934680f861a33ed01ff33991eaee4fd60914d854a0ca5984"
+  }
+}

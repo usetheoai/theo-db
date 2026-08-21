@@ -292,33 +292,33 @@ unsafe extern "C-unwind" fn pathlist_hook(
     _rti: pg_sys::Index,
     rte: *mut pg_sys::RangeTblEntry,
 ) {
-    if let Some(prev) = PREV_HOOK {
-        prev(root, rel, _rti, rte); // keep the vecfilter hook (and any earlier chain) running
+    if let Some(prev) = unsafe { PREV_HOOK } {
+        unsafe { prev(root, rel, _rti, rte) }; // keep the vecfilter hook (and any earlier chain) running
     }
     if !ENABLE_PROJECTION.get() {
         return;
     }
-    let relref = &mut *rel;
+    let relref = unsafe { &mut *rel };
     if relref.reloptkind != pg_sys::RelOptKind::RELOPT_BASEREL {
         return;
     }
     // Plain relation using the theodb_columnar AM (same detection idiom as columnar_agg: get_rel_relam + amoid).
-    if rte.is_null() || (*rte).rtekind != pg_sys::RTEKind::RTE_RELATION {
+    if rte.is_null() || unsafe { (*rte).rtekind } != pg_sys::RTEKind::RTE_RELATION {
         return;
     }
     let amoid = columnar_amoid();
-    if amoid == pg_sys::InvalidOid || pg_sys::get_rel_relam((*rte).relid) != amoid {
+    if amoid == pg_sys::InvalidOid || unsafe { pg_sys::get_rel_relam((*rte).relid) } != amoid {
         return;
     }
     // (c) NOT an aggregate query — leave those to the plain seqscan (which columnar_agg may then swap at
     // UPPERREL_GROUP_AGG). Replacing the seqscan under an Agg would break columnar_agg's `find_scan_relid`
     // (it matches a T_SeqScan, not our CustomScan) and lose the vectorized-aggregate path (plan R3).
-    let parse = (*root).parse;
+    let parse = unsafe { (*root).parse };
     if !parse.is_null()
-        && ((*parse).hasAggs
-            || !(*parse).groupClause.is_null()
-            || !(*parse).groupingSets.is_null()
-            || (*parse).hasWindowFuncs)
+        && (unsafe { (*parse).hasAggs }
+            || !unsafe { (*parse).groupClause.is_null() }
+            || !unsafe { (*parse).groupingSets.is_null() }
+            || unsafe { (*parse).hasWindowFuncs })
     {
         return;
     }
@@ -326,13 +326,13 @@ unsafe extern "C-unwind" fn pathlist_hook(
     // Cost: beat the plain seqscan, but never a genuinely cheaper index path. Base off the cheapest existing
     // T_SeqScan path (unparameterized); price at 0.9× — a modest planner NUDGE, NOT a performance claim (the
     // real number is the T3.2 benchmark). If there is no seqscan path, add nothing (fail-safe).
-    let paths = PgList::<pg_sys::Path>::from_pg(relref.pathlist);
+    let paths = unsafe { PgList::<pg_sys::Path>::from_pg(relref.pathlist) };
     let mut seq: *mut pg_sys::Path = std::ptr::null_mut();
     for i in 0..paths.len() {
         if let Some(p) = paths.get_ptr(i) {
-            if (*p).pathtype == pg_sys::NodeTag::T_SeqScan
-                && (*p).param_info.is_null()
-                && (seq.is_null() || (*p).total_cost < (*seq).total_cost)
+            if unsafe { (*p).pathtype } == pg_sys::NodeTag::T_SeqScan
+                && unsafe { (*p).param_info.is_null() }
+                && (seq.is_null() || unsafe { (*p).total_cost } < unsafe { (*seq).total_cost })
             {
                 seq = p;
             }
@@ -341,11 +341,12 @@ unsafe extern "C-unwind" fn pathlist_hook(
     if seq.is_null() {
         return;
     }
-    let startup = (*seq).startup_cost;
-    let total = (*seq).total_cost * 0.9;
-    let rows = (*seq).rows;
+    let startup = unsafe { (*seq).startup_cost };
+    let total = unsafe { (*seq).total_cost } * 0.9;
+    let rows = unsafe { (*seq).rows };
 
-    let mut cpath = PgBox::<pg_sys::CustomPath>::alloc_node(pg_sys::NodeTag::T_CustomPath);
+    let mut cpath =
+        unsafe { PgBox::<pg_sys::CustomPath>::alloc_node(pg_sys::NodeTag::T_CustomPath) };
     let path = &mut cpath.path;
     path.pathtype = pg_sys::NodeTag::T_CustomScan;
     path.parent = rel;
@@ -358,13 +359,13 @@ unsafe extern "C-unwind" fn pathlist_hook(
     // Inherit the seqscan's `disabled_nodes` (PG17+ planner-preference fidelity, review LOW): with
     // `enable_seqscan = off` the seqscan is marked disabled_nodes=1; without copying it our derived path would
     // stay 0 and dominate the very scan the user disabled. Correct results either way — this respects the GUC.
-    path.disabled_nodes = (*seq).disabled_nodes;
+    path.disabled_nodes = unsafe { (*seq).disabled_nodes };
     cpath.flags = 0; // scan-type projection is handled by ExecScan's ps_ProjInfo — no PROJECTION flag needed
     cpath.custom_paths = std::ptr::null_mut(); // no children — this node IS the scan
     cpath.custom_private = std::ptr::null_mut(); // wanted is derived at begin from the plan
     cpath.custom_restrictinfo = std::ptr::null_mut(); // ⇒ create_customscan_plan hands us baserestrictinfo
     cpath.methods = &PATH_METHODS.0;
-    pg_sys::add_path(rel, cpath.into_pg() as *mut pg_sys::Path);
+    unsafe { pg_sys::add_path(rel, cpath.into_pg() as *mut pg_sys::Path) };
 }
 
 /// Path → Plan (hand-rolled `make_custom_scan`). This node IS the table scan: `scanrelid = rel.relid`, no
@@ -383,16 +384,17 @@ unsafe extern "C-unwind" fn plan_custom_path(
     clauses: *mut pg_sys::List,
     _custom_plans: *mut pg_sys::List,
 ) -> *mut pg_sys::Plan {
-    let mut cscan = PgBox::<pg_sys::CustomScan>::alloc_node(pg_sys::NodeTag::T_CustomScan);
+    let mut cscan =
+        unsafe { PgBox::<pg_sys::CustomScan>::alloc_node(pg_sys::NodeTag::T_CustomScan) };
     {
         let plan = &mut cscan.scan.plan;
         plan.targetlist = tlist;
         // RestrictInfo list → bare AND-expr list (pseudoconstant=false, same call the built-in scan planners make).
-        plan.qual = pg_sys::extract_actual_clauses(clauses, false);
+        plan.qual = unsafe { pg_sys::extract_actual_clauses(clauses, false) };
         plan.lefttree = std::ptr::null_mut();
         plan.righttree = std::ptr::null_mut();
     }
-    cscan.scan.scanrelid = (*rel).relid;
+    cscan.scan.scanrelid = unsafe { (*rel).relid };
     cscan.flags = 0;
     cscan.custom_plans = std::ptr::null_mut();
     cscan.custom_exprs = std::ptr::null_mut();
@@ -415,8 +417,9 @@ struct ProjScanState {
 unsafe extern "C-unwind" fn create_custom_scan_state(
     _cscan: *mut pg_sys::CustomScan,
 ) -> *mut pg_sys::Node {
-    let ptr = pg_sys::palloc0(std::mem::size_of::<ProjScanState>()) as *mut ProjScanState;
-    let st = &mut *ptr;
+    let ptr =
+        unsafe { pg_sys::palloc0(std::mem::size_of::<ProjScanState>()) } as *mut ProjScanState;
+    let st = unsafe { &mut *ptr };
     st.css.ss.ps.type_ = pg_sys::NodeTag::T_CustomScanState;
     st.css.methods = &EXEC_METHODS.0;
     st.scandesc = std::ptr::null_mut();
@@ -437,22 +440,22 @@ unsafe fn columns_needed(
         | pg_sys::PVC_RECURSE_WINDOWFUNCS
         | pg_sys::PVC_RECURSE_PLACEHOLDERS) as c_int;
     let mut set: BTreeSet<usize> = BTreeSet::new();
-    for &list in &[(*plan).targetlist, (*plan).qual] {
+    for &list in &[unsafe { (*plan).targetlist }, unsafe { (*plan).qual }] {
         if list.is_null() {
             continue;
         }
-        let vars = pg_sys::pull_var_clause(list as *mut pg_sys::Node, flags);
-        let vl = PgList::<pg_sys::Node>::from_pg(vars);
+        let vars = unsafe { pg_sys::pull_var_clause(list as *mut pg_sys::Node, flags) };
+        let vl = unsafe { PgList::<pg_sys::Node>::from_pg(vars) };
         for i in 0..vl.len() {
             let node = vl.get_ptr(i)?;
-            if (*node).type_ != pg_sys::NodeTag::T_Var {
+            if unsafe { (*node).type_ } != pg_sys::NodeTag::T_Var {
                 return None; // e.g. a surviving PlaceHolderVar — decode all (correctness over cleverness)
             }
             let var = node as *mut pg_sys::Var;
-            if (*var).varno as u32 != scanrelid {
+            if unsafe { (*var).varno } as u32 != scanrelid {
                 return None; // a Var from another rel / special varno (OUTER/INNER/INDEX) → decode all
             }
-            let att = (*var).varattno as i32;
+            let att = unsafe { (*var).varattno } as i32;
             if att <= 0 {
                 return None; // whole-row (0) or system column (< 0) → decode all
             }
@@ -475,7 +478,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     estate: *mut pg_sys::EState,
     eflags: c_int,
 ) {
-    let st = &mut *(node as *mut ProjScanState);
+    let st = unsafe { &mut *(node as *mut ProjScanState) };
     if (eflags & pg_sys::EXEC_FLAG_EXPLAIN_ONLY as c_int) != 0 {
         st.scandesc = std::ptr::null_mut();
         return;
@@ -484,9 +487,9 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     if rel.is_null() {
         pg_sys::error!("theodb columnar_project: scan relation not opened");
     }
-    let natts = (*(*rel).rd_att).natts as usize;
+    let natts = unsafe { (*(*rel).rd_att).natts } as usize;
     let cscan = st.css.ss.ps.plan as *mut pg_sys::CustomScan;
-    let scanrelid = (*cscan).scan.scanrelid;
+    let scanrelid = unsafe { (*cscan).scan.scanrelid };
     // Derive wanted from targetlist ∪ qual, and SYNCHRONIZE the registry on BOTH branches (review HIGH — ABA
     // hazard). A `ProjScanState` can be palloc'd at the address of a PRIOR node whose `end_custom_scan` was
     // longjmp'd over by a caught subxact abort (its `{addr → wanted}` entry stays orphaned — `subxact_clear`
@@ -494,7 +497,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     // takes the `None` fallback and did NOT evict, `exec` would `registry_get(addr)` the STALE mask and decode
     // only the dead node's columns — a silent wrong answer (the rest come back NULL). Removing on `None` makes
     // a reused address deterministic, mirroring the vecfilter's unconditional insert (`customscan.rs:572`).
-    match columns_needed(st.css.ss.ps.plan, scanrelid, natts) {
+    match unsafe { columns_needed(st.css.ss.ps.plan, scanrelid, natts) } {
         Some(wanted) => registry_insert(node as usize, wanted),
         None => registry_remove(node as usize),
     }
@@ -502,10 +505,11 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     // `ExtractPushdownClause`): keep the `col op const` clauses `extract_zone_predicate` accepts and DROP the rest
     // (function / OR / cross-type / two-Var) — the `ExecScan` re-checks the FULL qual, so an incomplete push is
     // still correct (ADR-2). UNCONDITIONAL insert (even empty) makes a reused address ABA-proof for this channel.
-    let preds: Vec<ZonePredicate> = predicates_needed(st.css.ss.ps.plan, scanrelid);
+    let preds: Vec<ZonePredicate> = unsafe { predicates_needed(st.css.ss.ps.plan, scanrelid) };
     preds_registry_insert(node as usize, preds);
     // Open a real table scan over the columnar rel under the query snapshot (routes to columnar_scan_begin).
-    st.scandesc = pg_sys::table_beginscan(rel, (*estate).es_snapshot, 0, std::ptr::null_mut());
+    st.scandesc =
+        unsafe { pg_sys::table_beginscan(rel, (*estate).es_snapshot, 0, std::ptr::null_mut()) };
     st.css.ss.ss_currentScanDesc = st.scandesc;
 }
 
@@ -513,14 +517,14 @@ unsafe extern "C-unwind" fn begin_custom_scan(
 /// dropped; `ExecScan` re-checks the full qual). Empty ⇒ no chunk-group skip. Mirrors `columns_needed`'s walk of
 /// `(*plan).qual` but keeps the whole clause (not its leaf Vars). Vars in the qual carry `varno == scanrelid`.
 unsafe fn predicates_needed(plan: *mut pg_sys::Plan, scanrelid: u32) -> Vec<ZonePredicate> {
-    if (*plan).qual.is_null() {
+    if unsafe { (*plan).qual.is_null() } {
         return Vec::new();
     }
-    let quals = PgList::<pg_sys::Node>::from_pg((*plan).qual);
+    let quals = unsafe { PgList::<pg_sys::Node>::from_pg((*plan).qual) };
     let mut preds = Vec::with_capacity(quals.len());
     for i in 0..quals.len() {
         if let Some(clause) = quals.get_ptr(i) {
-            if let Some(p) = extract_zone_predicate(clause, scanrelid as i32) {
+            if let Some(p) = unsafe { extract_zone_predicate(clause, scanrelid as i32) } {
                 preds.push(p);
             }
         }
@@ -536,18 +540,20 @@ unsafe extern "C-unwind" fn proj_access(
     node: *mut pg_sys::ScanState,
 ) -> *mut pg_sys::TupleTableSlot {
     let st = node as *mut ProjScanState;
-    let slot = (*node).ss_ScanTupleSlot;
-    if (*st).scandesc.is_null() {
-        return pg_sys::ExecClearTuple(slot);
+    let slot = unsafe { (*node).ss_ScanTupleSlot };
+    if unsafe { (*st).scandesc.is_null() } {
+        return unsafe { pg_sys::ExecClearTuple(slot) };
     }
-    if pg_sys::table_scan_getnextslot(
-        (*st).scandesc,
-        pg_sys::ScanDirection::ForwardScanDirection,
-        slot,
-    ) {
+    if unsafe {
+        pg_sys::table_scan_getnextslot(
+            (*st).scandesc,
+            pg_sys::ScanDirection::ForwardScanDirection,
+            slot,
+        )
+    } {
         slot
     } else {
-        pg_sys::ExecClearTuple(slot)
+        unsafe { pg_sys::ExecClearTuple(slot) }
     }
 }
 
@@ -569,7 +575,7 @@ unsafe extern "C-unwind" fn proj_recheck(
 unsafe extern "C-unwind" fn exec_custom_scan(
     node: *mut pg_sys::CustomScanState,
 ) -> *mut pg_sys::TupleTableSlot {
-    let st = &mut *(node as *mut ProjScanState);
+    let st = unsafe { &mut *(node as *mut ProjScanState) };
     if st.scandesc.is_null() {
         return std::ptr::null_mut(); // EXPLAIN-only or torn down
     }
@@ -582,17 +588,17 @@ unsafe extern "C-unwind" fn exec_custom_scan(
         .filter(|p| !p.is_empty())
         .map(|p| (st.scandesc as usize, p));
     let _pguard = PredGuard::install(pactive);
-    pg_sys::ExecScan(&mut st.css.ss, Some(proj_access), Some(proj_recheck))
+    unsafe { pg_sys::ExecScan(&mut st.css.ss, Some(proj_access), Some(proj_recheck)) }
 }
 
 /// Exec teardown: drop this node's registry entry (frees the Vec) and end the columnar scan.
 #[pg_guard]
 unsafe extern "C-unwind" fn end_custom_scan(node: *mut pg_sys::CustomScanState) {
-    let st = &mut *(node as *mut ProjScanState);
+    let st = unsafe { &mut *(node as *mut ProjScanState) };
     registry_remove(node as usize);
     preds_registry_remove(node as usize); // M150 — free this node's predicate entry too
     if !st.scandesc.is_null() {
-        pg_sys::table_endscan(st.scandesc);
+        unsafe { pg_sys::table_endscan(st.scandesc) };
         st.scandesc = std::ptr::null_mut();
         st.css.ss.ss_currentScanDesc = std::ptr::null_mut();
     }
@@ -602,9 +608,9 @@ unsafe extern "C-unwind" fn end_custom_scan(node: *mut pg_sys::CustomScanState) 
 /// change across rescans (same plan), so the registry entry is kept; exec re-installs it each pull window.
 #[pg_guard]
 unsafe extern "C-unwind" fn rescan_custom_scan(node: *mut pg_sys::CustomScanState) {
-    let st = &mut *(node as *mut ProjScanState);
+    let st = unsafe { &mut *(node as *mut ProjScanState) };
     if !st.scandesc.is_null() {
-        pg_sys::table_rescan(st.scandesc, std::ptr::null_mut());
+        unsafe { pg_sys::table_rescan(st.scandesc, std::ptr::null_mut()) };
     }
 }
 

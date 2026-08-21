@@ -366,7 +366,7 @@ unsafe fn gather_hnsw_candidates(
     query: &[f32],
     ef: usize,
 ) -> Result<Vec<(i64, f64)>, ScanError> {
-    let meta = crate::am::hnsw_page::read_meta(rel)?;
+    let meta = unsafe { crate::am::hnsw_page::read_meta(rel)? };
     let metric = Metric::from_tag(meta.metric_tag)
         .ok_or_else(|| ScanError::Corrupt("unknown metric tag in persisted index meta".into()))?;
     // Fail-fast with a typed error (mirrors pgvector's "different vector dimensions") instead of letting a
@@ -379,9 +379,9 @@ unsafe fn gather_hnsw_candidates(
             meta.dim
         ));
     }
-    let mut results = crate::am::hnsw_page::traverse(rel, &meta, query, ef)?;
+    let mut results = unsafe { crate::am::hnsw_page::traverse(rel, &meta, query, ef)? };
     // Fold in pending (INSERTed after build) — no rebuild (mirror the IVF path).
-    let pending = page::read_pending(rel)?;
+    let pending = unsafe { page::read_pending(rel)? };
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
     }
@@ -406,22 +406,26 @@ unsafe fn scan_ivf_structured(
     // unknown discriminant on a TIVS-magic index is corruption → XX002 (the operator REINDEXes), never
     // silently read as v3. The comment history of each path: v7=M90 inline label filter, v4=M77 pg_scann,
     // v5=M83 storage-separated, v6=M85 SQ8 refine, v8=E1 f32-free RaBitQ.
-    match page::ivf_version(rel) {
+    match unsafe { page::ivf_version(rel) } {
         Ok(page::IvfVersion::V7) => {
-            return scan_ivf_aq_split_v7(rel, query, probes, rerank_pool, query_labels);
+            return unsafe { scan_ivf_aq_split_v7(rel, query, probes, rerank_pool, query_labels) };
         }
-        Ok(page::IvfVersion::V4) => return scan_ivf_aq(rel, query, probes, rerank_pool),
-        Ok(page::IvfVersion::V5) => return scan_ivf_aq_split(rel, query, probes, rerank_pool),
-        Ok(page::IvfVersion::V6) => return scan_ivf_aq_split_sq8(rel, query, probes, rerank_pool),
+        Ok(page::IvfVersion::V4) => return unsafe { scan_ivf_aq(rel, query, probes, rerank_pool) },
+        Ok(page::IvfVersion::V5) => {
+            return unsafe { scan_ivf_aq_split(rel, query, probes, rerank_pool) };
+        }
+        Ok(page::IvfVersion::V6) => {
+            return unsafe { scan_ivf_aq_split_sq8(rel, query, probes, rerank_pool) };
+        }
         Ok(page::IvfVersion::V8) => {
-            return scan_ivf_aq_split_rabitq(rel, query, probes, rerank_pool);
+            return unsafe { scan_ivf_aq_split_rabitq(rel, query, probes, rerank_pool) };
         }
         Ok(page::IvfVersion::V3) => {} // f32 structured — falls through to the body below
         Err(e) => return Err(e.into()),
     }
     // v3 f32 IVF reranks ALL probed candidates exactly (no AH prune pool) — `rerank_pool` unused here.
     let _ = rerank_pool;
-    let meta = page::read_ivf_meta(rel)?;
+    let meta = unsafe { page::read_ivf_meta(rel)? };
     let metric = Metric::from_tag(meta.metric_tag)
         .ok_or_else(|| ScanError::Corrupt("unknown metric tag in persisted index meta".into()))?;
     // NOTE: do NOT early-return on empty centroids — an index built (or vacuumed) empty still has a pending
@@ -454,7 +458,7 @@ unsafe fn scan_ivf_structured(
     for &(_, ci) in cd.iter().take(probes) {
         let (fb, np, cnt) = meta.dir[ci];
         let t_read = std::time::Instant::now();
-        let bytes = page::read_ivf_list_bytes(rel, fb, np)?;
+        let bytes = unsafe { page::read_ivf_list_bytes(rel, fb, np)? };
         if profile {
             read_us += t_read.elapsed().as_micros();
         }
@@ -480,7 +484,7 @@ unsafe fn scan_ivf_structured(
         }
     }
     // Fold in pending (INSERTed after build) — no rebuild.
-    let pending = page::read_pending(rel)?;
+    let pending = unsafe { page::read_pending(rel)? };
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
     }
@@ -508,7 +512,7 @@ unsafe fn scan_ivf_aq(
     probes: usize,
     rerank_pool: usize,
 ) -> Result<Vec<(i64, f64)>, ScanError> {
-    let meta = page::read_ivf_aq_meta(rel)?;
+    let meta = unsafe { page::read_ivf_aq_meta(rel)? };
     let quant = crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.codebook)
         .map_err(|e| ScanError::Corrupt(format!("aq codebook: {e}")))?;
     let lut =
@@ -540,7 +544,7 @@ unsafe fn scan_ivf_aq(
         if n == 0 {
             continue;
         }
-        let bytes = page::read_ivf_list_bytes(rel, fb, np)?;
+        let bytes = unsafe { page::read_ivf_list_bytes(rel, fb, np)? };
         let codes_off = 8 * n + entry_f32 * n;
         let lbidx = listbytes.len();
         stage1_score_blocks(&lut, &bytes, codes_off, n, pairs, |ordinal, score| {
@@ -570,8 +574,9 @@ unsafe fn scan_ivf_aq(
     }
     // M81 — fold in pending (rows INSERTed after build): f32, scored EXACTLY (never quantized), no rebuild. Same
     // contract as the v3 f32 path — else post-build INSERTs are silently dropped from a WITH (pq_subspaces) index.
-    let pending =
-        page::read_pending(rel).map_err(|e| ScanError::Corrupt(format!("pending: {e}")))?;
+    let pending = unsafe {
+        page::read_pending(rel).map_err(|e| ScanError::Corrupt(format!("pending: {e}")))?
+    };
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
     }
@@ -589,7 +594,7 @@ unsafe fn scan_ivf_aq_split(
     probes: usize,
     rerank_pool: usize,
 ) -> Result<Vec<(i64, f64)>, ScanError> {
-    let meta = page::read_ivf_aq_meta_split(rel)?;
+    let meta = unsafe { page::read_ivf_aq_meta_split(rel)? };
     let quant = crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.codebook)
         .map_err(|e| ScanError::Corrupt(format!("aq codebook: {e}")))?;
     let lut =
@@ -634,7 +639,7 @@ unsafe fn scan_ivf_aq_split(
         if n == 0 {
             continue;
         }
-        let cbytes = page::read_ivf_list_bytes(rel, cfb, cnp)?;
+        let cbytes = unsafe { page::read_ivf_list_bytes(rel, cfb, cnp)? };
         let codes_off = 8 * n; // codes start right after the n ids
         stage1_score_blocks(&lut, &cbytes, codes_off, n, pairs, |ordinal, score| {
             let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
@@ -659,7 +664,7 @@ unsafe fn scan_ivf_aq_split(
     let mut results: Vec<(i64, f64)> = Vec::with_capacity(cands.len());
     for (_, tid, ci, ordinal) in &cands {
         let (_cfb, _cnp, vfb, vnp, _cnt) = meta.dir[*ci];
-        let raw = page::read_vec_at(rel, vfb, vnp, *ordinal, dim)
+        let raw = unsafe { page::read_vec_at(rel, vfb, vnp, *ordinal, dim) }
             .map_err(|e| ScanError::Corrupt(format!("v5 rerank: {e}")))?;
         let d = match metric {
             Metric::L2 => crate::vec::l2_dist_from_bytes(query, &raw),
@@ -669,8 +674,9 @@ unsafe fn scan_ivf_aq_split(
         results.push((*tid, d));
     }
     // M81 — fold in pending (rows INSERTed after build): f32, scored EXACTLY, no rebuild. Same contract as v3/v4.
-    let pending =
-        page::read_pending(rel).map_err(|e| ScanError::Corrupt(format!("pending: {e}")))?;
+    let pending = unsafe {
+        page::read_pending(rel).map_err(|e| ScanError::Corrupt(format!("pending: {e}")))?
+    };
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
     }
@@ -689,7 +695,7 @@ unsafe fn scan_ivf_aq_split_v7(
     rerank_pool: usize,
     query_labels: &[i16],
 ) -> Result<Vec<(i64, f64)>, ScanError> {
-    let meta = page::read_ivf_aq_meta_split(rel)?;
+    let meta = unsafe { page::read_ivf_aq_meta_split(rel)? };
     let quant = crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.codebook)
         .map_err(|e| ScanError::Corrupt(format!("aq codebook: {e}")))?;
     let lut =
@@ -733,7 +739,7 @@ unsafe fn scan_ivf_aq_split_v7(
         if n == 0 {
             continue;
         }
-        let cbytes = page::read_ivf_list_bytes(rel, cfb, cnp)?;
+        let cbytes = unsafe { page::read_ivf_list_bytes(rel, cfb, cnp)? };
         let labels_off = 8 * n; // labels start right after the n ids
         let codes_off = 8 * n + n * label_bytes; // codes start after ids + the fixed label region
         stage1_score_blocks(&lut, &cbytes, codes_off, n, pairs, |ordinal, score| {
@@ -777,7 +783,7 @@ unsafe fn scan_ivf_aq_split_v7(
     let mut results: Vec<(i64, f64)> = Vec::with_capacity(cands.len());
     for (_, tid, ci, ordinal) in &cands {
         let (_cfb, _cnp, vfb, vnp, _cnt) = meta.dir[*ci];
-        let raw = page::read_vec_at(rel, vfb, vnp, *ordinal, dim)
+        let raw = unsafe { page::read_vec_at(rel, vfb, vnp, *ordinal, dim) }
             .map_err(|e| ScanError::Corrupt(format!("v7 rerank: {e}")))?;
         let d = match metric {
             Metric::L2 => crate::vec::l2_dist_from_bytes(query, &raw),
@@ -787,8 +793,9 @@ unsafe fn scan_ivf_aq_split_v7(
         results.push((*tid, d));
     }
     // Pending region (post-build INSERTs) has NO stored label — emit it and let `xs_recheck` filter on the heap.
-    let pending =
-        page::read_pending(rel).map_err(|e| ScanError::Corrupt(format!("pending: {e}")))?;
+    let pending = unsafe {
+        page::read_pending(rel).map_err(|e| ScanError::Corrupt(format!("pending: {e}")))?
+    };
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
     }
@@ -833,7 +840,7 @@ unsafe fn scan_ivf_aq_split_sq8(
     probes: usize,
     rerank_pool: usize,
 ) -> Result<Vec<(i64, f64)>, ScanError> {
-    let meta = page::read_ivf_aq_meta_split_sq8(rel)?;
+    let meta = unsafe { page::read_ivf_aq_meta_split_sq8(rel)? };
     let quant = crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook)
         .map_err(|e| ScanError::Corrupt(format!("aq codebook: {e}")))?;
     let sq8 = crate::sq8::Sq8Quantizer::from_meta_bytes(&meta.sq8_codebook)
@@ -861,7 +868,7 @@ unsafe fn scan_ivf_aq_split_sq8(
         if n == 0 {
             continue;
         }
-        let cbytes = page::read_ivf_list_bytes(rel, cfb, cnp)?;
+        let cbytes = unsafe { page::read_ivf_list_bytes(rel, cfb, cnp)? };
         let codes_off = 8 * n;
         stage1_score_blocks(&lut, &cbytes, codes_off, n, pairs, |ordinal, score| {
             let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
@@ -879,14 +886,15 @@ unsafe fn scan_ivf_aq_split_sq8(
     let mut results: Vec<(i64, f64)> = Vec::with_capacity(cands.len());
     for (_, tid, ci, ordinal) in &cands {
         let (_cfb, _cnp, sfb, snp, _cnt) = meta.dir[*ci];
-        let code = page::read_sq8_at(rel, sfb, snp, *ordinal, dim)
+        let code = unsafe { page::read_sq8_at(rel, sfb, snp, *ordinal, dim) }
             .map_err(|e| ScanError::Corrupt(format!("v6 sq8 rerank: {e}")))?;
         let approx = sq8.decode(&code);
         results.push((*tid, metric.dist(query, &approx)));
     }
     // M81 — fold in pending (rows INSERTed after build): f32, scored EXACTLY (never quantized). Same as v3/v4/v5.
-    let pending =
-        page::read_pending(rel).map_err(|e| ScanError::Corrupt(format!("pending: {e}")))?;
+    let pending = unsafe {
+        page::read_pending(rel).map_err(|e| ScanError::Corrupt(format!("pending: {e}")))?
+    };
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
     }
@@ -904,7 +912,7 @@ unsafe fn scan_ivf_aq_split_rabitq(
     probes: usize,
     rerank_pool: usize,
 ) -> Result<Vec<(i64, f64)>, ScanError> {
-    let meta = page::read_ivf_aq_meta_split_rabitq(rel)?;
+    let meta = unsafe { page::read_ivf_aq_meta_split_rabitq(rel)? };
     let quant = crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook)
         .map_err(|e| ScanError::Corrupt(format!("aq codebook: {e}")))?;
     let rq = crate::vec::rabitq::RabitqQuantizer::from_meta_bytes(&meta.rabitq_codebook)
@@ -930,7 +938,7 @@ unsafe fn scan_ivf_aq_split_rabitq(
         if n == 0 {
             continue;
         }
-        let cbytes = page::read_ivf_list_bytes(rel, cfb, cnp)?;
+        let cbytes = unsafe { page::read_ivf_list_bytes(rel, cfb, cnp)? };
         let codes_off = 8 * n;
         stage1_score_blocks(&lut, &cbytes, codes_off, n, pairs, |ordinal, score| {
             let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
@@ -959,7 +967,7 @@ unsafe fn scan_ivf_aq_split_rabitq(
             qcache[*ci] = Some((q_r, qc2));
         }
         let (q_r, qc2) = qcache[*ci].as_ref().unwrap();
-        let rec = page::read_rabitq_at(rel, rfb, rnp, *ordinal, dim)
+        let rec = unsafe { page::read_rabitq_at(rel, rfb, rnp, *ordinal, dim) }
             .map_err(|e| ScanError::Corrupt(format!("v8 rabitq rerank: {e}")))?;
         let code = crate::vec::rabitq::RabitqQuantizer::record_to_code(&rec, dim)
             .map_err(|e| ScanError::Corrupt(format!("v8 rabitq record: {e}")))?;
@@ -969,8 +977,9 @@ unsafe fn scan_ivf_aq_split_rabitq(
         results.push((*tid, rq.estimate_l2_sq(&code, q_r, *qc2).max(0.0).sqrt()));
     }
     // Pending rows (INSERTed after build): f32, scored EXACTLY (same as v5/v6). Never RaBitQ-encoded.
-    let pending =
-        page::read_pending(rel).map_err(|e| ScanError::Corrupt(format!("pending: {e}")))?;
+    let pending = unsafe {
+        page::read_pending(rel).map_err(|e| ScanError::Corrupt(format!("pending: {e}")))?
+    };
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
     }
@@ -979,7 +988,7 @@ unsafe fn scan_ivf_aq_split_rabitq(
 
 /// The M26 blob scan path — HNSW (and any legacy blob index): deserialize the whole index + search. O(N).
 unsafe fn scan_blob(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Reverse<Scored>> {
-    let blob = match page::read_blob(rel) {
+    let blob = match unsafe { page::read_blob(rel) } {
         Ok(b) => b,
         Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
@@ -990,7 +999,7 @@ unsafe fn scan_blob(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Reverse<
         Ok(i) => i,
         Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
-    let pending = match page::read_pending(rel) {
+    let pending = match unsafe { page::read_pending(rel) } {
         Ok(p) => p,
         Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
