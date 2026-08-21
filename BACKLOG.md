@@ -517,6 +517,11 @@ source: human
 evidence: none-yet
 why_now: o M128 mediu 43 queries do ClickBench com md5 byte-idêntico ao heap — correção provada. Mas a suíte completa nunca rodou publicada, e o M184 registrou que o ganho do colunar vive no pushdown, não no seqscan plano. Sem a suíte completa não dá para dizer onde o pilar é competitivo e onde não é, que é precisamente o que o objetivo B-002 vai precisar saber.
 status: raw
+nota_2026_08_21: o [[B-058]] mediu a curva de crossover e encontrou **dois gaps que a suíte completa
+  do ClickBench encontraria multiplicados**: o agregado FILTRADO perde para o heap em toda a faixa e
+  piora com N (0,25× a 2M), e o `GROUP BY` não faz pushdown para o agregado colunar. A maioria das
+  queries do ClickBench filtra e agrupa — rodar a suíte antes de tratar esses dois produziria uma
+  tabela cujo resultado já é previsível, e cara. `wiki/benchmarks/b058-crossover-colunar.md`.
 dod:
   - suíte ClickBench completa executada e publicada em `wiki/benchmarks/`, com as queries que falham ou degradam nomeadas
   - por query, quanto do tempo é pushdown e quanto é seqscan plano — medido, não estimado
@@ -2624,6 +2629,35 @@ separado; **(b)** a população automática do store **falha em silêncio** num 
 restart, porque o recomendador usa histórico de consultas que está vazio: o store fica vazio, todo plano cai
 para heap, e a corrida não mede nada sem erro nem aviso.
 status: triaged
+medido_2026_08_21: **bullets 2 e 4 ENTREGUES, e a resposta do bullet 2 não é um número.**
+  `wiki/benchmarks/b058-crossover-colunar.md`, artefato em `benchmarks/artifacts/20260821T122336Z-*`.
+  .
+  BULLET 4 (residência) — o portão existia e **nunca era pedido**: `assert_analytical_path` provava
+  residência (`pg_class.relam`) E plano (`ANALYTICAL_PLAN_MARKERS`), o AlloyDB estendera com três
+  fatos, e nada em `src/bench/` a chamava. Agora é pedida ANTES de qualquer cronometragem, e um
+  caminho que não se prova produz medida recusada — nunca um número.
+  .
+  BULLET 2 (crossover) — medido de 10K a 2M, e **a pergunta tem quatro respostas**:
+  .
+  | consulta | veredito |
+  |---|---|
+  | `total_rows` | colunar ganha **abaixo de 10K**; pico **4,02×** em 500K |
+  | `sum_amount` | crossover **entre 10K e 50K**; pico 2,75× em 100K |
+  | **`filtered_sum`** | **PERDE em toda a faixa: 0,42× a 10K → 0,25× a 2M** |
+  | **`group_by_category`** | **recusado nos 6 pontos — sem pushdown** |
+  .
+  DOIS GAPS REAIS, nomeados: (a) o agregado FILTRADO — a forma mais comum de consulta analítica — é
+  **4× mais lento que heap a 2M e a distância CRESCE com N**; não é crossover a atingir em escala
+  maior, a curva vai na direção errada. (b) o `GROUP BY` cai para `Seq Scan → external-merge Sort →
+  GroupAggregate` e o portão o recusa; antes dele, esse número teria entrado como "colunar".
+  .
+  E DOIS ACHADOS QUE NINGUÉM PROCURAVA: a vantagem do colunar tem **pico e declina** (4,02× em 500K →
+  3,17× em 2M; 2,75× em 100K → 1,74× em 2M), que é o oposto do que um store colunar deveria fazer e
+  **não está diagnosticado**; e o **Parquet é 40× a 142× mais lento que o heap**, piorando com a
+  escala — 8,3 s para contar 2M linhas.
+  .
+  BULLETS 1 e 3 PENDENTES: o TPC-H contra o Omni exige o [[B-057]]/[[B-059]]; a contenção nos dois
+  regimes exige o regime "além do cache" no `contention`.
 status_nota_evidencia: 2026-08-20 — campo de evidência MISTO, e a distinção importa. O grosso dele
   (`Q6 39×`, `311×` a SF100, o crossover) é medição de TERCEIRO sobre produto de terceiro, e
   `cycle-discover.md § Anti-patterns` proíbe prior art como evidência. O que sustenta este item é a
