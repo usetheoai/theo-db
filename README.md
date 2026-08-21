@@ -7,7 +7,7 @@ edição única para download que roda no seu laptop, on-premises, na borda, em 
 em Kubernetes ou bare metal. Num só pacote você tem busca vetorial + híbrida (BM25+vetor) para
 aplicações de IA, grafo para GraphRAG, analytics colunar sobre dados transacionais vivos e
 lakehouse Parquet own-code (sem DuckDB) — tudo em SQL, com código próprio, sem licença por vCPU
-e sem lock-in.
+e com saída declarada: os dados saem por `pg_dump` e por Parquet, e a extensão é Apache 2.0.
 
 > ⚠️ **Status:** em desenvolvimento ativo, ainda **pré-1.0** (releases 0.x — ver [`CHANGELOG.md`](./CHANGELOG.md)).
 > Sem afirmação de "production-ready" até haver evidência de uso sustentado (`public-copy.md`).

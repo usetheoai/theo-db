@@ -13,6 +13,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **O README trocou uma alegação absoluta por uma saída concreta.** Dizia "sem lock-in", que é a forma
+  que o próprio `public-copy.md § 6` bane; agora nomeia a saída — `pg_dump`, Parquet, extensão Apache
+  2.0. O lint de copy pública **não** pegou isso, e a lacuna dele ficou registrada. (#B-091)
+
 ## [0.162.0] - 2026-08-20
 
 ### Added

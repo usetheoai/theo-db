@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-90 items — **Open** 26 · **In flight** 7 · **Closed** 57
+91 items — **Open** 27 · **In flight** 7 · **Closed** 57
 
-### Open (26)
+### Open (27)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -100,6 +100,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala----) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
+| [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `triaged` | — |
 
 ### In flight (7)
 
@@ -3886,3 +3887,32 @@ dod:
 > Registrado 2026-08-20 ao mergear o #258. **É o B-052 outra vez, um diretório adiante**: um portão que não
 > olha um código é indistinguível de um portão que aprova aquele código, e a diferença só aparece quando
 > alguém quebra alguma coisa.
+## B-091 — O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo   [ ]
+
+domain: governanca
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: medido em 2026-08-20 rodando `hooks/public-copy-lint.sh` contra o `README.md` real (o hook lê o
+caminho do stdin como JSON; invocá-lo sem isso não verifica **nada** e sai 0, que foi o meu primeiro erro).
+**Falso positivo:** ele avisa de `production-ready` nas quatro ocorrências do arquivo, e as quatro são
+NEGAÇÕES — *"Sem afirmação de 'production-ready' até haver evidência"*, *"**Não é production-ready**"*, *"o
+gate para sequer começar a alegar production-ready"*. O lint não distingue afirmação de negação, então avisa
+exatamente sobre o texto que existe para cumprir a regra.
+**Falso negativo:** `public-copy.md § 6` bane `lock-in free`/`lock-in proof` como claim absoluta, e o
+`README.md:10` dizia *"sem lock-in"* — não avisado. O lint verifica **3 das 4** famílias banidas do § 6:
+falta `lock-in`, `<competidor> killer`, `drop-in replacement` e `zero downtime`.
+why_now: um lint com as duas falhas ao mesmo tempo é pior que nenhum: ele treina o leitor a ignorar o aviso
+(porque o aviso que ele dá é sobre o texto certo) enquanto deixa passar o que deveria pegar. A frase da linha
+10 foi corrigida na mesma sessão, mas por leitura humana — o portão não a teria pego.
+status: triaged
+dod:
+  - o lint não avisa quando o termo aparece negado (`não é X`, `sem afirmação de X`) — provado por teste
+    contra o `README.md` atual, que hoje dispara quatro avisos e deveria disparar zero
+  - as quatro famílias do `public-copy.md § 6` são verificadas, não três
+  - existe teste que roda o hook com a entrada JSON que ele realmente espera — invocá-lo sem stdin não
+    verifica nada e sai 0, e um portão que "passa" sem olhar é o defeito que esta sessão perseguiu o dia todo
+
+> Registrado 2026-08-20 ao verificar a própria edição que fiz no README para o [[B-055]]. **Encontrado
+> porque eu duvidei do meu próprio "passou"**: o lint saiu 0 sem output, e 0-sem-output é ausência de
+> resposta, não resposta.
