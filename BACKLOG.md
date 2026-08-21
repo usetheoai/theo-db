@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-91 items — **Open** 21 · **In flight** 7 · **Closed** 63
+91 items — **Open** 18 · **In flight** 10 · **Closed** 63
 
-### Open (21)
+### Open (18)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -89,20 +89,20 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-042`](#b-042--o-build-do-hnsw-é-36-mais-lento-que-o-do-pgvector-usando-8-mais-threads-e-o-grafo-sai-pior----) | O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior | `triaged` | — |
 | [`B-043`](#b-043--o-qps-lexical-satura-em-20-clientes-numa-máquina-de-16-vcpu-e-não-sobe-mais----) | O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais | `triaged` | — |
 | [`B-046`](#b-046--paridade-de-qps-com-o-pgvector-a-recall-casado-hoje-o-déficit-medido-é-163----) | Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3% | `triaged` | — |
-| [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `triaged` | — |
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
-| [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela----) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `triaged` | — |
-| [`B-066`](#b-066--a-contenção-escritascan-não-é-medível-não-existe-arnês-concorrente----) | A contenção escrita×scan não é medível: não existe arnês concorrente | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 
-### In flight (7)
+### In flight (10)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta----) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `planned` | — |
+| [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `planned` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
+| [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela----) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `planned` | — |
+| [`B-066`](#b-066--a-contenção-escritascan-não-é-medível-não-existe-arnês-concorrente----) | A contenção escrita×scan não é medível: não existe arnês concorrente | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
@@ -2104,10 +2104,19 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: o [[B-045]] fechou a lacuna para métricas de **qualidade** — a paridade lexical do `b047` passou a ter p=0,477 sobre 6.980 consultas, com IC 95% de [−0,0011, +0,0025]. Ele **não** fecha para velocidade, e a razão é estrutural: o teste pareado precisa de valor **por consulta**, e QPS não tem — é uma taxa agregada sobre a corrida inteira. As duas maiores diferenças que publicamos são justamente de velocidade e seguem sem teste: **Elasticsearch faz 4,3× o nosso QPS** no lexical (`b047`) e **pgvector faz +16,3%** a recall casado no vetorial (`b035`). O que existe hoje como sustentação são duas corridas concordantes a 1,3% no b035, e **uma única corrida por configuração** no b047.
 why_now: os dois números são grandes o bastante para que ninguém duvide do sinal — mas o projeto acabou de gastar um ciclo inteiro para poder dizer "demonstrado" em vez de "observado" num empate de terceira casa decimal, e continua dizendo "observado" nas duas diferenças que mais aparecem. A assimetria é indefensável: exigimos rigor onde a diferença é minúscula e o dispensamos onde ela é de 4×. Pior, a ausência morde na direção errada quando o número **melhorar**: o [[B-042]] e o [[B-046]] existem para fechar essas diferenças, e sem teste um ganho de 8% será tão inafirmável quanto o déficit atual.
-status: triaged
+status: planned
 status_nota_evidencia: 2026-08-20 — o campo ARGUMENTA a partir de medições que já existem (p=0,477 do
   [[B-045]]; os 4,3× do b047 e +16,3% do b035) em vez de trazer medição nova. Sustenta `triaged` porque
   cada fato citado é verificável, e a lacuna que ele afirma é de ausência — que se verifica por ausência.
+resultado: 2026-08-21 — `theodb-bench#18` mergeado em `develop`. `src/analysis/throughput.py` (Welch +
+  bootstrap sobre a RAZÃO, para amostras independentes), `precision_for_n`, veredito em `compare.py`
+  nomeando o teste, comando `theodb-bench throughput`. Estatística própria VALIDADA contra referência
+  externa (p a ~1e-15 do `scipy.stats.ttest_ind(equal_var=False)`; t crítico na quarta casa das tabelas).
+  RETROATIVO: o **b035 sobrevive** com IC de ±8,2% em vez da precisão que "+16,3%" sugere; o **b047 não é
+  testável** — uma corrida por configuração, e um IC sobre N=1 teria largura zero, que se leria como
+  certeza absoluta. Registrado por acréscimo em `wiki/benchmarks/b049-velocidade-sem-teste.md`. Achado
+  colateral, corrigido no próprio PR: o `importorskip` em nível de módulo pulava os 19 testes do item e o
+  relatório parecia verde.
 dod:
   - o runner passa a aceitar **N corridas por configuração** (N declarado no artefato), e o artefato reporta média, desvio e IC — não um número solto
   - o teste aplicado é **apropriado para amostras independentes** (bootstrap sobre as N corridas, ou t não-pareado), e a escolha é justificada como a do `significance.py` justifica a permutação pareada — nunca aplicar o pareado a taxas agregadas, que é o erro que este item existe para não cometer
@@ -2880,7 +2889,14 @@ why_now: o [[B-061]] entregou a suíte analítica e o portão de residência sob
 primeiro bullet do seu DoD (shape TPC-H) ficou **declarado e não feito** por esta razão. Sem isto, os números
 do concorrente para Q1/Q5/Q6/Q18 não têm onde ser respondidos com o mesmo shape — e responder com shape nosso
 mede outra coisa e chama de comparação.
-status: triaged
+status: planned
+status_nota: 2026-08-21 — os quatro bullets fecharam no `theodb-bench` (workspace), aguardando release.
+  Esquema multi-tabela com chaves, gerador semeado, **oráculo da junção calculado em Python**, SQL
+  construído a partir do esquema, e o comando `theodb-bench tpch`. **Verificado contra um PostgreSQL
+  real**: q1 (6 linhas), q6 (1) e q18 (100) — as três batendo com o oráculo. A q18 é a que prova o
+  redesenho. Q5 fora de escopo com a razão escrita: seis junções, e três dimensões que nenhuma outra
+  query toca. No caminho entraram `execute_analytical_sql` e tipos de coluna por tabela — o carregador
+  criava esquema fixo e copiava em colunas de outro nome, o que falha na primeira linha.
 dod:
   - `AnalyticalTable` (ou sucessor) expressa esquema multi-tabela com chaves, e o oráculo calcula a resposta
     esperada de uma junção sem consultar nenhum dos caminhos medidos
@@ -2902,7 +2918,20 @@ em disco), porque foi exatamente aí que a avaliação independente mediu uma **
 **piorou** a contenção a SF100 (29% contra 16% do row store), contra empate a SF10 (13,5% ≈ 13,6%). É o único
 número do artigo em que o colunar do concorrente sai **pior**, e é portanto o mais interessante de responder —
 e o que não temos instrumento para medir. Ficou declarado e não feito no B-061.
-status: triaged
+status: planned
+status_nota: 2026-08-21 — os quatro bullets fecharam no `theodb-bench` (workspace), aguardando release.
+  **A premissa do item envelheceu e foi re-medida antes de construir**: quando ele foi registrado
+  (2026-08-17) não havia executor concorrente nenhum; hoje existe (`load.run_load`, ThreadPoolExecutor)
+  e o pilar vetorial o usa. O que faltava era carga **mista** — escritor concorrente com leitores.
+  Construído SOBRE o motor existente, não ao lado: um segundo executor divergiria do primeiro.
+  A linha de base sai de dentro da mesma chamada e **não há parâmetro para injetá-la** — comparar
+  contra outra corrida vira impossível por construção, em vez de proibido por escrito. E a ordem é
+  deliberada: isolados primeiro, para o cache não estar aquecido pelo dobro do trabalho.
+  **O portão de módulo órfão do [[B-071]] pegou o meu próprio módulo** e estava certo. Ligar exigiu a
+  outra ponta: `append_analytical_row` no adapter Postgres, que não tinha escrita por operação.
+  **E rodar o comando achou um defeito meu**: contra o fake, tudo falhou e o relatório saiu com
+  `p95_ratio: null` sem dizer que nada rodou. Agora recusa com erro tipado.
+  Verificado: 997 passed, `ruff check` limpo, mypy sem erro nos arquivos tocados.
 dod:
   - existe executor concorrente que roda escrita e scan simultaneamente, com p95/p99 medidos por lado
   - a degradação é reportada como **razão** contra a linha de base isolada, não como número absoluto

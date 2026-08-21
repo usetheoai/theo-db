@@ -13,6 +13,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.163.0] - 2026-08-21
+
 ### Added
 - **Um `CREATE INDEX ... USING theodb_hnsw` grande demais passa a ser recusado com números, em vez de
   derrubar o servidor.** Até aqui o build materializava o corpus e o operador descobria o limite por um
@@ -21,12 +23,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   exatamente) e comparado com `theodb_hnsw.build_memory_mb` ou, sem ele, com o `MemAvailable` do host.
   A recusa nomeia a projeção, o orçamento e o knob. (#B-076)
 
-### Fixed
-- **A extensão `vector` deixou de dizer que tem `halfvec`.** Ela declarava `0.7.0`, que é a versão em
-  que o pgvector introduziu `halfvec`/`sparsevec` — e uma aplicação que faz a checagem de capacidade
-  padrão (`extversion >= '0.7.0'`) recebia **sim** e quebrava na primeira coluna. Passou a declarar
-  `0.6.0`, que é a superfície de fato entregue. Uma instalação já feita se corrige com
-  `ALTER EXTENSION vector UPDATE TO '0.6.0'`, sem perder capacidade. (#B-038)
+### Changed
+- **O README trocou uma alegação absoluta por uma saída concreta.** Dizia "sem lock-in", que é a forma
+  que o próprio `public-copy.md § 6` bane; agora nomeia a saída — `pg_dump`, Parquet, extensão Apache
+  2.0. O lint de copy pública **não** pegou isso, e a lacuna dele ficou registrada. (#B-091)
 
 ### Removed
 - **`halfvec` e `sparsevec` declarados fora de escopo**, por decisão registrada e não por omissão —
@@ -34,6 +34,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   resposta. `wiki/decisions/0063-*`. (#B-038)
 
 ### Fixed
+- **A extensão `vector` deixou de dizer que tem `halfvec`.** Ela declarava `0.7.0`, que é a versão em
+  que o pgvector introduziu `halfvec`/`sparsevec` — e uma aplicação que faz a checagem de capacidade
+  padrão (`extversion >= '0.7.0'`) recebia **sim** e quebrava na primeira coluna. Passou a declarar
+  `0.6.0`, que é a superfície de fato entregue. Uma instalação já feita se corrige com
+  `ALTER EXTENSION vector UPDATE TO '0.6.0'`, sem perder capacidade. (#B-038)
+
 - **O portão de CHANGELOG deixou de bloquear depois de um merge limpo.** Um merge não introduz
   trabalho próprio e não lista arquivos, então o checador saía com "não pude inspecionar" — e o hook
   tratava qualquer não-zero como violação, colapsando *"não pude perguntar"* com *"perguntei e a
@@ -46,7 +52,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   acceptance", falso para itens: um portão que descreve errado a própria condição é um portão que
   ninguém consegue satisfazer de propósito. (#B-056)
 
-### Fixed
 - **O lint de copy pública deixou de avisar sobre o texto que cumpre a regra.** Ele apontava
   `production-ready` nas quatro ocorrências do README, e as quatro eram **negações** — "Não é
   production-ready", "Sem afirmação de production-ready até haver evidência". Um aviso sobre o texto
@@ -55,12 +60,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **`scripts/tests/` e `hooks/tests/` passaram a ser executados.** O runner só varria
   `skills/*/tests`, então os testes escritos ali — incluindo os sete do portão de CHANGELOG — nunca
   rodaram, e quem os escrevia via `ALL SUITES GREEN`. (#B-091)
-
-### Changed
-- **O README trocou uma alegação absoluta por uma saída concreta.** Dizia "sem lock-in", que é a forma
-  que o próprio `public-copy.md § 6` bane; agora nomeia a saída — `pg_dump`, Parquet, extensão Apache
-  2.0. O lint de copy pública **não** pegou isso, e a lacuna dele ficou registrada. (#B-091)
-
 ## [0.162.0] - 2026-08-20
 
 ### Added
