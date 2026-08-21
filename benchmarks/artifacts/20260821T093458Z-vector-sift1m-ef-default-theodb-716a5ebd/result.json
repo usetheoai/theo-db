@@ -1,0 +1,214 @@
+{
+  "schema_version": 1,
+  "run_id": "20260821T093458Z-vector-sift1m-ef-default-theodb-716a5ebd",
+  "points": [
+    {
+      "label": "hnsw m=16 ef_search=40",
+      "parameters": {
+        "m": 16,
+        "ef_search": 40,
+        "theodb_hnsw.ef_search": "40"
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 500,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.5448558100001719,
+          "throughput_per_second": 917.6739805708271,
+          "latency_ms": {
+            "p50": 1.0091610000699802,
+            "p95": 1.3106195999625925,
+            "p99": 1.4362513000969557,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 500"
+            },
+            "mean": 1.0195879139942008,
+            "stdev": 0.15001601242809767,
+            "min": 0.5813710001802974,
+            "max": 1.6275689999929455,
+            "sample_count": 500
+          },
+          "quality": {
+            "recall_at": 0.8316000000000001
+          },
+          "resources": {
+            "build_seconds": 166.8912117650001,
+            "index_size_bytes": 759250944
+          }
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 500,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.558208096000044,
+          "throughput_per_second": 895.7233038769123,
+          "latency_ms": {
+            "p50": 1.0345910001205993,
+            "p95": 1.2957952499505152,
+            "p99": 1.4398173601625779,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 500"
+            },
+            "mean": 1.0388529179958823,
+            "stdev": 0.15182011969900897,
+            "min": 0.5418949999693723,
+            "max": 1.7117340000822878,
+            "sample_count": 500
+          },
+          "quality": {
+            "recall_at": 0.8316000000000001
+          },
+          "resources": {
+            "build_seconds": 166.8912117650001,
+            "index_size_bytes": 759250944
+          }
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 500,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.5617599299998801,
+          "throughput_per_second": 890.0599229284771,
+          "latency_ms": {
+            "p50": 1.0390615000233083,
+            "p95": 1.396804549938224,
+            "p99": 1.5490004399316601,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 500"
+            },
+            "mean": 1.058618250005111,
+            "stdev": 0.17154799298977494,
+            "min": 0.5441120001705713,
+            "max": 1.793297000176608,
+            "sample_count": 500
+          },
+          "quality": {
+            "recall_at": 0.8316000000000001
+          },
+          "resources": {
+            "build_seconds": 166.8912117650001,
+            "index_size_bytes": 759250944
+          }
+        }
+      ]
+    },
+    {
+      "label": "hnsw m=16 ef_search=64",
+      "parameters": {
+        "m": 16,
+        "ef_search": 64,
+        "theodb_hnsw.ef_search": "64"
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 500,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.7574790179999127,
+          "throughput_per_second": 660.0842902820282,
+          "latency_ms": {
+            "p50": 1.4635079999152367,
+            "p95": 1.7675435499995729,
+            "p99": 1.9087245598484515,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 500"
+            },
+            "mean": 1.440369441997973,
+            "stdev": 0.20303425320499366,
+            "min": 0.7215509999696224,
+            "max": 2.1900009999171743,
+            "sample_count": 500
+          },
+          "quality": {
+            "recall_at": 0.9017999999999999
+          },
+          "resources": {
+            "build_seconds": 163.63812268000015,
+            "index_size_bytes": 759250944
+          }
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 500,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.7642413850001049,
+          "throughput_per_second": 654.2435542141327,
+          "latency_ms": {
+            "p50": 1.4534675000277275,
+            "p95": 1.7972786999393975,
+            "p99": 1.968389760083937,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 500"
+            },
+            "mean": 1.4520312740041845,
+            "stdev": 0.2101724745203193,
+            "min": 0.6848299999546725,
+            "max": 2.402135000011185,
+            "sample_count": 500
+          },
+          "quality": {
+            "recall_at": 0.9017999999999999
+          },
+          "resources": {
+            "build_seconds": 163.63812268000015,
+            "index_size_bytes": 759250944
+          }
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 500,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.7706110070000705,
+          "throughput_per_second": 648.8357880410529,
+          "latency_ms": {
+            "p50": 1.4668779998601167,
+            "p95": 1.8348539499925207,
+            "p99": 2.1294229399154574,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 500"
+            },
+            "mean": 1.4588604319956175,
+            "stdev": 0.22841084102513767,
+            "min": 0.7364230000348471,
+            "max": 2.3503380000420293,
+            "sample_count": 500
+          },
+          "quality": {
+            "recall_at": 0.9017999999999999
+          },
+          "resources": {
+            "build_seconds": 163.63812268000015,
+            "index_size_bytes": 759250944
+          }
+        }
+      ]
+    }
+  ]
+}

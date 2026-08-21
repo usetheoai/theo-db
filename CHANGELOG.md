@@ -13,6 +13,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Medido: baixar o default de `theodb_hnsw.ef_search` para 40 custa 7 pontos de recall, e a decisão é
+  não baixar.** SIFT1M completo, 3 repetições, no arnês: `ef=40` dá **901,2 QPS** e recall@10 **0,8316**;
+  `ef=64` dá 654,4 e **0,9018**. Baixar compra **1,377× de QPS** (IC95 [1,355×, 1,402×], p = 0,0003) e
+  custa **7,02 pontos de recall** — e o pilar sustenta paridade de recall classe-pgvector, então sete
+  pontos não são tuning, são a alegação. **O pgvector paga o mesmo preço:** em `ef=64` ele também larga
+  o índice na junção filtrada; o default de 40 dele compra o plano com os mesmos 7 pontos. A saída é por
+  consulta — `SET LOCAL theodb_hnsw.ef_search`. ADR-0066. (#B-018)
+
 ### Added
 - **Os seis caminhos de erro do `theodb.embed_batch` passaram a ter teste.** O mapeamento
   resposta→saída vivia depois da chamada HTTP, o que tornava resposta malformada — `data` ausente,
