@@ -13,9 +13,9 @@ pub(crate) unsafe fn write_structured(
     fork: pg_sys::ForkNumber::Type,
     packed: &Packed,
 ) {
-    page::extend_page_with_items(rel, fork, std::slice::from_ref(&packed.meta)); // block 0 = meta
+    unsafe { page::extend_page_with_items(rel, fork, std::slice::from_ref(&packed.meta)) }; // block 0 = meta
     for pg in &packed.pages {
-        page::extend_page_with_items(rel, fork, pg);
+        unsafe { page::extend_page_with_items(rel, fork, pg) };
     }
 }
 
@@ -25,13 +25,14 @@ pub(crate) unsafe fn write_structured(
 /// validate the length against the descriptor's `cb_len` (Rule 8 — a torn/short codebook is a typed REINDEX Err,
 /// never a silently-wrong quantizer). v1/v2 read exactly as before (no codebook pages to touch).
 pub(crate) unsafe fn read_meta(rel: pg_sys::Relation) -> Result<HnswMeta, String> {
-    let b = page::read_page_item_at(rel, 0, 1)?;
+    let b = unsafe { page::read_page_item_at(rel, 0, 1)? };
     let mut meta = decode_meta(&b)?;
     if meta.aq_m != 0 {
         // Re-decode the descriptor for the declared codebook length (decode_meta drops it, keeping HnswMeta lean).
         // `raw_npages != 0` ⇒ this is a v4 (code/vec split) descriptor, which is longer than a v3 one.
         let d = decode_aq_descriptor(&b, meta.raw_npages != 0)?;
-        meta.aq_codebook = read_codebook_pages(rel, meta.aq_cb_first, meta.aq_cb_npages, d.cb_len)?;
+        meta.aq_codebook =
+            unsafe { read_codebook_pages(rel, meta.aq_cb_first, meta.aq_cb_npages, d.cb_len)? };
     }
     Ok(meta)
 }
@@ -50,7 +51,8 @@ pub(crate) unsafe fn read_codebook_pages(
     // corruptible). u64 arithmetic avoids the u32 `first + npages` wrap. A range past the fork end is a typed
     // REINDEX Err — consistent with the codebook-length guard below — not a generic C `smgrread` ERROR.
     let nblocks =
-        pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM) as u64;
+        unsafe { pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM) }
+            as u64;
     if first as u64 + npages as u64 > nblocks {
         return Err(format!(
             "theodb hnsw: AQ codebook pages [{first}, {}) out of range (nblocks {nblocks}) — REINDEX (v3 corruption)",
@@ -59,7 +61,7 @@ pub(crate) unsafe fn read_codebook_pages(
     }
     let mut cb = Vec::with_capacity(cb_len);
     for blk in first..first + npages {
-        for item in page::read_all_page_items(rel, blk)? {
+        for item in unsafe { page::read_all_page_items(rel, blk)? } {
             cb.extend_from_slice(&item);
         }
     }
@@ -82,7 +84,7 @@ pub(crate) unsafe fn enumerate_entries(
     // A fold enumerating a v4 index reads each live node's f32 by following its `raw_addr` into that region. v1/v2
     // keep the f32 inline in the element tuple (read it directly) — byte-identical to before.
     let is_v4 = meta.raw_npages != 0;
-    let nblocks = page::main_fork_nblocks(rel);
+    let nblocks = unsafe { page::main_fork_nblocks(rel) };
     let bytes_to_vec = |vb: &[u8]| -> Vec<f32> {
         let dim = vb.len() / 4;
         let mut v = vec![0f32; dim];
@@ -92,7 +94,7 @@ pub(crate) unsafe fn enumerate_entries(
         v
     };
     for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
-        for item in page::read_all_page_items(rel, blk)? {
+        for item in unsafe { page::read_all_page_items(rel, blk)? } {
             // M56: compaction reuses this enumerate → the rebuild drops tombstoned nodes here (they are gone
             // from the fresh graph, reclaiming their space). This is the ONLY reclaim path in phase 1 (slot
             // reuse on INSERT is phase 2 — it would mutate the immutable M35 graph).
@@ -101,9 +103,11 @@ pub(crate) unsafe fn enumerate_entries(
                 if ev.deleted {
                     continue;
                 }
-                let vb = page::with_page_item(rel, ev.raw_addr.0, ev.raw_addr.1, nblocks, |b| {
-                    Ok(decode_raw_vec(b)?.to_vec())
-                })?;
+                let vb = unsafe {
+                    page::with_page_item(rel, ev.raw_addr.0, ev.raw_addr.1, nblocks, |b| {
+                        Ok(decode_raw_vec(b)?.to_vec())
+                    })?
+                };
                 // Rule 8 defense: the raw tuple's f32 count MUST match the hot tuple's recorded dim — a mismatch is
                 // a torn/orphan raw page (corruption), a typed Err over a silently-wrong reconstructed vector.
                 if vb.len() != ev.dim as usize * 4 {
@@ -136,13 +140,15 @@ pub(crate) unsafe fn tombstone_sweep(
 ) -> u32 {
     let mut total = 0u32;
     for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
-        total += page::modify_items_under_wal(rel, blk, |item| {
-            if item.len() < ELEM_HEADER || item[E_TAG] != ELEM_TAG || item[E_DELETED] != 0 {
-                return false; // not an element tuple, or already a tombstone
-            }
-            let tid = i64::from_le_bytes(item[E_TID..E_TID + 8].try_into().unwrap());
-            if is_dead(tid) { mark_tombstone_in_place(item) } else { false }
-        });
+        total += unsafe {
+            page::modify_items_under_wal(rel, blk, |item| {
+                if item.len() < ELEM_HEADER || item[E_TAG] != ELEM_TAG || item[E_DELETED] != 0 {
+                    return false; // not an element tuple, or already a tombstone
+                }
+                let tid = i64::from_le_bytes(item[E_TID..E_TID + 8].try_into().unwrap());
+                if is_dead(tid) { mark_tombstone_in_place(item) } else { false }
+            })
+        };
     }
     total
 }
@@ -151,7 +157,7 @@ pub(crate) unsafe fn tombstone_sweep(
 pub(crate) unsafe fn count_tombstones(rel: pg_sys::Relation, meta: &HnswMeta) -> u32 {
     let mut n = 0u32;
     for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
-        for item in page::read_all_page_items(rel, blk).unwrap_or_default() {
+        for item in unsafe { page::read_all_page_items(rel, blk).unwrap_or_default() } {
             if item.len() >= ELEM_HEADER && item[E_TAG] == ELEM_TAG && item[E_DELETED] != 0 {
                 n += 1;
             }
@@ -169,7 +175,7 @@ pub(crate) unsafe fn count_tombstones(rel: pg_sys::Relation, meta: &HnswMeta) ->
 pub(crate) unsafe fn count_churned(rel: pg_sys::Relation, meta: &HnswMeta) -> u32 {
     let mut n = 0u32;
     for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
-        for item in page::read_all_page_items(rel, blk).unwrap_or_default() {
+        for item in unsafe { page::read_all_page_items(rel, blk).unwrap_or_default() } {
             if item.len() >= ELEM_HEADER && item[E_TAG] == ELEM_TAG && item[E_VERSION] != 0 {
                 n += 1;
             }
@@ -189,7 +195,7 @@ pub(crate) unsafe fn find_reusable_slot(
     need_level: usize,
 ) -> Option<Addr> {
     for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
-        let items = match page::read_all_page_items_with_off(rel, blk) {
+        let items = match unsafe { page::read_all_page_items_with_off(rel, blk) } {
             Ok(v) => v,
             Err(_) => continue,
         };
@@ -225,26 +231,28 @@ pub(crate) unsafe fn write_reused_element(
     vec: &[f32],
 ) -> bool {
     let (blk, off) = elem_addr;
-    page::modify_item_at(rel, blk, off, |item| {
-        // Atomic claim: revive ONLY a still-tombstoned slot. `modify_item_at` holds the buffer EXCLUSIVE, so two
-        // concurrent inserts racing for the same slot serialize here — the first flips `deleted=0` and wins; the
-        // second sees `deleted==0` and returns false (the caller then falls back to `append_pending`). No lost write.
-        if item.len() < ELEM_HEADER || item[E_TAG] != ELEM_TAG || item[E_DELETED] == 0 {
-            return false;
-        }
-        let dim = u16::from_le_bytes([item[E_DIM], item[E_DIM + 1]]) as usize;
-        // v1 only (exact size = header + vec, no trailing SBQ code) AND matching dim.
-        if item.len() != E_VEC + dim * 4 || vec.len() != dim {
-            return false;
-        }
-        item[E_DELETED] = 0;
-        item[E_VERSION] = item[E_VERSION].wrapping_add(1);
-        item[E_TID..E_TID + 8].copy_from_slice(&tid.to_le_bytes());
-        for (i, &x) in vec.iter().enumerate() {
-            item[E_VEC + i * 4..E_VEC + i * 4 + 4].copy_from_slice(&x.to_le_bytes());
-        }
-        true
-    })
+    unsafe {
+        page::modify_item_at(rel, blk, off, |item| {
+            // Atomic claim: revive ONLY a still-tombstoned slot. `modify_item_at` holds the buffer EXCLUSIVE, so two
+            // concurrent inserts racing for the same slot serialize here — the first flips `deleted=0` and wins; the
+            // second sees `deleted==0` and returns false (the caller then falls back to `append_pending`). No lost write.
+            if item.len() < ELEM_HEADER || item[E_TAG] != ELEM_TAG || item[E_DELETED] == 0 {
+                return false;
+            }
+            let dim = u16::from_le_bytes([item[E_DIM], item[E_DIM + 1]]) as usize;
+            // v1 only (exact size = header + vec, no trailing SBQ code) AND matching dim.
+            if item.len() != E_VEC + dim * 4 || vec.len() != dim {
+                return false;
+            }
+            item[E_DELETED] = 0;
+            item[E_VERSION] = item[E_VERSION].wrapping_add(1);
+            item[E_TID..E_TID + 8].copy_from_slice(&tid.to_le_bytes());
+            for (i, &x) in vec.iter().enumerate() {
+                item[E_VEC + i * 4..E_VEC + i * 4 + 4].copy_from_slice(&x.to_le_bytes());
+            }
+            true
+        })
+    }
 }
 
 /// M56 fase 2 (T1.3): set the GROUND-layer neighbor slots of an existing neighbor tuple IN PLACE — write up to
@@ -261,22 +269,24 @@ pub(crate) unsafe fn set_ground_neighbors_inplace(
     neighbors: &[Addr],
 ) -> bool {
     let (blk, off) = nbr_addr;
-    page::modify_item_at(rel, blk, off, |b| {
-        if b.len() < NBR_HEADER || b[N_TAG] != NBR_TAG {
-            return false;
-        }
-        let start = level * m;
-        if b.len() < NBR_HEADER + (start + m0) * SLOT {
-            return false;
-        }
-        for i in 0..m0 {
-            let (nb_blk, nb_off) = neighbors.get(i).copied().unwrap_or((0, 0));
-            let o = NBR_HEADER + (start + i) * SLOT;
-            b[o..o + 4].copy_from_slice(&nb_blk.to_le_bytes());
-            b[o + 4..o + 6].copy_from_slice(&nb_off.to_le_bytes());
-        }
-        true
-    })
+    unsafe {
+        page::modify_item_at(rel, blk, off, |b| {
+            if b.len() < NBR_HEADER || b[N_TAG] != NBR_TAG {
+                return false;
+            }
+            let start = level * m;
+            if b.len() < NBR_HEADER + (start + m0) * SLOT {
+                return false;
+            }
+            for i in 0..m0 {
+                let (nb_blk, nb_off) = neighbors.get(i).copied().unwrap_or((0, 0));
+                let o = NBR_HEADER + (start + i) * SLOT;
+                b[o..o + 4].copy_from_slice(&nb_blk.to_le_bytes());
+                b[o + 4..o + 6].copy_from_slice(&nb_off.to_le_bytes());
+            }
+            true
+        })
+    }
 }
 
 /// M56 fase 2 (T2.1): the insert-time neighbor search — greedy-descend the upper layers to a ground entry (exactly
@@ -297,29 +307,33 @@ pub(crate) unsafe fn insert_search_ground(
     let (m, m0) = (meta.m as usize, meta.m0 as usize);
     let ef = ef_construction.max(m0);
     let mut reads = 0usize;
-    let nblocks = page::main_fork_nblocks(rel);
+    let nblocks = unsafe { page::main_fork_nblocks(rel) };
     let qcode: Option<&[u8]> = None; // v1 only (the reused-slot insert gates to v1)
     let lut: Option<&crate::vec::ah::Lut16> = None; // build-time insert search is v1 f32 (no AH walk)
 
-    let mut ep = load(
-        rel,
-        meta.entry_blkno,
-        meta.entry_offno,
-        q,
-        metric,
-        is_l2,
-        qcode,
-        lut,
-        nblocks,
-        &mut reads,
-    )?;
+    let mut ep = unsafe {
+        load(
+            rel,
+            meta.entry_blkno,
+            meta.entry_offno,
+            q,
+            metric,
+            is_l2,
+            qcode,
+            lut,
+            nblocks,
+            &mut reads,
+        )?
+    };
     let mut lc = meta.entry_level as usize;
     while lc >= 1 {
         loop {
-            let nbrs = neighbors_of(rel, &ep, lc, m, m0, nblocks, &mut reads)?;
+            let nbrs = unsafe { neighbors_of(rel, &ep, lc, m, m0, nblocks, &mut reads)? };
             let mut improved = false;
             for (nb, no) in nbrs {
-                let cand = load(rel, nb, no, q, metric, is_l2, qcode, lut, nblocks, &mut reads)?;
+                let cand = unsafe {
+                    load(rel, nb, no, q, metric, is_l2, qcode, lut, nblocks, &mut reads)?
+                };
                 if cand.d < ep.d {
                     ep = cand;
                     improved = true;
@@ -375,7 +389,7 @@ pub(crate) unsafe fn insert_inplace(
         return Ok(false);
     }
     let (m, m0) = (meta.m as usize, meta.m0 as usize);
-    let slot = match find_reusable_slot(rel, meta, 0) {
+    let slot = match unsafe { find_reusable_slot(rel, meta, 0) } {
         Some(s) => s,
         None => return Ok(false),
     };
@@ -384,35 +398,35 @@ pub(crate) unsafe fn insert_inplace(
     // `ef_construction=200` degradaria a cada linha inserida depois do build — em silêncio, e sem nada no meta
     // para denunciar (o `efc` não é persistido). A reloption está na relação, que já temos aberta aqui.
     let efc = unsafe { crate::am::options::hnsw_ef_construction_from_relation(rel) };
-    let neighbors = insert_search_ground(rel, meta, vec, efc)?;
+    let neighbors = unsafe { insert_search_ground(rel, meta, vec, efc)? };
     // (3) revive the slot as Z (v1 only).
-    if !write_reused_element(rel, slot, tid, vec) {
+    if !unsafe { write_reused_element(rel, slot, tid, vec) } {
         return Ok(false);
     }
     // (4) set Z's ground neighbors. Read Z's kept level + neighbor-tuple address.
     let (zlvl, znbr) = {
-        let zb = page::read_page_item_at(rel, slot.0, slot.1)?;
+        let zb = unsafe { page::read_page_item_at(rel, slot.0, slot.1)? };
         let z = decode_element(&zb)?;
         (z.level as usize, z.nbr_addr)
     };
-    set_ground_neighbors_inplace(rel, znbr, zlvl, m, m0, &neighbors);
+    unsafe { set_ground_neighbors_inplace(rel, znbr, zlvl, m, m0, &neighbors) };
     // (5) backward links: add Z (element addr == `slot`) to each neighbor's ground list if it has a free slot.
     for &n in &neighbors {
         if n == slot {
             continue;
         }
         let (nlvl, nnbr) = {
-            let nb = page::read_page_item_at(rel, n.0, n.1)?;
+            let nb = unsafe { page::read_page_item_at(rel, n.0, n.1)? };
             let ne = decode_element(&nb)?;
             (ne.level as usize, ne.nbr_addr)
         };
         let mut ground = {
-            let nnb = page::read_page_item_at(rel, nnbr.0, nnbr.1)?;
+            let nnb = unsafe { page::read_page_item_at(rel, nnbr.0, nnbr.1)? };
             decode_neighbors(&nnb, nlvl, 0, m, m0)?
         };
         if ground.len() < m0 && !ground.contains(&slot) {
             ground.push(slot);
-            set_ground_neighbors_inplace(rel, nnbr, nlvl, m, m0, &ground);
+            unsafe { set_ground_neighbors_inplace(rel, nnbr, nlvl, m, m0, &ground) };
         }
     }
     Ok(true)

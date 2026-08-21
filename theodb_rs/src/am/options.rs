@@ -130,46 +130,55 @@ static mut RELOPT_KIND: pg_sys::relopt_kind::Type = 0;
 /// # Safety
 /// Must run exactly once at extension load (single-threaded postmaster init), before any index DDL.
 pub(crate) unsafe fn init() {
-    RELOPT_KIND = pg_sys::add_reloption_kind();
-    pg_sys::add_int_reloption(
-        RELOPT_KIND,
-        "lists".as_pg_cstr(),
-        "Number of inverted lists (k-means cells) for the theodb_ivfflat build".as_pg_cstr(),
-        DEFAULT_LISTS as i32,
-        MIN_LISTS,
-        MAX_LISTS,
-        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
-    );
-    pg_sys::add_int_reloption(
-        RELOPT_KIND,
-        "sbq_bits".as_pg_cstr(),
-        "Bits-per-dim for the theodb_hnsw inline SBQ codes (0 = f32-only, M51)".as_pg_cstr(),
-        DEFAULT_SBQ_BITS,
-        MIN_SBQ_BITS,
-        MAX_SBQ_BITS,
-        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
-    );
-    pg_sys::add_int_reloption(
-        RELOPT_KIND,
-        "pq_subspaces".as_pg_cstr(),
-        "Number of anisotropic-PQ subspaces for the theodb_hnsw AQ codes (0 = AQ off, M59)"
-            .as_pg_cstr(),
-        DEFAULT_PQ_SUBSPACES,
-        MIN_PQ_SUBSPACES,
-        MAX_PQ_SUBSPACES,
-        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
-    );
-    pg_sys::add_int_reloption(
-        RELOPT_KIND,
-        "pq_bits".as_pg_cstr(),
-        "Bits per subquantizer for the theodb_hnsw AQ codes (only 4 is supported, M59)"
-            .as_pg_cstr(),
-        DEFAULT_PQ_BITS,
-        MIN_PQ_BITS,
-        MAX_PQ_BITS,
-        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
-    );
-    pg_sys::add_int_reloption(
+    unsafe { RELOPT_KIND = pg_sys::add_reloption_kind() };
+    unsafe {
+        pg_sys::add_int_reloption(
+            RELOPT_KIND,
+            "lists".as_pg_cstr(),
+            "Number of inverted lists (k-means cells) for the theodb_ivfflat build".as_pg_cstr(),
+            DEFAULT_LISTS as i32,
+            MIN_LISTS,
+            MAX_LISTS,
+            pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
+        )
+    };
+    unsafe {
+        pg_sys::add_int_reloption(
+            RELOPT_KIND,
+            "sbq_bits".as_pg_cstr(),
+            "Bits-per-dim for the theodb_hnsw inline SBQ codes (0 = f32-only, M51)".as_pg_cstr(),
+            DEFAULT_SBQ_BITS,
+            MIN_SBQ_BITS,
+            MAX_SBQ_BITS,
+            pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
+        )
+    };
+    unsafe {
+        pg_sys::add_int_reloption(
+            RELOPT_KIND,
+            "pq_subspaces".as_pg_cstr(),
+            "Number of anisotropic-PQ subspaces for the theodb_hnsw AQ codes (0 = AQ off, M59)"
+                .as_pg_cstr(),
+            DEFAULT_PQ_SUBSPACES,
+            MIN_PQ_SUBSPACES,
+            MAX_PQ_SUBSPACES,
+            pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
+        )
+    };
+    unsafe {
+        pg_sys::add_int_reloption(
+            RELOPT_KIND,
+            "pq_bits".as_pg_cstr(),
+            "Bits per subquantizer for the theodb_hnsw AQ codes (only 4 is supported, M59)"
+                .as_pg_cstr(),
+            DEFAULT_PQ_BITS,
+            MIN_PQ_BITS,
+            MAX_PQ_BITS,
+            pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
+        )
+    };
+    unsafe {
+        pg_sys::add_int_reloption(
         RELOPT_KIND,
         "aq_threshold".as_pg_cstr(),
         "Anisotropic parallel/orthogonal weight ratio η × 1000 for the theodb_hnsw AQ codes (1000 = isotropic, M59)".as_pg_cstr(),
@@ -177,8 +186,10 @@ pub(crate) unsafe fn init() {
         MIN_AQ_THRESHOLD_MILLI,
         MAX_AQ_THRESHOLD_MILLI,
         pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
-    );
-    pg_sys::add_int_reloption(
+    )
+    };
+    unsafe {
+        pg_sys::add_int_reloption(
         RELOPT_KIND,
         "separate_storage".as_pg_cstr(),
         "Persist the v5 storage-separated IVF-AQ layout (codes/f32 on distinct pages) when 1 (M83)"
@@ -187,8 +198,10 @@ pub(crate) unsafe fn init() {
         MIN_SEPARATE_STORAGE,
         MAX_SEPARATE_STORAGE,
         pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
-    );
-    pg_sys::add_int_reloption(
+    )
+    };
+    unsafe {
+        pg_sys::add_int_reloption(
         RELOPT_KIND,
         "refine".as_pg_cstr(),
         "Rerank the storage-separated IVF-AQ scan on SQ8 codes (v6) when 1, raw f32 (v5) when 0 (M85)".as_pg_cstr(),
@@ -196,18 +209,22 @@ pub(crate) unsafe fn init() {
         MIN_REFINE,
         MAX_REFINE,
         pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
-    );
-    pg_sys::add_int_reloption(
-        RELOPT_KIND,
-        "soar_lambda".as_pg_cstr(),
-        "SOAR spill orthogonality-penalty λ × 1000 for the IVF-AQ build (0 = off, M86)"
-            .as_pg_cstr(),
-        DEFAULT_SOAR_LAMBDA_MILLI,
-        MIN_SOAR_LAMBDA_MILLI,
-        MAX_SOAR_LAMBDA_MILLI,
-        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
-    );
-    pg_sys::add_int_reloption(
+    )
+    };
+    unsafe {
+        pg_sys::add_int_reloption(
+            RELOPT_KIND,
+            "soar_lambda".as_pg_cstr(),
+            "SOAR spill orthogonality-penalty λ × 1000 for the IVF-AQ build (0 = off, M86)"
+                .as_pg_cstr(),
+            DEFAULT_SOAR_LAMBDA_MILLI,
+            MIN_SOAR_LAMBDA_MILLI,
+            MAX_SOAR_LAMBDA_MILLI,
+            pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
+        )
+    };
+    unsafe {
+        pg_sys::add_int_reloption(
         RELOPT_KIND,
         "m".as_pg_cstr(),
         "Max neighbor degree above level 0 for the theodb_hnsw build (m0 = 2m on the ground level, B-036)"
@@ -216,8 +233,10 @@ pub(crate) unsafe fn init() {
         MIN_HNSW_M,
         MAX_HNSW_M,
         pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
-    );
-    pg_sys::add_int_reloption(
+    )
+    };
+    unsafe {
+        pg_sys::add_int_reloption(
         RELOPT_KIND,
         "ef_construction".as_pg_cstr(),
         "Candidate-list size during the theodb_hnsw build; raises graph quality and build cost (B-036)"
@@ -226,8 +245,10 @@ pub(crate) unsafe fn init() {
         MIN_HNSW_EF_CONSTRUCTION,
         MAX_HNSW_EF_CONSTRUCTION,
         pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
-    );
-    pg_sys::add_int_reloption(
+    )
+    };
+    unsafe {
+        pg_sys::add_int_reloption(
         RELOPT_KIND,
         "rabitq_bits".as_pg_cstr(),
         "Bits-per-dim for the v8 (refine=2) f32-free RaBitQ residual rerank codes (7 = f32-free 0.99 recall, E1)".as_pg_cstr(),
@@ -235,7 +256,8 @@ pub(crate) unsafe fn init() {
         MIN_RABITQ_BITS,
         MAX_RABITQ_BITS,
         pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
-    );
+    )
+    };
 }
 
 /// The `amoptions` callback: parse `pg_class.reloptions` text[] into the `TheodbIvfflatOptions` bytea that fills
@@ -352,14 +374,16 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
         // Ou seja: a opção nunca foi aceita, então NENHUM índice existente pode tê-la gravada, e remover não
         // tem efeito sobre dump/restore — que era o risco pelo qual eu havia adiado esta parte do item.
     ];
-    pg_sys::build_reloptions(
-        reloptions,
-        validate,
-        RELOPT_KIND,
-        std::mem::size_of::<TheodbIvfflatOptions>(),
-        tab.as_ptr(),
-        tab.len() as i32,
-    ) as *mut pg_sys::bytea
+    (unsafe {
+        pg_sys::build_reloptions(
+            reloptions,
+            validate,
+            RELOPT_KIND,
+            std::mem::size_of::<TheodbIvfflatOptions>(),
+            tab.as_ptr(),
+            tab.len() as i32,
+        )
+    }) as *mut pg_sys::bytea
 }
 
 /// Resolve the build-time `lists` for an index relation: the `WITH (lists=N)` value, or `DEFAULT_LISTS` when the
@@ -369,12 +393,12 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
 /// # Safety
 /// `indexrel` must be a valid open `theodb_ivfflat` index relation.
 pub(crate) unsafe fn lists_from_relation(indexrel: pg_sys::Relation) -> usize {
-    let rd_options = (*indexrel).rd_options;
+    let rd_options = unsafe { (*indexrel).rd_options };
     if rd_options.is_null() {
         return DEFAULT_LISTS;
     }
     let opts = rd_options as *const TheodbIvfflatOptions;
-    let lists = (*opts).lists;
+    let lists = unsafe { (*opts).lists };
     if lists < MIN_LISTS { DEFAULT_LISTS } else { lists as usize }
 }
 
@@ -385,11 +409,11 @@ pub(crate) unsafe fn lists_from_relation(indexrel: pg_sys::Relation) -> usize {
 /// # Safety
 /// `indexrel` must be a valid open index relation.
 pub(crate) unsafe fn sbq_bits_from_relation(indexrel: pg_sys::Relation) -> u8 {
-    let rd_options = (*indexrel).rd_options;
+    let rd_options = unsafe { (*indexrel).rd_options };
     if rd_options.is_null() {
         return 0;
     }
-    let bits = (*(rd_options as *const TheodbIvfflatOptions)).sbq_bits;
+    let bits = unsafe { (*(rd_options as *const TheodbIvfflatOptions)).sbq_bits };
     if (MIN_SBQ_BITS..=MAX_SBQ_BITS).contains(&bits) { bits as u8 } else { 0 }
 }
 
@@ -401,11 +425,11 @@ pub(crate) unsafe fn sbq_bits_from_relation(indexrel: pg_sys::Relation) -> u8 {
 /// `indexrel` must be a valid open index relation.
 // M59 T3.3: wired into `ambuild_hnsw` (`pack_hnsw_for_build`) — decides the v3 AQ layout at initial build.
 pub(crate) unsafe fn pq_subspaces_from_relation(indexrel: pg_sys::Relation) -> usize {
-    let rd_options = (*indexrel).rd_options;
+    let rd_options = unsafe { (*indexrel).rd_options };
     if rd_options.is_null() {
         return DEFAULT_PQ_SUBSPACES as usize;
     }
-    let m = (*(rd_options as *const TheodbIvfflatOptions)).pq_subspaces;
+    let m = unsafe { (*(rd_options as *const TheodbIvfflatOptions)).pq_subspaces };
     if m < MIN_PQ_SUBSPACES { DEFAULT_PQ_SUBSPACES as usize } else { m as usize }
 }
 
@@ -417,11 +441,11 @@ pub(crate) unsafe fn pq_subspaces_from_relation(indexrel: pg_sys::Relation) -> u
 /// `indexrel` must be a valid open index relation.
 // M59 T3.3: wired into `ambuild_hnsw` (`pack_hnsw_for_build`).
 pub(crate) unsafe fn pq_bits_from_relation(indexrel: pg_sys::Relation) -> u8 {
-    let rd_options = (*indexrel).rd_options;
+    let rd_options = unsafe { (*indexrel).rd_options };
     if rd_options.is_null() {
         return DEFAULT_PQ_BITS as u8;
     }
-    let bits = (*(rd_options as *const TheodbIvfflatOptions)).pq_bits;
+    let bits = unsafe { (*(rd_options as *const TheodbIvfflatOptions)).pq_bits };
     if (MIN_PQ_BITS..=MAX_PQ_BITS).contains(&bits) { bits as u8 } else { DEFAULT_PQ_BITS as u8 }
 }
 
@@ -433,11 +457,11 @@ pub(crate) unsafe fn pq_bits_from_relation(indexrel: pg_sys::Relation) -> u8 {
 /// `indexrel` must be a valid open index relation.
 // M59 T3.3: wired into `ambuild_hnsw` (`pack_hnsw_for_build`); the fold reads η off the persisted meta instead.
 pub(crate) unsafe fn aq_threshold_from_relation(indexrel: pg_sys::Relation) -> f32 {
-    let rd_options = (*indexrel).rd_options;
+    let rd_options = unsafe { (*indexrel).rd_options };
     let milli = if rd_options.is_null() {
         DEFAULT_AQ_THRESHOLD_MILLI
     } else {
-        (*(rd_options as *const TheodbIvfflatOptions)).aq_threshold_milli
+        unsafe { (*(rd_options as *const TheodbIvfflatOptions)).aq_threshold_milli }
     };
     (milli as f32 / 1000.0).max(1.0)
 }
@@ -449,11 +473,11 @@ pub(crate) unsafe fn aq_threshold_from_relation(indexrel: pg_sys::Relation) -> f
 /// # Safety
 /// `indexrel` must be a valid open index relation.
 pub(crate) unsafe fn separate_storage_from_relation(indexrel: pg_sys::Relation) -> bool {
-    let rd_options = (*indexrel).rd_options;
+    let rd_options = unsafe { (*indexrel).rd_options };
     if rd_options.is_null() {
         return false;
     }
-    (*(rd_options as *const TheodbIvfflatOptions)).separate_storage == 1
+    (unsafe { (*(rd_options as *const TheodbIvfflatOptions)).separate_storage }) == 1
 }
 
 /// M85 — resolve `refine` for a `theodb_ivfflat` AQ index: `true` iff `WITH (refine=1)` (SQ8 rerank, v6). Off
@@ -462,11 +486,11 @@ pub(crate) unsafe fn separate_storage_from_relation(indexrel: pg_sys::Relation) 
 /// # Safety
 /// `indexrel` must be a valid open index relation.
 pub(crate) unsafe fn refine_sq8_from_relation(indexrel: pg_sys::Relation) -> bool {
-    let rd_options = (*indexrel).rd_options;
+    let rd_options = unsafe { (*indexrel).rd_options };
     if rd_options.is_null() {
         return false;
     }
-    (*(rd_options as *const TheodbIvfflatOptions)).refine == 1
+    (unsafe { (*(rd_options as *const TheodbIvfflatOptions)).refine }) == 1
 }
 
 /// E1 — `WITH (refine = 2)` on a storage-separated AQ index: the v8 f32-free residual-RaBitQ rerank path.
@@ -474,11 +498,11 @@ pub(crate) unsafe fn refine_sq8_from_relation(indexrel: pg_sys::Relation) -> boo
 /// # Safety
 /// `indexrel` must be a live open relation.
 pub(crate) unsafe fn refine_rabitq_from_relation(indexrel: pg_sys::Relation) -> bool {
-    let rd_options = (*indexrel).rd_options;
+    let rd_options = unsafe { (*indexrel).rd_options };
     if rd_options.is_null() {
         return false;
     }
-    (*(rd_options as *const TheodbIvfflatOptions)).refine == 2
+    (unsafe { (*(rd_options as *const TheodbIvfflatOptions)).refine }) == 2
 }
 
 /// E1 — bits-per-dim for the v8 RaBitQ rerank codes (`WITH (rabitq_bits = N)`, default 7).
@@ -486,11 +510,11 @@ pub(crate) unsafe fn refine_rabitq_from_relation(indexrel: pg_sys::Relation) -> 
 /// # Safety
 /// `indexrel` must be a live open relation.
 pub(crate) unsafe fn rabitq_bits_from_relation(indexrel: pg_sys::Relation) -> u8 {
-    let rd_options = (*indexrel).rd_options;
+    let rd_options = unsafe { (*indexrel).rd_options };
     if rd_options.is_null() {
         return DEFAULT_RABITQ_BITS as u8;
     }
-    let bits = (*(rd_options as *const TheodbIvfflatOptions)).rabitq_bits;
+    let bits = unsafe { (*(rd_options as *const TheodbIvfflatOptions)).rabitq_bits };
     if (MIN_RABITQ_BITS..=MAX_RABITQ_BITS).contains(&bits) {
         bits as u8
     } else {
@@ -515,11 +539,11 @@ pub(crate) unsafe fn rabitq_bits_from_relation(indexrel: pg_sys::Relation) -> u8
 /// # Safety
 /// `indexrel` must be a valid open index relation.
 pub(crate) unsafe fn soar_lambda_from_relation(indexrel: pg_sys::Relation) -> f64 {
-    let rd_options = (*indexrel).rd_options;
+    let rd_options = unsafe { (*indexrel).rd_options };
     let milli = if rd_options.is_null() {
         DEFAULT_SOAR_LAMBDA_MILLI
     } else {
-        (*(rd_options as *const TheodbIvfflatOptions)).soar_lambda_milli
+        unsafe { (*(rd_options as *const TheodbIvfflatOptions)).soar_lambda_milli }
     };
     (milli.max(0) as f64) / 1000.0
 }
@@ -533,11 +557,11 @@ pub(crate) unsafe fn soar_lambda_from_relation(indexrel: pg_sys::Relation) -> f6
 /// # Safety
 /// `indexrel` must be a valid open index relation.
 pub(crate) unsafe fn hnsw_m_from_relation(indexrel: pg_sys::Relation) -> usize {
-    let rd_options = (*indexrel).rd_options;
+    let rd_options = unsafe { (*indexrel).rd_options };
     if rd_options.is_null() {
         return DEFAULT_HNSW_M as usize;
     }
-    let m = (*(rd_options as *const TheodbIvfflatOptions)).hnsw_m;
+    let m = unsafe { (*(rd_options as *const TheodbIvfflatOptions)).hnsw_m };
     if (MIN_HNSW_M..=MAX_HNSW_M).contains(&m) { m as usize } else { DEFAULT_HNSW_M as usize }
 }
 
@@ -547,11 +571,11 @@ pub(crate) unsafe fn hnsw_m_from_relation(indexrel: pg_sys::Relation) -> usize {
 /// # Safety
 /// `indexrel` must be a valid open index relation.
 pub(crate) unsafe fn hnsw_ef_construction_from_relation(indexrel: pg_sys::Relation) -> usize {
-    let rd_options = (*indexrel).rd_options;
+    let rd_options = unsafe { (*indexrel).rd_options };
     if rd_options.is_null() {
         return DEFAULT_HNSW_EF_CONSTRUCTION as usize;
     }
-    let efc = (*(rd_options as *const TheodbIvfflatOptions)).hnsw_ef_construction;
+    let efc = unsafe { (*(rd_options as *const TheodbIvfflatOptions)).hnsw_ef_construction };
     if (MIN_HNSW_EF_CONSTRUCTION..=MAX_HNSW_EF_CONSTRUCTION).contains(&efc) {
         efc as usize
     } else {

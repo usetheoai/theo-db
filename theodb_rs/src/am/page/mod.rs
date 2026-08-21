@@ -39,13 +39,13 @@ pub(crate) unsafe fn write_blob(
     meta.extend_from_slice(&META_VERSION.to_le_bytes());
     meta.extend_from_slice(&(blob.len() as u64).to_le_bytes());
     meta.extend_from_slice(&(nchunks as u32).to_le_bytes());
-    extend_page_with_item(rel, fork, &meta);
+    unsafe { extend_page_with_item(rel, fork, &meta) };
     // Data chunks (blocks 1..=nchunks). An empty blob still writes one empty data page for a uniform read path.
     if blob.is_empty() {
-        extend_page_with_item(rel, fork, &[]);
+        unsafe { extend_page_with_item(rel, fork, &[]) };
     } else {
         for chunk in blob.chunks(CHUNK) {
-            extend_page_with_item(rel, fork, chunk);
+            unsafe { extend_page_with_item(rel, fork, chunk) };
         }
     }
 }
@@ -56,11 +56,12 @@ pub(crate) unsafe fn write_blob(
 /// HNSW (M35) layouts. Retained for read/VACUUM back-compat with pre-M31 indexes (REINDEX migrates them). New
 /// builds never write a blob (see `write_ivf_structured` / `hnsw_page::write_structured`).
 pub(crate) unsafe fn read_blob(rel: pg_sys::Relation) -> Result<Vec<u8>, String> {
-    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
+    let nblocks =
+        unsafe { pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM) };
     if nblocks == 0 {
         return Ok(Vec::new());
     }
-    let meta = read_page_item(rel, 0)?;
+    let meta = unsafe { read_page_item(rel, 0)? };
     if meta.len() < 20 {
         return Err("theodb am: truncated meta page".into());
     }
@@ -78,7 +79,7 @@ pub(crate) unsafe fn read_blob(rel: pg_sys::Relation) -> Result<Vec<u8>, String>
             return Err("theodb am: missing data page".into());
         }
         // M38: one copy (append into `blob`) instead of the old two-copy `extend_from_slice(&read_page_item(...))`.
-        read_page_item_into(rel, i as pg_sys::BlockNumber, &mut blob)?;
+        unsafe { read_page_item_into(rel, i as pg_sys::BlockNumber, &mut blob)? };
     }
     if blob.len() != blob_len {
         return Err("theodb am: blob length mismatch (corrupt index)".into());
@@ -98,44 +99,49 @@ pub(crate) unsafe fn extend_page_with_item(
 ) -> pg_sys::BlockNumber {
     debug_assert!(data.len() < CHUNK + 1);
     // Extend: serialize extension with the relation-extension lock (pgvectorscale util/buffer.rs:62).
-    pg_sys::LockRelationForExtension(rel, pg_sys::ExclusiveLock as pg_sys::LOCKMODE);
-    let buf = pg_sys::ReadBufferExtended(
-        rel,
-        fork,
-        pg_sys::InvalidBlockNumber, // == P_NEW: extend by one page
-        pg_sys::ReadBufferMode::RBM_NORMAL,
-        std::ptr::null_mut(),
-    );
-    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
-    pg_sys::UnlockRelationForExtension(rel, pg_sys::ExclusiveLock as pg_sys::LOCKMODE);
+    unsafe { pg_sys::LockRelationForExtension(rel, pg_sys::ExclusiveLock as pg_sys::LOCKMODE) };
+    let buf = unsafe {
+        pg_sys::ReadBufferExtended(
+            rel,
+            fork,
+            pg_sys::InvalidBlockNumber, // == P_NEW: extend by one page
+            pg_sys::ReadBufferMode::RBM_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32) };
+    unsafe { pg_sys::UnlockRelationForExtension(rel, pg_sys::ExclusiveLock as pg_sys::LOCKMODE) };
 
-    let state = pg_sys::GenericXLogStart(rel);
-    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, 0);
-    pg_sys::PageInit(page, pg_sys::BLCKSZ as usize, 0);
-    let off = pg_sys::PageAddItemExtended(
-        page,
-        data.as_ptr() as pg_sys::Item,
-        data.len(),
-        pg_sys::InvalidOffsetNumber,
-        0,
-    );
+    let state = unsafe { pg_sys::GenericXLogStart(rel) };
+    let page = unsafe { pg_sys::GenericXLogRegisterBuffer(state, buf, 0) };
+    unsafe { pg_sys::PageInit(page, pg_sys::BLCKSZ as usize, 0) };
+    let off = unsafe {
+        pg_sys::PageAddItemExtended(
+            page,
+            data.as_ptr() as pg_sys::Item,
+            data.len(),
+            pg_sys::InvalidOffsetNumber,
+            0,
+        )
+    };
     assert!(off != pg_sys::InvalidOffsetNumber, "theodb am: PageAddItem failed (chunk too large?)");
-    let blkno = pg_sys::BufferGetBlockNumber(buf);
-    pg_sys::MarkBufferDirty(buf);
-    pg_sys::GenericXLogFinish(state);
-    pg_sys::UnlockReleaseBuffer(buf);
+    let blkno = unsafe { pg_sys::BufferGetBlockNumber(buf) };
+    unsafe { pg_sys::MarkBufferDirty(buf) };
+    unsafe { pg_sys::GenericXLogFinish(state) };
+    unsafe { pg_sys::UnlockReleaseBuffer(buf) };
     blkno
 }
 
 /// The block where the pending region starts, read from the meta page: `1 + nchunks` (block 0 = meta, blocks
 /// `1..=nchunks` = the main blob). Returns `(pending_start, nblocks)`. `nchunks==0` when the index is unbuilt.
 unsafe fn pending_layout(rel: pg_sys::Relation) -> Result<(u32, u32), String> {
-    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
+    let nblocks =
+        unsafe { pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM) };
     if nblocks == 0 {
         return Ok((0, 0));
     }
     // Pending starts right after the MAIN index pages — format-aware (blob or structured IVFFlat, M31).
-    Ok((main_index_pages(rel)?, nblocks))
+    Ok((unsafe { main_index_pages(rel)? }, nblocks))
 }
 
 /// Number of pending pages `[pending_start, nblocks)`. Returns 0 (⇒ do-not-fold) for any index whose meta
@@ -143,7 +149,7 @@ unsafe fn pending_layout(rel: pg_sys::Relation) -> Result<(u32, u32), String> {
 /// this, so the `Err` is swallowed to 0 with a server WARN (the EC-3 fail-safe applied to the maintenance path,
 /// per D3 "v1 blob → skip with WARN"), not propagated.
 pub(crate) unsafe fn pending_page_count(rel: pg_sys::Relation) -> u32 {
-    match pending_layout(rel) {
+    match unsafe { pending_layout(rel) } {
         Ok((pstart, nblocks)) if pstart > 0 && nblocks > pstart => nblocks - pstart,
         Ok(_) => 0,
         Err(e) => {
@@ -173,7 +179,7 @@ pub(crate) unsafe fn append_pending(
     tid: i64,
     vec: &[f32],
 ) -> Result<(), String> {
-    let (pstart, nblocks) = pending_layout(rel)?;
+    let (pstart, nblocks) = unsafe { pending_layout(rel)? };
     if pstart == 0 {
         return Err("theodb am: aminsert before build".into());
     }
@@ -181,54 +187,58 @@ pub(crate) unsafe fn append_pending(
     // Try the last pending page first (if any) — modify it in place under WAL.
     if nblocks > pstart {
         let last = nblocks - 1;
-        if try_add_to_page(rel, last, &item) {
+        if unsafe { try_add_to_page(rel, last, &item) } {
             return Ok(());
         }
     }
     // Otherwise extend a fresh pending page.
-    extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &item);
+    unsafe { extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &item) };
     Ok(())
 }
 
 /// Add `item` to an existing page under WAL; returns false if it does not fit (caller extends a new page).
 unsafe fn try_add_to_page(rel: pg_sys::Relation, block: pg_sys::BlockNumber, item: &[u8]) -> bool {
-    let buf = pg_sys::ReadBufferExtended(
-        rel,
-        pg_sys::ForkNumber::MAIN_FORKNUM,
-        block,
-        pg_sys::ReadBufferMode::RBM_NORMAL,
-        std::ptr::null_mut(),
-    );
-    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
-    let state = pg_sys::GenericXLogStart(rel);
-    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, 0);
-    let free = pg_sys::PageGetFreeSpace(page);
+    let buf = unsafe {
+        pg_sys::ReadBufferExtended(
+            rel,
+            pg_sys::ForkNumber::MAIN_FORKNUM,
+            block,
+            pg_sys::ReadBufferMode::RBM_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32) };
+    let state = unsafe { pg_sys::GenericXLogStart(rel) };
+    let page = unsafe { pg_sys::GenericXLogRegisterBuffer(state, buf, 0) };
+    let free = unsafe { pg_sys::PageGetFreeSpace(page) };
     if free < item.len() + 8 {
-        pg_sys::GenericXLogAbort(state);
-        pg_sys::UnlockReleaseBuffer(buf);
+        unsafe { pg_sys::GenericXLogAbort(state) };
+        unsafe { pg_sys::UnlockReleaseBuffer(buf) };
         return false;
     }
-    let off = pg_sys::PageAddItemExtended(
-        page,
-        item.as_ptr() as pg_sys::Item,
-        item.len(),
-        pg_sys::InvalidOffsetNumber,
-        0,
-    );
+    let off = unsafe {
+        pg_sys::PageAddItemExtended(
+            page,
+            item.as_ptr() as pg_sys::Item,
+            item.len(),
+            pg_sys::InvalidOffsetNumber,
+            0,
+        )
+    };
     if off == pg_sys::InvalidOffsetNumber {
-        pg_sys::GenericXLogAbort(state);
-        pg_sys::UnlockReleaseBuffer(buf);
+        unsafe { pg_sys::GenericXLogAbort(state) };
+        unsafe { pg_sys::UnlockReleaseBuffer(buf) };
         return false;
     }
-    pg_sys::MarkBufferDirty(buf);
-    pg_sys::GenericXLogFinish(state);
-    pg_sys::UnlockReleaseBuffer(buf);
+    unsafe { pg_sys::MarkBufferDirty(buf) };
+    unsafe { pg_sys::GenericXLogFinish(state) };
+    unsafe { pg_sys::UnlockReleaseBuffer(buf) };
     true
 }
 
 /// Read every pending `(tid, vector)` appended since the build (M26 Phase 5). Empty when there is no pending.
 pub(crate) unsafe fn read_pending(rel: pg_sys::Relation) -> Result<Vec<(i64, Vec<f32>)>, String> {
-    let (pstart, nblocks) = pending_layout(rel)?;
+    let (pstart, nblocks) = unsafe { pending_layout(rel)? };
     let pending_pages = if pstart > 0 && nblocks > pstart { nblocks - pstart } else { 0 };
     // Runtime metric (wiring pillar c, opt-in THEODB_SCAN_PROFILE=1): the O(pending) linear scan cost that
     // `pages_read` (graph-only) misses. Logged on EVERY scan (incl. 0) so the T3.1 fold win (N→0) is observable.
@@ -240,7 +250,7 @@ pub(crate) unsafe fn read_pending(rel: pg_sys::Relation) -> Result<Vec<(i64, Vec
     }
     let mut out = Vec::new();
     for block in pstart..nblocks {
-        for item in read_all_page_items(rel, block)? {
+        for item in unsafe { read_all_page_items(rel, block)? } {
             // A well-formed pending item is EXACTLY `[tid i64, dim u32, f32×dim]`. Validate the length with `==`
             // (not `<`): a crash mid-fold that extended the relation (#47, base=tail) leaves orphan body pages in
             // the old pending range `[pending_start, nblocks)`; decoded as pending they yield a bogus dim. Fail
@@ -272,27 +282,29 @@ pub(crate) unsafe fn read_all_page_items(
     rel: pg_sys::Relation,
     block: pg_sys::BlockNumber,
 ) -> Result<Vec<Vec<u8>>, String> {
-    let buf = pg_sys::ReadBufferExtended(
-        rel,
-        pg_sys::ForkNumber::MAIN_FORKNUM,
-        block,
-        pg_sys::ReadBufferMode::RBM_NORMAL,
-        std::ptr::null_mut(),
-    );
-    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_SHARE as i32);
-    let page = pg_sys::BufferGetPage(buf);
-    let max_off = page_get_max_offset(page);
+    let buf = unsafe {
+        pg_sys::ReadBufferExtended(
+            rel,
+            pg_sys::ForkNumber::MAIN_FORKNUM,
+            block,
+            pg_sys::ReadBufferMode::RBM_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_SHARE as i32) };
+    let page = unsafe { pg_sys::BufferGetPage(buf) };
+    let max_off = unsafe { page_get_max_offset(page) };
     let mut out = Vec::with_capacity(max_off);
     for off in 1..=max_off {
-        let item_id = page_get_item_id(page, off as pg_sys::OffsetNumber);
-        let len = (*item_id).lp_len() as usize;
+        let item_id = unsafe { page_get_item_id(page, off as pg_sys::OffsetNumber) };
+        let len = unsafe { (*item_id).lp_len() } as usize;
         if len == 0 {
             continue;
         }
-        let ptr = page_get_item(page, item_id) as *const u8;
-        out.push(std::slice::from_raw_parts(ptr, len).to_vec());
+        let ptr = unsafe { page_get_item(page, item_id) } as *const u8;
+        out.push(unsafe { std::slice::from_raw_parts(ptr, len).to_vec() });
     }
-    pg_sys::UnlockReleaseBuffer(buf);
+    unsafe { pg_sys::UnlockReleaseBuffer(buf) };
     Ok(out)
 }
 
@@ -302,27 +314,29 @@ pub(crate) unsafe fn read_all_page_items_with_off(
     rel: pg_sys::Relation,
     block: pg_sys::BlockNumber,
 ) -> Result<Vec<(u16, Vec<u8>)>, String> {
-    let buf = pg_sys::ReadBufferExtended(
-        rel,
-        pg_sys::ForkNumber::MAIN_FORKNUM,
-        block,
-        pg_sys::ReadBufferMode::RBM_NORMAL,
-        std::ptr::null_mut(),
-    );
-    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_SHARE as i32);
-    let page = pg_sys::BufferGetPage(buf);
-    let max_off = page_get_max_offset(page);
+    let buf = unsafe {
+        pg_sys::ReadBufferExtended(
+            rel,
+            pg_sys::ForkNumber::MAIN_FORKNUM,
+            block,
+            pg_sys::ReadBufferMode::RBM_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_SHARE as i32) };
+    let page = unsafe { pg_sys::BufferGetPage(buf) };
+    let max_off = unsafe { page_get_max_offset(page) };
     let mut out = Vec::with_capacity(max_off);
     for off in 1..=max_off {
-        let item_id = page_get_item_id(page, off as pg_sys::OffsetNumber);
-        let len = (*item_id).lp_len() as usize;
+        let item_id = unsafe { page_get_item_id(page, off as pg_sys::OffsetNumber) };
+        let len = unsafe { (*item_id).lp_len() } as usize;
         if len == 0 {
             continue;
         }
-        let ptr = page_get_item(page, item_id) as *const u8;
-        out.push((off as u16, std::slice::from_raw_parts(ptr, len).to_vec()));
+        let ptr = unsafe { page_get_item(page, item_id) } as *const u8;
+        out.push((off as u16, unsafe { std::slice::from_raw_parts(ptr, len).to_vec() }));
     }
-    pg_sys::UnlockReleaseBuffer(buf);
+    unsafe { pg_sys::UnlockReleaseBuffer(buf) };
     Ok(out)
 }
 
@@ -336,38 +350,40 @@ pub(crate) unsafe fn modify_items_under_wal(
     block: pg_sys::BlockNumber,
     mut f: impl FnMut(&mut [u8]) -> bool,
 ) -> u32 {
-    let buf = pg_sys::ReadBufferExtended(
-        rel,
-        pg_sys::ForkNumber::MAIN_FORKNUM,
-        block,
-        pg_sys::ReadBufferMode::RBM_NORMAL,
-        std::ptr::null_mut(),
-    );
-    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
-    let state = pg_sys::GenericXLogStart(rel);
+    let buf = unsafe {
+        pg_sys::ReadBufferExtended(
+            rel,
+            pg_sys::ForkNumber::MAIN_FORKNUM,
+            block,
+            pg_sys::ReadBufferMode::RBM_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32) };
+    let state = unsafe { pg_sys::GenericXLogStart(rel) };
     // The registered page is GenericXLog's working copy; mutating it is the intended in-place edit path.
-    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, 0);
-    let max_off = page_get_max_offset(page);
+    let page = unsafe { pg_sys::GenericXLogRegisterBuffer(state, buf, 0) };
+    let max_off = unsafe { page_get_max_offset(page) };
     let mut changed = 0u32;
     for off in 1..=max_off {
-        let item_id = page_get_item_id(page, off as pg_sys::OffsetNumber);
-        let len = (*item_id).lp_len() as usize;
+        let item_id = unsafe { page_get_item_id(page, off as pg_sys::OffsetNumber) };
+        let len = unsafe { (*item_id).lp_len() } as usize;
         if len == 0 {
             continue;
         }
-        let ptr = page_get_item(page, item_id) as *mut u8;
-        let item = std::slice::from_raw_parts_mut(ptr, len);
+        let ptr = unsafe { page_get_item(page, item_id) } as *mut u8;
+        let item = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
         if f(item) {
             changed += 1;
         }
     }
     if changed > 0 {
-        pg_sys::MarkBufferDirty(buf);
-        pg_sys::GenericXLogFinish(state);
+        unsafe { pg_sys::MarkBufferDirty(buf) };
+        unsafe { pg_sys::GenericXLogFinish(state) };
     } else {
-        pg_sys::GenericXLogAbort(state);
+        unsafe { pg_sys::GenericXLogAbort(state) };
     }
-    pg_sys::UnlockReleaseBuffer(buf);
+    unsafe { pg_sys::UnlockReleaseBuffer(buf) };
     changed
 }
 
@@ -381,30 +397,32 @@ pub(crate) unsafe fn modify_item_at(
     off: u16,
     f: impl FnOnce(&mut [u8]) -> bool,
 ) -> bool {
-    let buf = pg_sys::ReadBufferExtended(
-        rel,
-        pg_sys::ForkNumber::MAIN_FORKNUM,
-        block,
-        pg_sys::ReadBufferMode::RBM_NORMAL,
-        std::ptr::null_mut(),
-    );
-    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
-    let state = pg_sys::GenericXLogStart(rel);
-    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, 0);
+    let buf = unsafe {
+        pg_sys::ReadBufferExtended(
+            rel,
+            pg_sys::ForkNumber::MAIN_FORKNUM,
+            block,
+            pg_sys::ReadBufferMode::RBM_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32) };
+    let state = unsafe { pg_sys::GenericXLogStart(rel) };
+    let page = unsafe { pg_sys::GenericXLogRegisterBuffer(state, buf, 0) };
     let mut changed = false;
-    let item_id = page_get_item_id(page, off as pg_sys::OffsetNumber);
-    let len = (*item_id).lp_len() as usize;
+    let item_id = unsafe { page_get_item_id(page, off as pg_sys::OffsetNumber) };
+    let len = unsafe { (*item_id).lp_len() } as usize;
     if len > 0 {
-        let ptr = page_get_item(page, item_id) as *mut u8;
-        changed = f(std::slice::from_raw_parts_mut(ptr, len));
+        let ptr = unsafe { page_get_item(page, item_id) } as *mut u8;
+        changed = f(unsafe { std::slice::from_raw_parts_mut(ptr, len) });
     }
     if changed {
-        pg_sys::MarkBufferDirty(buf);
-        pg_sys::GenericXLogFinish(state);
+        unsafe { pg_sys::MarkBufferDirty(buf) };
+        unsafe { pg_sys::GenericXLogFinish(state) };
     } else {
-        pg_sys::GenericXLogAbort(state);
+        unsafe { pg_sys::GenericXLogAbort(state) };
     }
-    pg_sys::UnlockReleaseBuffer(buf);
+    unsafe { pg_sys::UnlockReleaseBuffer(buf) };
     changed
 }
 
@@ -422,7 +440,8 @@ pub(crate) unsafe fn rewrite_blob(rel: pg_sys::Relation, blob: &[u8]) {
     meta.extend_from_slice(&(blob.len() as u64).to_le_bytes());
     meta.extend_from_slice(&(nchunks as u32).to_le_bytes());
 
-    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
+    let nblocks =
+        unsafe { pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM) };
     let mut blocks: Vec<Vec<u8>> = Vec::with_capacity(1 + nchunks);
     blocks.push(meta);
     if blob.is_empty() {
@@ -435,14 +454,14 @@ pub(crate) unsafe fn rewrite_blob(rel: pg_sys::Relation, blob: &[u8]) {
     for (i, data) in blocks.iter().enumerate() {
         let b = i as u32;
         if b < nblocks {
-            reinit_page_with_item(rel, b, data);
+            unsafe { reinit_page_with_item(rel, b, data) };
         } else {
-            extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, data);
+            unsafe { extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, data) };
         }
     }
     // Empty any leftover trailing pages (old pending / larger old blob).
     for b in (blocks.len() as u32)..nblocks {
-        reinit_page_with_item(rel, b, &[]);
+        unsafe { reinit_page_with_item(rel, b, &[]) };
     }
 }
 
@@ -455,86 +474,99 @@ pub(crate) unsafe fn reinit_page_with_items(
     block: pg_sys::BlockNumber,
     items: &[Vec<u8>],
 ) {
-    let buf = pg_sys::ReadBufferExtended(
-        rel,
-        pg_sys::ForkNumber::MAIN_FORKNUM,
-        block,
-        pg_sys::ReadBufferMode::RBM_NORMAL,
-        std::ptr::null_mut(),
-    );
-    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
-    let state = pg_sys::GenericXLogStart(rel);
-    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, 0);
-    pg_sys::PageInit(page, pg_sys::BLCKSZ as usize, 0);
+    let buf = unsafe {
+        pg_sys::ReadBufferExtended(
+            rel,
+            pg_sys::ForkNumber::MAIN_FORKNUM,
+            block,
+            pg_sys::ReadBufferMode::RBM_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32) };
+    let state = unsafe { pg_sys::GenericXLogStart(rel) };
+    let page = unsafe { pg_sys::GenericXLogRegisterBuffer(state, buf, 0) };
+    unsafe { pg_sys::PageInit(page, pg_sys::BLCKSZ as usize, 0) };
     for it in items {
-        let off = pg_sys::PageAddItemExtended(
-            page,
-            it.as_ptr() as pg_sys::Item,
-            it.len(),
-            pg_sys::InvalidOffsetNumber,
-            0,
-        );
+        let off = unsafe {
+            pg_sys::PageAddItemExtended(
+                page,
+                it.as_ptr() as pg_sys::Item,
+                it.len(),
+                pg_sys::InvalidOffsetNumber,
+                0,
+            )
+        };
         assert!(off != pg_sys::InvalidOffsetNumber, "theodb am: reinit PageAddItem failed");
     }
-    pg_sys::MarkBufferDirty(buf);
-    pg_sys::GenericXLogFinish(state);
-    pg_sys::UnlockReleaseBuffer(buf);
+    unsafe { pg_sys::MarkBufferDirty(buf) };
+    unsafe { pg_sys::GenericXLogFinish(state) };
+    unsafe { pg_sys::UnlockReleaseBuffer(buf) };
 }
 
 /// Pivot the fixed meta page (block 0) to a new generation — the LAST write of a crash-safe fold (M48 #47).
 /// Registers block 0 with `GENERIC_XLOG_FULL_IMAGE` (nbtree/GIN meta-full-record discipline, blueprint §Q1/§Q4):
 /// the whole meta is carried, torn-page-proof on redo — a delta over a torn base page would corrupt it.
 pub(crate) unsafe fn pivot_meta_page(rel: pg_sys::Relation, meta: &[u8]) {
-    let buf = pg_sys::ReadBufferExtended(
-        rel,
-        pg_sys::ForkNumber::MAIN_FORKNUM,
-        0,
-        pg_sys::ReadBufferMode::RBM_NORMAL,
-        std::ptr::null_mut(),
-    );
-    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
-    let state = pg_sys::GenericXLogStart(rel);
-    let page =
-        pg_sys::GenericXLogRegisterBuffer(state, buf, pg_sys::GENERIC_XLOG_FULL_IMAGE as i32);
-    pg_sys::PageInit(page, pg_sys::BLCKSZ as usize, 0);
-    let off = pg_sys::PageAddItemExtended(
-        page,
-        meta.as_ptr() as pg_sys::Item,
-        meta.len(),
-        pg_sys::InvalidOffsetNumber,
-        0,
-    );
+    let buf = unsafe {
+        pg_sys::ReadBufferExtended(
+            rel,
+            pg_sys::ForkNumber::MAIN_FORKNUM,
+            0,
+            pg_sys::ReadBufferMode::RBM_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32) };
+    let state = unsafe { pg_sys::GenericXLogStart(rel) };
+    let page = unsafe {
+        pg_sys::GenericXLogRegisterBuffer(state, buf, pg_sys::GENERIC_XLOG_FULL_IMAGE as i32)
+    };
+    unsafe { pg_sys::PageInit(page, pg_sys::BLCKSZ as usize, 0) };
+    let off = unsafe {
+        pg_sys::PageAddItemExtended(
+            page,
+            meta.as_ptr() as pg_sys::Item,
+            meta.len(),
+            pg_sys::InvalidOffsetNumber,
+            0,
+        )
+    };
     assert!(off != pg_sys::InvalidOffsetNumber, "theodb am: pivot PageAddItem failed");
-    pg_sys::MarkBufferDirty(buf);
-    pg_sys::GenericXLogFinish(state);
-    pg_sys::UnlockReleaseBuffer(buf);
+    unsafe { pg_sys::MarkBufferDirty(buf) };
+    unsafe { pg_sys::GenericXLogFinish(state) };
+    unsafe { pg_sys::UnlockReleaseBuffer(buf) };
 }
 
 unsafe fn reinit_page_with_item(rel: pg_sys::Relation, block: pg_sys::BlockNumber, data: &[u8]) {
-    let buf = pg_sys::ReadBufferExtended(
-        rel,
-        pg_sys::ForkNumber::MAIN_FORKNUM,
-        block,
-        pg_sys::ReadBufferMode::RBM_NORMAL,
-        std::ptr::null_mut(),
-    );
-    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
-    let state = pg_sys::GenericXLogStart(rel);
-    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, 0);
-    pg_sys::PageInit(page, pg_sys::BLCKSZ as usize, 0);
+    let buf = unsafe {
+        pg_sys::ReadBufferExtended(
+            rel,
+            pg_sys::ForkNumber::MAIN_FORKNUM,
+            block,
+            pg_sys::ReadBufferMode::RBM_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32) };
+    let state = unsafe { pg_sys::GenericXLogStart(rel) };
+    let page = unsafe { pg_sys::GenericXLogRegisterBuffer(state, buf, 0) };
+    unsafe { pg_sys::PageInit(page, pg_sys::BLCKSZ as usize, 0) };
     if !data.is_empty() {
-        let off = pg_sys::PageAddItemExtended(
-            page,
-            data.as_ptr() as pg_sys::Item,
-            data.len(),
-            pg_sys::InvalidOffsetNumber,
-            0,
-        );
+        let off = unsafe {
+            pg_sys::PageAddItemExtended(
+                page,
+                data.as_ptr() as pg_sys::Item,
+                data.len(),
+                pg_sys::InvalidOffsetNumber,
+                0,
+            )
+        };
         assert!(off != pg_sys::InvalidOffsetNumber, "theodb am: reinit PageAddItem failed");
     }
-    pg_sys::MarkBufferDirty(buf);
-    pg_sys::GenericXLogFinish(state);
-    pg_sys::UnlockReleaseBuffer(buf);
+    unsafe { pg_sys::MarkBufferDirty(buf) };
+    unsafe { pg_sys::GenericXLogFinish(state) };
+    unsafe { pg_sys::UnlockReleaseBuffer(buf) };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -547,11 +579,12 @@ unsafe fn reinit_page_with_item(rel: pg_sys::Relation, block: pg_sys::BlockNumbe
 /// Peek block 0's leading magic to dispatch the scan/maintenance path (structured IVF vs M26 blob). Returns 0
 /// for an unbuilt index (0 blocks).
 pub(crate) unsafe fn peek_magic(rel: pg_sys::Relation) -> Result<u32, String> {
-    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
+    let nblocks =
+        unsafe { pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM) };
     if nblocks == 0 {
         return Ok(0);
     }
-    let m = read_page_item(rel, 0)?;
+    let m = unsafe { read_page_item(rel, 0)? };
     if m.len() < 4 {
         return Ok(0);
     }
@@ -582,7 +615,7 @@ unsafe fn pending_start_v4(rel: pg_sys::Relation, m: &[u8]) -> Result<u32, Strin
     let dir_npages4 = u32::from_le_bytes(m[25..29].try_into().unwrap());
     let centroid_npages4 = u32::from_le_bytes(m[29..33].try_into().unwrap());
     let gen_base4 = u32::from_le_bytes(m[33..37].try_into().unwrap());
-    let dbytes4 = read_chunked(rel, gen_base4, dir_npages4)?;
+    let dbytes4 = unsafe { read_chunked(rel, gen_base4, dir_npages4)? };
     if dbytes4.len() < nlists4 * 12 {
         return Err("theodb am: truncated v4 directory".into());
     }
@@ -609,7 +642,7 @@ unsafe fn pending_start_v5_v7(rel: pg_sys::Relation, m: &[u8]) -> Result<u32, St
     let dir_npages5 = u32::from_le_bytes(m[25..29].try_into().unwrap());
     let centroid_npages5 = u32::from_le_bytes(m[29..33].try_into().unwrap());
     let gen_base5 = u32::from_le_bytes(m[33..37].try_into().unwrap());
-    let dbytes5 = read_chunked(rel, gen_base5, dir_npages5)?;
+    let dbytes5 = unsafe { read_chunked(rel, gen_base5, dir_npages5)? };
     if dbytes5.len() < nlists5 * 20 {
         return Err("theodb am: truncated v5 directory".into());
     }
@@ -641,7 +674,7 @@ unsafe fn pending_start_v6_v8(rel: pg_sys::Relation, m: &[u8]) -> Result<u32, St
     let centroid_npages6 = u32::from_le_bytes(m[29..33].try_into().unwrap());
     let gen_base6 = u32::from_le_bytes(m[33..37].try_into().unwrap());
     let sq8_codebook_npages6 = u32::from_le_bytes(m[37..41].try_into().unwrap());
-    let dbytes6 = read_chunked(rel, gen_base6, dir_npages6)?;
+    let dbytes6 = unsafe { read_chunked(rel, gen_base6, dir_npages6)? };
     if dbytes6.len() < nlists6 * 20 {
         return Err("theodb am: truncated v6 directory".into());
     }
@@ -682,7 +715,7 @@ unsafe fn pending_start_v2_v3(rel: pg_sys::Relation, m: &[u8], ver: u32) -> Resu
     };
     // The directory is on its own pages — read it to sum the per-list npages. Pending starts right after the
     // generation body (gen_base + dir + centroids + Σ list pages), which is the true tail for an append fold.
-    let dbytes = read_chunked(rel, gen_base, dir_npages)?;
+    let dbytes = unsafe { read_chunked(rel, gen_base, dir_npages)? };
     if dbytes.len() < nlists * 12 {
         return Err("theodb am: truncated directory".into());
     }
@@ -695,7 +728,7 @@ unsafe fn pending_start_v2_v3(rel: pg_sys::Relation, m: &[u8], ver: u32) -> Resu
 }
 
 unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
-    let m = read_page_item(rel, 0)?;
+    let m = unsafe { read_page_item(rel, 0)? };
     if m.len() < 4 {
         return Err("theodb am: truncated meta page".into());
     }
@@ -708,10 +741,10 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
         // Cada versão tem seu helper verbatim — NÃO unificar (ADR-2 T1.3).
         let ver = u32::from_le_bytes(m[4..8].try_into().unwrap());
         match ver {
-            4 => pending_start_v4(rel, &m),
-            5 | 7 => pending_start_v5_v7(rel, &m),
-            6 | 8 => pending_start_v6_v8(rel, &m),
-            _ => pending_start_v2_v3(rel, &m, ver),
+            4 => unsafe { pending_start_v4(rel, &m) },
+            5 | 7 => unsafe { pending_start_v5_v7(rel, &m) },
+            6 | 8 => unsafe { pending_start_v6_v8(rel, &m) },
+            _ => unsafe { pending_start_v2_v3(rel, &m, ver) },
         }
     } else if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
         // M35 structured HNSW: pending starts right after the neighbor page range (nbr_first + nbr_npages).
@@ -741,7 +774,7 @@ pub(crate) unsafe fn read_chunked(
     for b in first_block..first_block + npages {
         // M38: append each chunk's bytes DIRECTLY into `out` (one copy) — was `extend_from_slice(&read_page_item(...))`
         // (two copies + intermediate realloc); the copy dominates the `reads` scan phase (M36 profiler).
-        read_page_item_into(rel, b, &mut out)?;
+        unsafe { read_page_item_into(rel, b, &mut out)? };
     }
     Ok(out)
 }
@@ -770,7 +803,7 @@ pub(crate) unsafe fn read_chunked(
 /// M89 — write one page item (mirrors the pre-M89 `extend_page_with_item` call site).
 #[inline]
 unsafe fn write_item(rel: pg_sys::Relation, data: &[u8]) {
-    extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, data);
+    unsafe { extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, data) };
 }
 
 /// M89 — write `data` as CHUNK-sized page items (byte-identical to the pre-M89 `push_chunks` split), streaming
@@ -778,10 +811,10 @@ unsafe fn write_item(rel: pg_sys::Relation, data: &[u8]) {
 #[inline]
 unsafe fn write_chunks(rel: pg_sys::Relation, data: &[u8]) {
     if data.is_empty() {
-        write_item(rel, &[]);
+        unsafe { write_item(rel, &[]) };
     } else {
         for chunk in data.chunks(CHUNK) {
-            write_item(rel, chunk);
+            unsafe { write_item(rel, chunk) };
         }
     }
 }
@@ -802,7 +835,7 @@ unsafe fn read_page_item(
     block: pg_sys::BlockNumber,
 ) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
-    read_page_item_into(rel, block, &mut out)?;
+    unsafe { read_page_item_into(rel, block, &mut out)? };
     Ok(out)
 }
 
@@ -820,29 +853,32 @@ unsafe fn read_page_item_into(
     // a block past end-of-relation; `ReadBufferExtended(RBM_NORMAL)` on it raises a C `ereport(ERROR)` longjmp,
     // which from a planner hook (cost.rs / customscan.rs meta reads) aborts ALL query planning. A typed `Err`
     // degrades to the fail-safe path instead.
-    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
+    let nblocks =
+        unsafe { pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM) };
     if block >= nblocks {
         return Err(format!("theodb am: page {block} out of range (nblocks={nblocks})"));
     }
-    let buf = pg_sys::ReadBufferExtended(
-        rel,
-        pg_sys::ForkNumber::MAIN_FORKNUM,
-        block,
-        pg_sys::ReadBufferMode::RBM_NORMAL,
-        std::ptr::null_mut(),
-    );
-    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_SHARE as i32);
-    let page = pg_sys::BufferGetPage(buf);
-    let max_off = page_get_max_offset(page);
+    let buf = unsafe {
+        pg_sys::ReadBufferExtended(
+            rel,
+            pg_sys::ForkNumber::MAIN_FORKNUM,
+            block,
+            pg_sys::ReadBufferMode::RBM_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_SHARE as i32) };
+    let page = unsafe { pg_sys::BufferGetPage(buf) };
+    let max_off = unsafe { page_get_max_offset(page) };
     if max_off < 1 {
-        pg_sys::UnlockReleaseBuffer(buf);
+        unsafe { pg_sys::UnlockReleaseBuffer(buf) };
         return Ok(()); // empty data page — append nothing
     }
-    let item_id = page_get_item_id(page, 1);
-    let len = (*item_id).lp_len() as usize;
-    let ptr = page_get_item(page, item_id) as *const u8;
-    out.extend_from_slice(std::slice::from_raw_parts(ptr, len));
-    pg_sys::UnlockReleaseBuffer(buf);
+    let item_id = unsafe { page_get_item_id(page, 1) };
+    let len = unsafe { (*item_id).lp_len() } as usize;
+    let ptr = unsafe { page_get_item(page, item_id) } as *const u8;
+    out.extend_from_slice(unsafe { std::slice::from_raw_parts(ptr, len) });
+    unsafe { pg_sys::UnlockReleaseBuffer(buf) };
     Ok(())
 }
 
@@ -854,31 +890,34 @@ pub(crate) unsafe fn read_page_item_at(
     block: pg_sys::BlockNumber,
     offno: pg_sys::OffsetNumber,
 ) -> Result<Vec<u8>, String> {
-    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
+    let nblocks =
+        unsafe { pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM) };
     if block >= nblocks {
         return Err(format!("theodb am: page {block} out of range (nblocks={nblocks})"));
     }
-    let buf = pg_sys::ReadBufferExtended(
-        rel,
-        pg_sys::ForkNumber::MAIN_FORKNUM,
-        block,
-        pg_sys::ReadBufferMode::RBM_NORMAL,
-        std::ptr::null_mut(),
-    );
-    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_SHARE as i32);
-    let page = pg_sys::BufferGetPage(buf);
-    let max_off = page_get_max_offset(page);
+    let buf = unsafe {
+        pg_sys::ReadBufferExtended(
+            rel,
+            pg_sys::ForkNumber::MAIN_FORKNUM,
+            block,
+            pg_sys::ReadBufferMode::RBM_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_SHARE as i32) };
+    let page = unsafe { pg_sys::BufferGetPage(buf) };
+    let max_off = unsafe { page_get_max_offset(page) };
     if (offno as usize) < 1 || (offno as usize) > max_off {
-        pg_sys::UnlockReleaseBuffer(buf);
+        unsafe { pg_sys::UnlockReleaseBuffer(buf) };
         return Err(format!(
             "theodb am: offset {offno} out of range (max={max_off}) on page {block}"
         ));
     }
-    let item_id = page_get_item_id(page, offno);
-    let len = (*item_id).lp_len() as usize;
-    let ptr = page_get_item(page, item_id) as *const u8;
-    let out = std::slice::from_raw_parts(ptr, len).to_vec();
-    pg_sys::UnlockReleaseBuffer(buf);
+    let item_id = unsafe { page_get_item_id(page, offno) };
+    let len = unsafe { (*item_id).lp_len() } as usize;
+    let ptr = unsafe { page_get_item(page, item_id) } as *const u8;
+    let out = unsafe { std::slice::from_raw_parts(ptr, len).to_vec() };
+    unsafe { pg_sys::UnlockReleaseBuffer(buf) };
     Ok(out)
 }
 
@@ -898,29 +937,31 @@ pub(crate) unsafe fn with_page_item<T>(
     if block >= nblocks {
         return Err(format!("theodb am: page {block} out of range (nblocks={nblocks})"));
     }
-    let buf = pg_sys::ReadBufferExtended(
-        rel,
-        pg_sys::ForkNumber::MAIN_FORKNUM,
-        block,
-        pg_sys::ReadBufferMode::RBM_NORMAL,
-        std::ptr::null_mut(),
-    );
-    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_SHARE as i32);
+    let buf = unsafe {
+        pg_sys::ReadBufferExtended(
+            rel,
+            pg_sys::ForkNumber::MAIN_FORKNUM,
+            block,
+            pg_sys::ReadBufferMode::RBM_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_SHARE as i32) };
     // RAII: release (unlock + unpin) on EVERY exit path — incl. an early `?`, an `Err` from `f`, OR a Rust panic
     // inside `f`. `f` now runs decode+score under the pin (a wider critical section than the old `to_vec`), so
     // structural release matters (mirrors pgvectorscale's `LockedBufferShare` Drop guard). M41 hardening.
     let _pin = SharePin(buf);
-    let page = pg_sys::BufferGetPage(buf);
-    let max_off = page_get_max_offset(page);
+    let page = unsafe { pg_sys::BufferGetPage(buf) };
+    let max_off = unsafe { page_get_max_offset(page) };
     if (offno as usize) < 1 || (offno as usize) > max_off {
         return Err(format!(
             "theodb am: offset {offno} out of range (max={max_off}) on page {block}"
         ));
     }
-    let item_id = page_get_item_id(page, offno);
-    let len = (*item_id).lp_len() as usize;
-    let ptr = page_get_item(page, item_id) as *const u8;
-    let bytes = std::slice::from_raw_parts(ptr, len);
+    let item_id = unsafe { page_get_item_id(page, offno) };
+    let len = unsafe { (*item_id).lp_len() } as usize;
+    let ptr = unsafe { page_get_item(page, item_id) } as *const u8;
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
     f(bytes) // score / decode INSIDE the pin — the borrow ends here; `_pin` releases the buffer on drop
 }
 
@@ -935,7 +976,7 @@ impl Drop for SharePin {
 
 /// M41 — read the MAIN-fork block count once (a hot traversal caches this instead of per-item).
 pub(crate) unsafe fn main_fork_nblocks(rel: pg_sys::Relation) -> pg_sys::BlockNumber {
-    pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM)
+    unsafe { pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM) }
 }
 
 /// M35 — extend `fork` by one page and write ALL `items` onto it (offsets 1..=items.len()), WAL-logged. The
@@ -946,36 +987,40 @@ pub(crate) unsafe fn extend_page_with_items(
     fork: pg_sys::ForkNumber::Type,
     items: &[Vec<u8>],
 ) {
-    pg_sys::LockRelationForExtension(rel, pg_sys::ExclusiveLock as pg_sys::LOCKMODE);
-    let buf = pg_sys::ReadBufferExtended(
-        rel,
-        fork,
-        pg_sys::InvalidBlockNumber, // P_NEW
-        pg_sys::ReadBufferMode::RBM_NORMAL,
-        std::ptr::null_mut(),
-    );
-    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
-    pg_sys::UnlockRelationForExtension(rel, pg_sys::ExclusiveLock as pg_sys::LOCKMODE);
+    unsafe { pg_sys::LockRelationForExtension(rel, pg_sys::ExclusiveLock as pg_sys::LOCKMODE) };
+    let buf = unsafe {
+        pg_sys::ReadBufferExtended(
+            rel,
+            fork,
+            pg_sys::InvalidBlockNumber, // P_NEW
+            pg_sys::ReadBufferMode::RBM_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32) };
+    unsafe { pg_sys::UnlockRelationForExtension(rel, pg_sys::ExclusiveLock as pg_sys::LOCKMODE) };
 
-    let state = pg_sys::GenericXLogStart(rel);
-    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, 0);
-    pg_sys::PageInit(page, pg_sys::BLCKSZ as usize, 0);
+    let state = unsafe { pg_sys::GenericXLogStart(rel) };
+    let page = unsafe { pg_sys::GenericXLogRegisterBuffer(state, buf, 0) };
+    unsafe { pg_sys::PageInit(page, pg_sys::BLCKSZ as usize, 0) };
     for it in items {
-        let off = pg_sys::PageAddItemExtended(
-            page,
-            it.as_ptr() as pg_sys::Item,
-            it.len(),
-            pg_sys::InvalidOffsetNumber,
-            0,
-        );
+        let off = unsafe {
+            pg_sys::PageAddItemExtended(
+                page,
+                it.as_ptr() as pg_sys::Item,
+                it.len(),
+                pg_sys::InvalidOffsetNumber,
+                0,
+            )
+        };
         assert!(
             off != pg_sys::InvalidOffsetNumber,
             "theodb am: PageAddItem failed (item too large / page full?)"
         );
     }
-    pg_sys::MarkBufferDirty(buf);
-    pg_sys::GenericXLogFinish(state);
-    pg_sys::UnlockReleaseBuffer(buf);
+    unsafe { pg_sys::MarkBufferDirty(buf) };
+    unsafe { pg_sys::GenericXLogFinish(state) };
+    unsafe { pg_sys::UnlockReleaseBuffer(buf) };
 }
 
 // --- Page macros pgrx does not expose (reimplemented from pgvectorscale util/ports.rs:47-92) ---
@@ -985,19 +1030,19 @@ const SIZE_OF_PAGE_HEADER: usize = std::mem::offset_of!(pg_sys::PageHeaderData, 
 
 unsafe fn page_get_item_id(page: pg_sys::Page, offset: pg_sys::OffsetNumber) -> pg_sys::ItemId {
     let header = page.cast::<pg_sys::PageHeaderData>();
-    (*header).pd_linp.as_mut_ptr().add((offset - 1) as usize)
+    unsafe { (*header).pd_linp.as_mut_ptr().add((offset - 1) as usize) }
 }
 
 unsafe fn page_get_item(page: pg_sys::Page, item_id: pg_sys::ItemId) -> *mut std::os::raw::c_char {
-    page.cast::<std::os::raw::c_char>().add((*item_id).lp_off() as usize)
+    unsafe { page.cast::<std::os::raw::c_char>().add((*item_id).lp_off() as usize) }
 }
 
 unsafe fn page_get_max_offset(page: pg_sys::Page) -> usize {
     let header = page.cast::<pg_sys::PageHeaderData>();
-    if (*header).pd_lower as usize <= SIZE_OF_PAGE_HEADER {
+    if unsafe { (*header).pd_lower } as usize <= SIZE_OF_PAGE_HEADER {
         0
     } else {
-        ((*header).pd_lower as usize - SIZE_OF_PAGE_HEADER)
+        (unsafe { (*header).pd_lower } as usize - SIZE_OF_PAGE_HEADER)
             / std::mem::size_of::<pg_sys::ItemIdData>()
     }
 }

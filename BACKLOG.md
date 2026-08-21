@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-91 items — **Open** 18 · **In flight** 10 · **Closed** 63
+91 items — **Open** 17 · **In flight** 11 · **Closed** 63
 
-### Open (18)
+### Open (17)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -85,7 +85,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-014`](#b-014--bm25_search-aceita-um-termo-por-chamada-consulta-de-usuário-tem-vários----) | `bm25_search` aceita um termo por chamada; consulta de usuário tem vários | `raw` | — |
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
 | [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off----) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `triaged` | — |
-| [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `triaged` | — |
 | [`B-042`](#b-042--o-build-do-hnsw-é-36-mais-lento-que-o-do-pgvector-usando-8-mais-threads-e-o-grafo-sai-pior----) | O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior | `triaged` | — |
 | [`B-043`](#b-043--o-qps-lexical-satura-em-20-clientes-numa-máquina-de-16-vcpu-e-não-sobe-mais----) | O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais | `triaged` | — |
 | [`B-046`](#b-046--paridade-de-qps-com-o-pgvector-a-recall-casado-hoje-o-déficit-medido-é-163----) | Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3% | `triaged` | — |
@@ -93,10 +92,11 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 
-### In flight (10)
+### In flight (11)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
+| [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `planned` | — |
 | [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta----) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `planned` | — |
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `planned` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `planned` | — |
@@ -1492,7 +1492,15 @@ suggested_mode: review
 source: human
 evidence: medido em 2026-08-12 na saída de `cargo pgrx test pg18` (suíte completa, 446 testes). O build emite **1.460 avisos**, e o lint dominante é `unsafe_op_in_unsafe_fn` (E0133) com **2.872 ocorrências**: 1.874 chamadas a função `unsafe`, 932 desreferências de ponteiro cru, 54 usos de `static` mutável e 4 acessos a campo de `union`. A concentração é o que assusta — `src/am/columnar_agg.rs` (1.236), `src/am/page/mod.rs` (354), `src/am/columnar.rs` (286), `src/am/customscan.rs` (140), `src/am/build_stream.rs` (140), `src/am/page/ivf.rs` (138). Para contraste medido na mesma saída: código morto (`never used/read/constructed`) aparece **10** vezes. O eixo de risco deste repositório não é código morto.
 why_now: o `CLAUDE.md` do projeto declara que `unsafe`/FFI/pgrx é "a classe de defeito mais cara já encontrada em review — panic atravessando C, `TopMemoryContext`, MVCC do SPI", e manda abrir o acervo de pgrx antes de tocar em qualquer bloco `unsafe`. O que o lint diz é exatamente sobre enxergar esses blocos: dentro de uma `unsafe fn`, sem `unsafe {}` explícito, **o corpo inteiro é implicitamente inseguro** — some a capacidade de apontar QUAIS linhas são as perigosas. Num banco onde um panic atravessando a fronteira C derruba o backend do usuário, essa visibilidade é a diferença entre revisar 12 linhas marcadas e reler 1.236. O sinal já é emitido pelo compilador a cada build e ninguém o consome; ele não foi descoberto por ferramenta nova, foi descoberto por alguém ter lido a saída.
-status: triaged
+status: planned
+resultado: 2026-08-21 — **1.444 → 0**, e o lint virou erro no crate (`#![deny(unsafe_op_in_unsafe_fn)]`).
+  Primeiro achado: o número registrado era o DOBRO do real — 1.444, não 2.872, e os seis arquivos citados
+  batem em precisamente metade, porque `cargo pgrx test` compila o crate duas vezes. Segundo: o `cargo fix`
+  do rustc envolve o CORPO da função, o que satisfaz o lint e preserva o status quo exatamente — foi
+  aplicado, medido e revertido; a marcação entregue é por operação. Terceiro: a densidade (2,3% a 28,8%)
+  DERRUBOU a hipótese de adiar os dois arquivos densos — mesmo no pior a revisão estreita 3,5×. Os dois que
+  o DoD mandava tratar primeiro foram tratados (795 de 1.444). 488 testes passando, 0 falhando.
+  `wiki/decisions/0065-b032-unsafe-op-marcado-por-operacao.md`.
 dod:
   - decidido em ADR se o lint vira erro (`#![deny(unsafe_op_in_unsafe_fn)]`) de uma vez, por módulo, ou com prazo — e o ADR registra o custo escolhido
   - `src/am/columnar_agg.rs` e `src/am/page/mod.rs`, que somam 1.590 das 2.872, tratados primeiro ou explicitamente adiados com razão escrita

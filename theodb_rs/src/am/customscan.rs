@@ -155,19 +155,22 @@ pub(crate) unsafe fn materialize_bitmap(
     let mut lossy: HashSet<u32> = HashSet::new();
 
     // `0` = InvalidDsaPointer ⇒ private iterator (see doc note 1).
-    let mut iter: pg_sys::TBMIterator = pg_sys::tbm_begin_iterate(tbm, std::ptr::null_mut(), 0);
+    let mut iter: pg_sys::TBMIterator =
+        unsafe { pg_sys::tbm_begin_iterate(tbm, std::ptr::null_mut(), 0) };
     let mut res = pg_sys::TBMIterateResult::default();
     let mut offsets = [0u16; MAX_TUPLES_PER_PAGE];
 
-    while pg_sys::tbm_iterate(&mut iter, &mut res) {
+    while unsafe { pg_sys::tbm_iterate(&mut iter, &mut res) } {
         if res.lossy {
             lossy.insert(res.blockno); // offsets gone; admit-then-recheck by block
         } else {
-            let reported = pg_sys::tbm_extract_page_tuple(
-                &mut res,
-                offsets.as_mut_ptr(),
-                MAX_TUPLES_PER_PAGE as u32,
-            ) as usize;
+            let reported = unsafe {
+                pg_sys::tbm_extract_page_tuple(
+                    &mut res,
+                    offsets.as_mut_ptr(),
+                    MAX_TUPLES_PER_PAGE as u32,
+                )
+            } as usize;
             // Clamp: `reported` is the page total, which may exceed the buffer (doc note 4).
             let n = reported.min(MAX_TUPLES_PER_PAGE);
             for &off in &offsets[..n] {
@@ -176,7 +179,7 @@ pub(crate) unsafe fn materialize_bitmap(
         }
     }
 
-    pg_sys::tbm_end_iterate(&mut iter); // exactly once, after the drain (double call trips an Assert)
+    unsafe { pg_sys::tbm_end_iterate(&mut iter) }; // exactly once, after the drain (double call trips an Assert)
     (exact, lossy)
 }
 
@@ -293,19 +296,19 @@ unsafe extern "C-unwind" fn pathlist_hook(
     rti: pg_sys::Index,
     rte: *mut pg_sys::RangeTblEntry,
 ) {
-    if let Some(prev) = PREV_HOOK {
-        prev(root, rel, rti, rte);
+    if let Some(prev) = unsafe { PREV_HOOK } {
+        unsafe { prev(root, rel, rti, rte) };
     }
     if !crate::am::guc::vecfilter_enabled() {
         return;
     }
-    let relref = &mut *rel;
+    let relref = unsafe { &mut *rel };
     if relref.reloptkind != pg_sys::RelOptKind::RELOPT_BASEREL {
         return;
     }
     // Find the vector-ordered path (the only base path with pathkeys — our index's distance ORDER BY) + a
     // BitmapHeapPath (the scalar filter). Both must exist for this to be a filtered vector query worth intercepting.
-    let paths = PgList::<pg_sys::Path>::from_pg(relref.pathlist);
+    let paths = unsafe { PgList::<pg_sys::Path>::from_pg(relref.pathlist) };
     let mut vector_path: *mut pg_sys::Path = std::ptr::null_mut();
     let mut bitmap_path: *mut pg_sys::Path = std::ptr::null_mut();
     for i in 0..paths.len() {
@@ -316,15 +319,15 @@ unsafe extern "C-unwind" fn pathlist_hook(
             // hardening): our CustomPath declares `param_info = NULL`, so wrapping a parameterized child (e.g. a
             // LATERAL `cat = outer.col` bitmap) would break the planner's param contract — such queries fall back
             // to the native plans (correct, just not our fast path; honest boundary).
-            if !(*p).pathkeys.is_null()
-                && (*p).pathtype == pg_sys::NodeTag::T_IndexScan
-                && (*p).param_info.is_null()
+            if !unsafe { (*p).pathkeys.is_null() }
+                && unsafe { (*p).pathtype } == pg_sys::NodeTag::T_IndexScan
+                && unsafe { (*p).param_info.is_null() }
                 && vector_path.is_null()
             {
                 vector_path = p;
             }
-            if (*p).pathtype == pg_sys::NodeTag::T_BitmapHeapScan
-                && (*p).param_info.is_null()
+            if unsafe { (*p).pathtype } == pg_sys::NodeTag::T_BitmapHeapScan
+                && unsafe { (*p).param_info.is_null() }
                 && bitmap_path.is_null()
             {
                 bitmap_path = p;
@@ -343,17 +346,17 @@ unsafe extern "C-unwind" fn pathlist_hook(
         // Explicit user override (theodb.vecfilter_force): price below the cheapest base path so the planner picks
         // the node deterministically — for a selective filter where the node wins on RECALL but the probe-blind
         // native post-filter is under-priced (R4). Same rationale as an `enable_*` knob.
-        let mut min_cost = (*vector_path).total_cost;
+        let mut min_cost = unsafe { (*vector_path).total_cost };
         for i in 0..paths.len() {
             if let Some(p) = paths.get_ptr(i) {
-                if (*p).total_cost < min_cost {
-                    min_cost = (*p).total_cost;
+                if unsafe { (*p).total_cost } < min_cost {
+                    min_cost = unsafe { (*p).total_cost };
                 }
             }
         }
         (0.0, min_cost * 0.1)
     } else {
-        match vecfilter_honest_cost(rel, vector_path, bitmap_path) {
+        match unsafe { vecfilter_honest_cost(rel, vector_path, bitmap_path) } {
             Some(c) => c,
             None => return, // fail-safe: degenerate meta / null bitmapqual → skip the node, native plan is used
         }
@@ -361,14 +364,15 @@ unsafe extern "C-unwind" fn pathlist_hook(
     // Hand-roll `create_customscan_path` — a 2-child CustomPath. Preserve the vector path's pathkeys so the node
     // reports distance-ordered output (no redundant Sort above it) and the planner credits us against a
     // Sort-paying competitor.
-    let mut cpath = PgBox::<pg_sys::CustomPath>::alloc_node(pg_sys::NodeTag::T_CustomPath);
+    let mut cpath =
+        unsafe { PgBox::<pg_sys::CustomPath>::alloc_node(pg_sys::NodeTag::T_CustomPath) };
     let path = &mut cpath.path;
     path.pathtype = pg_sys::NodeTag::T_CustomScan;
     path.parent = rel;
     path.pathtarget = relref.reltarget;
     path.param_info = std::ptr::null_mut();
-    path.pathkeys = (*vector_path).pathkeys;
-    path.rows = (*vector_path).rows;
+    path.pathkeys = unsafe { (*vector_path).pathkeys };
+    path.rows = unsafe { (*vector_path).rows };
     path.startup_cost = startup_cost;
     path.total_cost = total_cost;
     cpath.flags = 0;
@@ -379,7 +383,7 @@ unsafe extern "C-unwind" fn pathlist_hook(
     cpath.custom_paths = children.into_pg();
     cpath.custom_private = std::ptr::null_mut();
     cpath.methods = &PATH_METHODS.0;
-    pg_sys::add_path(rel, cpath.into_pg() as *mut pg_sys::Path);
+    unsafe { pg_sys::add_path(rel, cpath.into_pg() as *mut pg_sys::Path) };
 }
 
 /// M95 — the honest cost of the vecfilter node: `Some((startup, total))` or `None` when any input is unreadable
@@ -398,41 +402,43 @@ unsafe fn vecfilter_honest_cost(
     // fetch run cost — the fetch we never perform — so use `indextotalcost` + the bitmap-manipulation charge
     // instead; for `BitmapAndPath`/`BitmapOrPath` the node's own `.total_cost` is already the produce-only cost.
     let bpath = bitmap_path as *mut pg_sys::BitmapHeapPath;
-    let bitmapqual = (*bpath).bitmapqual;
+    let bitmapqual = unsafe { (*bpath).bitmapqual };
     if bitmapqual.is_null() {
         return None;
     }
-    let term_b = if (*bitmapqual).type_ == pg_sys::NodeTag::T_IndexPath {
+    let term_b = if unsafe { (*bitmapqual).type_ } == pg_sys::NodeTag::T_IndexPath {
         let ip = bitmapqual as *mut pg_sys::IndexPath;
-        (*ip).indextotalcost + 0.1 * pg_sys::cpu_operator_cost * (*bitmapqual).rows
+        (unsafe { (*ip).indextotalcost })
+            + 0.1 * unsafe { pg_sys::cpu_operator_cost } * unsafe { (*bitmapqual).rows }
     } else {
-        (*bitmapqual).total_cost // BitmapAnd/BitmapOr — already produce-only
+        (unsafe { (*bitmapqual).total_cost }) // BitmapAnd/BitmapOr — already produce-only
     };
 
     // Selectivity `s` = matching-tuple fraction = bitmap rows / rel tuples (the planner's own estimates).
-    let rel_tuples = (*rel).tuples;
+    let rel_tuples = unsafe { (*rel).tuples };
     if rel_tuples <= 0.0 {
         return None; // never-ANALYZEd / empty rel — fall back to the native plan
     }
-    let s = ((*bitmap_path).rows / rel_tuples).clamp(1e-9, 1.0);
+    let s = (unsafe { (*bitmap_path).rows } / rel_tuples).clamp(1e-9, 1.0);
 
     // Index geometry from the vector IndexPath: page count + tuple count + oid for a fail-safe meta read.
     let ipath = vector_path as *mut pg_sys::IndexPath;
-    let ii = (*ipath).indexinfo;
+    let ii = unsafe { (*ipath).indexinfo };
     if ii.is_null() {
         return None;
     }
-    let index_pages = (*ii).pages as f64;
-    let idx_tuples = if (*ii).tuples > 0.0 { (*ii).tuples } else { rel_tuples };
+    let index_pages = unsafe { (*ii).pages } as f64;
+    let idx_tuples =
+        if unsafe { (*ii).tuples } > 0.0 { unsafe { (*ii).tuples } } else { rel_tuples };
 
     // `lists` from the IVF meta — fail-safe like `cost::scan_visit_ratio` (any unreadable/torn meta → skip node).
-    let irel = pg_sys::index_open((*ii).indexoid, pg_sys::NoLock as pg_sys::LOCKMODE);
-    let lists = page::read_ivf_aq_meta_split(irel)
+    let irel = unsafe { pg_sys::index_open((*ii).indexoid, pg_sys::NoLock as pg_sys::LOCKMODE) };
+    let lists = unsafe { page::read_ivf_aq_meta_split(irel) }
         .map(|m| m.dir.len())
-        .or_else(|_| page::read_ivf_aq_meta(irel).map(|m| m.dir.len()))
-        .or_else(|_| page::read_ivf_meta(irel).map(|m| m.dir.len()))
+        .or_else(|_| unsafe { page::read_ivf_aq_meta(irel).map(|m| m.dir.len()) })
+        .or_else(|_| unsafe { page::read_ivf_meta(irel).map(|m| m.dir.len()) })
         .unwrap_or(0);
-    pg_sys::index_close(irel, pg_sys::NoLock as pg_sys::LOCKMODE);
+    unsafe { pg_sys::index_close(irel, pg_sys::NoLock as pg_sys::LOCKMODE) };
     if lists == 0 {
         return None; // not an IVF index we can cost honestly (e.g. HNSW) → let the native plan win
     }
@@ -449,9 +455,11 @@ unsafe fn vecfilter_honest_cost(
     // Page/CPU cost globals (same source `cost_index` uses; per-tablespace random/seq).
     let mut spc_random: f64 = 0.0;
     let mut spc_seq: f64 = 0.0;
-    pg_sys::get_tablespace_page_costs((*ii).reltablespace, &mut spc_random, &mut spc_seq);
+    unsafe {
+        pg_sys::get_tablespace_page_costs((*ii).reltablespace, &mut spc_random, &mut spc_seq)
+    };
     if spc_random <= 0.0 {
-        spc_random = pg_sys::random_page_cost;
+        spc_random = unsafe { pg_sys::random_page_cost };
     }
     let term_v = cost::vecfilter_scan_cost(
         eff,
@@ -460,7 +468,7 @@ unsafe fn vecfilter_honest_cost(
         rerank_pool,
         lists,
         spc_random,
-        pg_sys::cpu_operator_cost,
+        unsafe { pg_sys::cpu_operator_cost },
     );
 
     // The ANN scan is not incremental: it gathers Stage-0/1 candidates before emitting the first ordered tuple, so
@@ -483,13 +491,14 @@ unsafe extern "C-unwind" fn plan_custom_path(
     _clauses: *mut pg_sys::List,
     custom_plans: *mut pg_sys::List,
 ) -> *mut pg_sys::Plan {
-    let mut cscan = PgBox::<pg_sys::CustomScan>::alloc_node(pg_sys::NodeTag::T_CustomScan);
+    let mut cscan =
+        unsafe { PgBox::<pg_sys::CustomScan>::alloc_node(pg_sys::NodeTag::T_CustomScan) };
     let plan = &mut cscan.scan.plan;
     plan.targetlist = tlist;
     plan.qual = std::ptr::null_mut(); // recheck lives on the vector child's Filter, not on the node
     plan.lefttree = std::ptr::null_mut();
     plan.righttree = std::ptr::null_mut();
-    cscan.scan.scanrelid = (*rel).relid;
+    cscan.scan.scanrelid = unsafe { (*rel).relid };
     cscan.flags = 0;
     cscan.custom_plans = custom_plans; // [vector_plan, bitmap_plan]
     cscan.custom_exprs = std::ptr::null_mut();
@@ -506,8 +515,9 @@ unsafe extern "C-unwind" fn plan_custom_path(
 unsafe extern "C-unwind" fn create_custom_scan_state(
     _cscan: *mut pg_sys::CustomScan,
 ) -> *mut pg_sys::Node {
-    let ptr = pg_sys::palloc0(std::mem::size_of::<VecFilterState>()) as *mut VecFilterState;
-    let st = &mut *ptr;
+    let ptr =
+        unsafe { pg_sys::palloc0(std::mem::size_of::<VecFilterState>()) } as *mut VecFilterState;
+    let st = unsafe { &mut *ptr };
     st.css.ss.ps.type_ = pg_sys::NodeTag::T_CustomScanState;
     st.css.methods = &EXEC_METHODS.0;
     ptr as *mut pg_sys::Node
@@ -524,9 +534,9 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     // M94: no concurrency guard needed anymore — each node stores its membership in the per-node REGISTRY and
     // installs it only during its own pull windows (swap-discipline in exec/rescan), so multiple vecfilter nodes in
     // one plan (UNION / self-join / partitioned Append) each see only their own set.
-    let st = &mut *(node as *mut VecFilterState);
+    let st = unsafe { &mut *(node as *mut VecFilterState) };
     let cscan = st.css.ss.ps.plan as *mut pg_sys::CustomScan;
-    let planned = PgList::<pg_sys::Plan>::from_pg((*cscan).custom_plans);
+    let planned = unsafe { PgList::<pg_sys::Plan>::from_pg((*cscan).custom_plans) };
     let vplan = match planned.get_ptr(0) {
         Some(p) => p,
         None => pg_sys::error!("theodb vecfilter: missing vector child plan"),
@@ -539,15 +549,15 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     // BitmapAnd) — the node MultiExecs THAT, not the heap scan. (`create_plan(bitmapqual)` alone would make a plain
     // IndexScan, which MultiExecProcNode rejects as "unrecognized node type: T_IndexScanState".) Tag-check first
     // (council M2 — defense in depth before dereferencing `.lefttree`).
-    if (*bplan).type_ != pg_sys::NodeTag::T_BitmapHeapScan {
+    if unsafe { (*bplan).type_ } != pg_sys::NodeTag::T_BitmapHeapScan {
         pg_sys::error!("theodb vecfilter: bitmap child is not a BitmapHeapScan");
     }
-    let bitmap_subplan = (*bplan).lefttree;
+    let bitmap_subplan = unsafe { (*bplan).lefttree };
     if bitmap_subplan.is_null() {
         pg_sys::error!("theodb vecfilter: BitmapHeapScan has no bitmap sub-plan");
     }
-    st.vector_child = pg_sys::ExecInitNode(vplan, estate, eflags);
-    st.bitmap_child = pg_sys::ExecInitNode(bitmap_subplan, estate, eflags);
+    st.vector_child = unsafe { pg_sys::ExecInitNode(vplan, estate, eflags) };
+    st.bitmap_child = unsafe { pg_sys::ExecInitNode(bitmap_subplan, estate, eflags) };
     // Show the vector child under the node in EXPLAIN.
     let mut ps_list = PgList::<pg_sys::PlanState>::new();
     ps_list.push(st.vector_child);
@@ -559,16 +569,18 @@ unsafe extern "C-unwind" fn begin_custom_scan(
         return;
     }
     // MultiExec the bitmap → TIDBitmap (nodeBitmapHeapscan.c:110 pattern; tag-check, not the absent `IsA`).
-    let res = pg_sys::MultiExecProcNode(st.bitmap_child);
-    if res.is_null() || (*(res as *mut pg_sys::Node)).type_ != pg_sys::NodeTag::T_TIDBitmap {
+    let res = unsafe { pg_sys::MultiExecProcNode(st.bitmap_child) };
+    if res.is_null()
+        || unsafe { (*(res as *mut pg_sys::Node)).type_ } != pg_sys::NodeTag::T_TIDBitmap
+    {
         pg_sys::error!("theodb vecfilter: bitmap subplan did not return a TIDBitmap");
     }
-    let (exact, lossy) = materialize_bitmap(res as *mut pg_sys::TIDBitmap);
+    let (exact, lossy) = unsafe { materialize_bitmap(res as *mut pg_sys::TIDBitmap) };
     // Free the bitmap NOW (review MEDIUM-2): `MultiExecBitmapIndexScan` tbm_create's a FRESH bitmap per call and
     // `ExecEndBitmapIndexScan` does NOT free it (only core's BitmapHeapScan consumer does) — without this, every
     // begin/rescan leaks a work_mem-sized bitmap until the query context resets. We copied the TIDs out into owned
     // Rust sets above (copy-out-before-release), so the free is safe.
-    pg_sys::tbm_free(res as *mut pg_sys::TIDBitmap);
+    unsafe { pg_sys::tbm_free(res as *mut pg_sys::TIDBitmap) };
     registry_insert(node as usize, Membership { exact, lossy });
     st.membership_active = true;
 }
@@ -581,7 +593,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
 unsafe extern "C-unwind" fn exec_custom_scan(
     node: *mut pg_sys::CustomScanState,
 ) -> *mut pg_sys::TupleTableSlot {
-    let st = &mut *(node as *mut VecFilterState);
+    let st = unsafe { &mut *(node as *mut VecFilterState) };
     if st.vector_child.is_null() {
         return std::ptr::null_mut();
     }
@@ -592,23 +604,23 @@ unsafe extern "C-unwind" fn exec_custom_scan(
         pg_sys::error!("theodb vecfilter: membership missing for this scan");
     }
     let _guard = ActiveGuard::install(mine);
-    pg_sys::ExecProcNode(st.vector_child)
+    unsafe { pg_sys::ExecProcNode(st.vector_child) }
 }
 
 /// Exec teardown: drop this node's registry entry (frees the sets) and end both children. The TIDBitmap was already
 /// freed at materialization time (begin/rescan) — see the MEDIUM-2 note there.
 #[pg_guard]
 unsafe extern "C-unwind" fn end_custom_scan(node: *mut pg_sys::CustomScanState) {
-    let st = &mut *(node as *mut VecFilterState);
+    let st = unsafe { &mut *(node as *mut VecFilterState) };
     if st.membership_active {
         registry_remove(node as usize);
         st.membership_active = false;
     }
     if !st.vector_child.is_null() {
-        pg_sys::ExecEndNode(st.vector_child);
+        unsafe { pg_sys::ExecEndNode(st.vector_child) };
     }
     if !st.bitmap_child.is_null() {
-        pg_sys::ExecEndNode(st.bitmap_child);
+        unsafe { pg_sys::ExecEndNode(st.bitmap_child) };
     }
 }
 
@@ -617,18 +629,20 @@ unsafe extern "C-unwind" fn end_custom_scan(node: *mut pg_sys::CustomScanState) 
 /// which must see THIS node's membership).
 #[pg_guard]
 unsafe extern "C-unwind" fn rescan_custom_scan(node: *mut pg_sys::CustomScanState) {
-    let st = &mut *(node as *mut VecFilterState);
+    let st = unsafe { &mut *(node as *mut VecFilterState) };
     if !st.bitmap_child.is_null() {
         // Replace-then-set (mirror begin): re-derive from the rescanned bitmap child; fail loud on a non-TIDBitmap
         // (a rescanned bitmap child MUST produce one — Rule 8).
-        pg_sys::ExecReScan(st.bitmap_child);
-        let res = pg_sys::MultiExecProcNode(st.bitmap_child);
-        if res.is_null() || (*(res as *mut pg_sys::Node)).type_ != pg_sys::NodeTag::T_TIDBitmap {
+        unsafe { pg_sys::ExecReScan(st.bitmap_child) };
+        let res = unsafe { pg_sys::MultiExecProcNode(st.bitmap_child) };
+        if res.is_null()
+            || unsafe { (*(res as *mut pg_sys::Node)).type_ } != pg_sys::NodeTag::T_TIDBitmap
+        {
             pg_sys::error!("theodb vecfilter: rescanned bitmap subplan did not return a TIDBitmap");
         }
-        let (exact, lossy) = materialize_bitmap(res as *mut pg_sys::TIDBitmap);
+        let (exact, lossy) = unsafe { materialize_bitmap(res as *mut pg_sys::TIDBitmap) };
         // Free the fresh bitmap now (review MEDIUM-2) — nothing downstream frees it; the sets were copied out.
-        pg_sys::tbm_free(res as *mut pg_sys::TIDBitmap);
+        unsafe { pg_sys::tbm_free(res as *mut pg_sys::TIDBitmap) };
         registry_insert(node as usize, Membership { exact, lossy });
         st.membership_active = true;
     }
@@ -639,7 +653,7 @@ unsafe extern "C-unwind" fn rescan_custom_scan(node: *mut pg_sys::CustomScanStat
             pg_sys::error!("theodb vecfilter: membership missing for this rescan");
         }
         let _guard = ActiveGuard::install(mine);
-        pg_sys::ExecReScan(st.vector_child);
+        unsafe { pg_sys::ExecReScan(st.vector_child) };
     }
 }
 

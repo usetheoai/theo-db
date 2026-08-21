@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **As 1.444 operações inseguras sem bloco explícito passaram a ser 0, e o lint virou erro.** Dentro
+  de uma `unsafe fn` sem `unsafe {}`, o corpo inteiro é implicitamente inseguro e some a capacidade de
+  apontar quais linhas são as perigosas — num banco onde um panic atravessando a fronteira C derruba o
+  backend, essa é a diferença entre revisar o que está marcado e reler o arquivo. O crate passa a
+  declarar `#![deny(unsafe_op_in_unsafe_fn)]`, então o número não pode crescer em silêncio: o build
+  para. **A marcação é por operação, nunca por corpo** — o `cargo fix` do próprio rustc envolve o
+  corpo, o que satisfaz o lint e preserva o status quo exatamente (uma deref acrescentada amanhã
+  continua sem avisar); ele foi aplicado, medido e revertido. Sem mudança de comportamento: 488 testes
+  passando. `wiki/decisions/0065-*`. (#B-032)
+- **O número registrado era o dobro do real.** Medido: 1.444, não 2.872 — e cada um dos seis arquivos
+  citados bate em precisamente metade, porque `cargo pgrx test` compila o crate duas vezes e emite
+  cada aviso duas vezes. (#B-032)
+
 ## [0.163.0] - 2026-08-21
 
 ### Added

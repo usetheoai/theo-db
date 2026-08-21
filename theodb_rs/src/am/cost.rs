@@ -110,15 +110,17 @@ pub(crate) fn toast_startup_correction(
 /// estimativa descrever o `m` declarado em vez do gravado — uma aproximação melhor que o 16 fixo de antes, e
 /// que não pode abortar plano nenhum.
 pub(crate) unsafe fn scan_visit_ratio(rel: pg_sys::Relation, tuples: f64) -> f64 {
-    let magic = page::peek_magic(rel).ok();
+    let magic = unsafe { page::peek_magic(rel).ok() };
     let lists = if magic == Some(page::IVF_STRUCT_MAGIC) {
         // v3 f32 OR v4 AQ (M77) — read_ivf_meta rejects v4, so fall back to the v4 meta for its list count. Still
         // fail-safe: either Err → 0 → ratio 1.0 (never aborts planning).
-        page::read_ivf_meta(rel)
+        unsafe { page::read_ivf_meta(rel) }
             .map(|meta| meta.dir.len())
-            .or_else(|_| page::read_ivf_aq_meta(rel).map(|meta| meta.dir.len()))
-            .or_else(|_| page::read_ivf_aq_meta_split(rel).map(|meta| meta.dir.len())) // M83 v5
-            .or_else(|_| page::read_ivf_aq_meta_split_sq8(rel).map(|meta| meta.dir.len())) // M85 v6 storage-separated
+            .or_else(|_| unsafe { page::read_ivf_aq_meta(rel).map(|meta| meta.dir.len()) })
+            .or_else(|_| unsafe { page::read_ivf_aq_meta_split(rel).map(|meta| meta.dir.len()) }) // M83 v5
+            .or_else(|_| unsafe {
+                page::read_ivf_aq_meta_split_sq8(rel).map(|meta| meta.dir.len())
+            }) // M85 v6 storage-separated
             .unwrap_or(0)
     } else {
         0

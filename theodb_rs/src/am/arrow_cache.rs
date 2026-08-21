@@ -78,13 +78,14 @@ unsafe fn cache_state(rel_oid: pg_sys::Oid) -> Result<Option<(i64, Vec<String>)>
 /// rebuild runs the SPI seqscan under the reader's active snapshot, so it materializes exactly the reader's view.
 unsafe fn get_or_build(rel_oid: pg_sys::Oid) -> Result<RecordBatch, String> {
     let oid = rel_oid.to_u32();
-    let (cur_gen, cols) = cache_state(rel_oid)?.ok_or("arrow_cache: table not columnarized")?;
+    let (cur_gen, cols) =
+        unsafe { cache_state(rel_oid)?.ok_or("arrow_cache: table not columnarized")? };
     if let Some((batch, built_gen)) = CACHE.with(|c| c.borrow().get(&oid).cloned()) {
         if built_gen == cur_gen {
             return Ok(batch); // no write since the build → the committed set is unchanged → reuse
         }
     }
-    let batch = build_cache(rel_oid, &cols)?;
+    let batch = unsafe { build_cache(rel_oid, &cols)? };
     // M104 — bound the per-backend cache: evict entries until under the entry cap before inserting a new table, so
     // a backend that columnarizes many tables cannot grow the cache without limit (the audit's unbounded-cache
     // finding). `theodb.arrow_cache_max_entries` (default 16). Eviction is arbitrary (HashMap order) — a coarse
@@ -132,26 +133,32 @@ fn encode_cell(
 /// Build the Arrow cache batch for `rel_oid`'s `cols` from the heap (SPI seqscan over committed rows).
 unsafe fn build_cache(rel_oid: pg_sys::Oid, cols: &[String]) -> Result<RecordBatch, String> {
     // Resolve (name, typid) per requested column from the live tuple descriptor.
-    let rel = pg_sys::relation_open(rel_oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
-    let tupdesc = (*rel).rd_att;
-    let natts = (*tupdesc).natts as usize;
+    let rel =
+        unsafe { pg_sys::relation_open(rel_oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE) };
+    let tupdesc = unsafe { (*rel).rd_att };
+    let natts = unsafe { (*tupdesc).natts } as usize;
     let mut meta: Vec<(String, u32)> = Vec::new();
     for name in cols {
         let idx = (0..natts)
             .find(|&i| {
-                std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
-                    .to_string_lossy()
+                unsafe {
+                    std::ffi::CStr::from_ptr(
+                        (*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr(),
+                    )
+                }
+                .to_string_lossy()
                     == name.as_str()
             })
             .ok_or_else(|| format!("arrow_cache: column '{name}' not found"))?;
-        let typid = (*super::tupdesc_attr(tupdesc, idx)).atttypid.to_u32();
+        let typid = unsafe { (*super::tupdesc_attr(tupdesc, idx)).atttypid.to_u32() };
         meta.push((name.clone(), typid));
     }
-    let relname =
-        std::ffi::CStr::from_ptr(pg_sys::get_rel_name(rel_oid)).to_string_lossy().into_owned();
-    let nsp = pg_sys::get_namespace_name(pg_sys::get_rel_namespace(rel_oid));
-    let nspname = std::ffi::CStr::from_ptr(nsp).to_string_lossy().into_owned();
-    pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+    let relname = unsafe {
+        std::ffi::CStr::from_ptr(pg_sys::get_rel_name(rel_oid)).to_string_lossy().into_owned()
+    };
+    let nsp = unsafe { pg_sys::get_namespace_name(pg_sys::get_rel_namespace(rel_oid)) };
+    let nspname = unsafe { std::ffi::CStr::from_ptr(nsp).to_string_lossy().into_owned() };
+    unsafe { pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE) };
 
     let collist = cols.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
     let sql = format!("SELECT {collist} FROM \"{nspname}\".\"{relname}\"");
@@ -195,8 +202,8 @@ pub(super) unsafe fn run_cache_aggs(
     rel_oid: pg_sys::Oid,
     aggs: &[AggSpec],
 ) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
-    let batch = get_or_build(rel_oid)?;
-    run_aggs_on_batch(batch, aggs, None)
+    let batch = unsafe { get_or_build(rel_oid)? };
+    unsafe { run_aggs_on_batch(batch, aggs, None) }
 }
 
 /// Pragma: register a heap table's columns for the Arrow cache — records `columnar.cache_state`, installs the

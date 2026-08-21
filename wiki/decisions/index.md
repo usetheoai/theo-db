@@ -64,3 +64,4 @@
 - [ADR-0062 — O portão passa a olhar antes do merge, e paga por si trocando de gatilho](0062-portao-antes-do-merge.md) — a premissa de custo caiu (runner grátis em repo público), e a medição mostra 30 corridas pesadas para 13 integrações
 - [ADR-0063 — halfvec/sparsevec fora de escopo, e a versão do shim que dizia tê-los](0063-halfvec-fora-de-escopo-e-a-versao-que-mentia.md) — o número de versão de um shim é contrato de capacidade, não número de build
 - [ADR-0064 — `maintenance_work_mem` não é um contrato de memória neste produto](0064-maintenance-work-mem-nao-e-contrato.md) — um componente o ignora, outro o excede em 7×; a regra passa a ser projetar e recusar nomeando o número
+- [ADR-0065 — `unsafe_op_in_unsafe_fn` vira erro no crate, e a marcação é por operação](0065-b032-unsafe-op-marcado-por-operacao.md) — 1.444 e não 2.872 (o número antigo contava duas vezes); o `cargo fix` do rustc envolve o corpo e é teatro

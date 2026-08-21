@@ -121,11 +121,11 @@ unsafe fn interrupt_is_pending() -> bool {
     // ociosa, e um scan em curso não é uma sessão ociosa.
     //
     // Todos são `sig_atomic_t` (i32), não `bool` — comparar com 0 é o que o C faz.
-    pg_sys::InterruptPending != 0
-        && (pg_sys::QueryCancelPending != 0
-            || pg_sys::ProcDiePending != 0
-            || pg_sys::ClientConnectionLost != 0
-            || pg_sys::TransactionTimeoutPending != 0)
+    (unsafe { pg_sys::InterruptPending }) != 0
+        && (unsafe { pg_sys::QueryCancelPending } != 0
+            || unsafe { pg_sys::ProcDiePending } != 0
+            || unsafe { pg_sys::ClientConnectionLost } != 0
+            || unsafe { pg_sys::TransactionTimeoutPending } != 0)
 }
 
 /// Map the decoded columnar columns (name, atttypid, per-row stored bytes) to an Arrow schema + arrays. The stored
@@ -454,7 +454,7 @@ unsafe fn decode_to_batch(
 ) -> Result<RecordBatch, String> {
     let mut proj: Vec<usize> = Vec::new();
     for name in sum_cols {
-        let idx = super::columnar::column_index(rel, name)
+        let idx = unsafe { super::columnar::column_index(rel, name) }
             .ok_or_else(|| format!("df_executor: column '{name}' not found"))?;
         if !proj.contains(&idx) {
             proj.push(idx);
@@ -485,7 +485,7 @@ unsafe fn decode_to_batch(
     // M160 — decode_columns_v2 returns fixed-width non-null columns as `FixedRaw` (contiguous LE bytes, no per-cell
     // alloc); build_arrow_from_decoded turns those into Arrow via one typed Vec<T> per column. Cell columns are
     // byte-identical to the legacy path. This is the hot pushdown path only (vindex/arrow_cache keep decode_columns).
-    let cols = super::columnar::decode_columns_v2(rel, Some(&proj), predicates, skip)?;
+    let cols = unsafe { super::columnar::decode_columns_v2(rel, Some(&proj), predicates, skip)? };
     let (schema, arrays) = build_arrow_from_decoded(&cols)?;
     RecordBatch::try_new(Arc::new(schema), arrays)
         .map_err(|e| format!("df_executor: arrow batch: {e}"))
@@ -502,24 +502,25 @@ unsafe fn build_filter_expr(
 ) -> Option<Expr> {
     use super::columnar_codec::MinMaxKind;
     use super::zonemap::{TextOp, ZoneOp};
-    let tupdesc = (*rel).rd_att;
-    let natts = (*tupdesc).natts as usize;
+    let tupdesc = unsafe { (*rel).rd_att };
+    let natts = unsafe { (*tupdesc).natts } as usize;
     let mut acc: Option<Expr> = None;
     for p in predicates {
         if p.col >= natts {
             continue; // fail-safe (EC-2): unknown column → do not build a filter term on it
         }
-        let att = super::tupdesc_attr(tupdesc, p.col);
-        let name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned();
+        let att = unsafe { super::tupdesc_attr(tupdesc, p.col) };
+        let name =
+            unsafe { CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned() };
         let c = col(name.as_str());
         let b = p.const_bits;
         // Temporal columns share the I8/I4 min/max domain but need an Arrow-typed literal so the Filter matches the
         // Timestamp/Date column type built in `build_arrow` (a bare Int64 lit would type-mismatch). Intercept by OID
         // BEFORE the MinMaxKind dispatch. tz=None to match build_arrow (raw-int compare — D3).
-        let val = match (*att).atttypid.to_u32() {
+        let val = match unsafe { (*att).atttypid.to_u32() } {
             1114 | 1184 => lit(ScalarValue::TimestampMicrosecond(Some(b as i64), None)),
             1082 => lit(ScalarValue::Date32(Some(b as i64 as i32))),
-            _ => match super::columnar::minmax_kind_of((*att).atttypid.to_u32()) {
+            _ => match super::columnar::minmax_kind_of(unsafe { (*att).atttypid.to_u32() }) {
                 MinMaxKind::I2 => lit(b as i64 as i16),
                 MinMaxKind::I4 => lit(b as i64 as i32),
                 MinMaxKind::I8 => lit(b as i64),
@@ -549,8 +550,9 @@ unsafe fn build_filter_expr(
         if t.col >= natts {
             continue; // fail-safe: unknown column → do not build a filter term on it
         }
-        let att = super::tupdesc_attr(tupdesc, t.col);
-        let name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned();
+        let att = unsafe { super::tupdesc_attr(tupdesc, t.col) };
+        let name =
+            unsafe { CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned() };
         let c = col(name.as_str());
         let val = lit(ScalarValue::Utf8(Some(t.needle.clone())));
         let e = match t.op {
@@ -573,10 +575,11 @@ unsafe fn build_filter_expr(
         if ip.col >= natts || ip.consts.is_empty() {
             continue; // fail-safe: unknown column / empty list → do not build a filter term on it
         }
-        let att = super::tupdesc_attr(tupdesc, ip.col);
-        let name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned();
+        let att = unsafe { super::tupdesc_attr(tupdesc, ip.col) };
+        let name =
+            unsafe { CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned() };
         let c = col(name.as_str());
-        let kind = super::columnar::minmax_kind_of((*att).atttypid.to_u32());
+        let kind = super::columnar::minmax_kind_of(unsafe { (*att).atttypid.to_u32() });
         let lits: Vec<Expr> = ip
             .consts
             .iter()
@@ -610,28 +613,30 @@ pub(super) unsafe fn run_columnar_aggs(
 ) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
     let agg_cols: Vec<String> =
         aggs.iter().filter_map(|a| a.col_name().map(str::to_string)).collect();
-    let filter = build_filter_expr(rel, predicates, text_predicates, in_predicates);
+    let filter = unsafe { build_filter_expr(rel, predicates, text_predicates, in_predicates) };
     let mut exprs = Vec::with_capacity(aggs.len());
     for a in aggs {
         push_agg_exprs(a, &mut exprs);
     }
-    let batches = run_df_over_columnar(
-        rel,
-        &agg_cols,
-        predicates,
-        text_predicates,
-        in_predicates,
-        skip,
-        move |df| {
-            // Zone-map predicate as the FINAL authority over surviving rows (D3): filter BEFORE aggregating.
-            let df = match filter {
-                Some(f) => df.filter(f)?,
-                None => df,
-            };
-            df.aggregate(vec![], exprs)
-        },
-    )?;
-    aggs_from_batches(&batches, aggs)
+    let batches = unsafe {
+        run_df_over_columnar(
+            rel,
+            &agg_cols,
+            predicates,
+            text_predicates,
+            in_predicates,
+            skip,
+            move |df| {
+                // Zone-map predicate as the FINAL authority over surviving rows (D3): filter BEFORE aggregating.
+                let df = match filter {
+                    Some(f) => df.filter(f)?,
+                    None => df,
+                };
+                df.aggregate(vec![], exprs)
+            },
+        )?
+    };
+    unsafe { aggs_from_batches(&batches, aggs) }
 }
 
 /// M169 — run a DataFusion plan over the columnar relation, streaming one chunk-group at a time when possible.
@@ -695,10 +700,11 @@ where
     // os irmãos vivos é o defeito recorrente desta sessão; esta é a varredura da classe.
     super::columnar::reset_stream_cg_count();
     if super::columnar_agg::ENABLE_COLUMNAR_AGG_STREAM.get()
-        && let Some((part, varlena_bytes)) =
+        && let Some((part, varlena_bytes)) = unsafe {
             open_streaming_source(rel, proj_cols, predicates, text_predicates, in_predicates, skip)?
+        }
     {
-        match run_df_collect_streaming(part, build.clone()) {
+        match unsafe { run_df_collect_streaming(part, build.clone()) } {
             Ok(batches) => return Ok(batches),
             // `find_root()`, NÃO `match` na variante exata — a mesma disciplina do top-k (`:1346-1353`), e pela
             // mesma razão: o DataFusion embrulha `ResourcesExhausted` em `Context(_, Box(ResourcesExhausted))`
@@ -728,8 +734,10 @@ where
             Err(e) => return Err(format!("df_executor: datafusion: {e}")),
         }
     }
-    let batch = decode_to_batch(rel, proj_cols, predicates, text_predicates, in_predicates, skip)?;
-    run_df_collect(batch, build)
+    let batch = unsafe {
+        decode_to_batch(rel, proj_cols, predicates, text_predicates, in_predicates, skip)?
+    };
+    unsafe { run_df_collect(batch, build) }
 }
 
 /// Extract one `(Datum, is_null)` per agg from the single scalar-aggregate result batch.
@@ -763,15 +771,17 @@ pub(super) unsafe fn run_aggs_on_batch(
         push_agg_exprs(a, &mut exprs);
     }
 
-    let batches = run_df_collect(batch, move |df| {
-        // Zone-map predicate as the FINAL authority over surviving rows (D3): filter BEFORE aggregating.
-        let df = match filter {
-            Some(f) => df.filter(f)?,
-            None => df,
-        };
-        df.aggregate(vec![], exprs)
-    })?;
-    aggs_from_batches(&batches, aggs)
+    let batches = unsafe {
+        run_df_collect(batch, move |df| {
+            // Zone-map predicate as the FINAL authority over surviving rows (D3): filter BEFORE aggregating.
+            let df = match filter {
+                Some(f) => df.filter(f)?,
+                None => df,
+            };
+            df.aggregate(vec![], exprs)
+        })?
+    };
+    unsafe { aggs_from_batches(&batches, aggs) }
 }
 
 /// Marcador da falha de criação de arquivo de spill do DataFusion. Vem de
@@ -872,7 +882,7 @@ where
     // mitigated this by defaulting the GUC OFF; M167 flipped the default ON, so the mitigation is now the plan-time
     // decode-size guard in `try_swap_topk` (M167 ADR-4): a candidate whose estimated decode dwarfs `work_mem`
     // declines to the native plan instead of being admitted here.)
-    let work_mem_bytes = (pg_sys::work_mem.max(64) as usize) * 1024;
+    let work_mem_bytes = (unsafe { pg_sys::work_mem.max(64) } as usize) * 1024;
     let batch_bytes = batch.get_array_memory_size();
     // M167 § 6 left the peak of the decoded batch UNMEASURED: `VmRSS` is dominated by `shared_buffers` mapped into
     // every backend, so per-PID sampling never isolated it. The number was in-process the whole time — this is the
@@ -956,7 +966,7 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
             }
         }
     }
-    let filter = build_filter_expr(rel, predicates, text_predicates, in_predicates);
+    let filter = unsafe { build_filter_expr(rel, predicates, text_predicates, in_predicates) };
 
     // Grouping keys: bare columns FIRST, then the expression exprs (M157/M161). The output batch columns follow this
     // order: [bare_0..bare_{ncols-1}, expr_0..expr_{nexpr-1}, agg columns…].
@@ -998,21 +1008,23 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
     // whole URL column as one i32-offset Arrow array. What streaming does NOT reduce is the hash table's own
     // state, which is O(distinct groups): q32 (`GROUP BY WatchID, ClientIP`, near-unique key) times out for that
     // reason and this change does not move it. Claiming otherwise would be selling a fix that does not happen.
-    let batches = run_df_over_columnar(
-        rel,
-        &proj_cols,
-        predicates,
-        text_predicates,
-        in_predicates,
-        skip,
-        move |df| {
-            let df = match filter {
-                Some(f) => df.filter(f)?,
-                None => df,
-            };
-            df.aggregate(group_exprs, agg_exprs)
-        },
-    )?;
+    let batches = unsafe {
+        run_df_over_columnar(
+            rel,
+            &proj_cols,
+            predicates,
+            text_predicates,
+            in_predicates,
+            skip,
+            move |df| {
+                let df = match filter {
+                    Some(f) => df.filter(f)?,
+                    None => df,
+                };
+                df.aggregate(group_exprs, agg_exprs)
+            },
+        )?
+    };
 
     // DataFusion output columns: [group_0..group_{ngroup-1}, agg columns…]. Agg `idx` starts at batch column
     // `ngroup + agg_off[idx]` (a multi-column spec shifts the rest). Emit rows in `layout` (target) order.
@@ -1332,7 +1344,7 @@ unsafe fn open_streaming_source(
         }
     };
     for name in proj_names {
-        let idx = super::columnar::column_index(rel, name)
+        let idx = unsafe { super::columnar::column_index(rel, name) }
             .ok_or_else(|| format!("df_executor: column '{name}' not found"))?;
         want(idx, &mut proj);
     }
@@ -1354,15 +1366,15 @@ unsafe fn open_streaming_source(
     // (`BEGIN; INSERT; SELECT … ORDER BY … LIMIT` over a table that already has stripes) silently lost the new
     // rows. Declining here hands the query to the eager path, which handles it correctly. Found in review — the
     // ClickBench oracles cannot reach this shape, because they bulk-load and then only read.
-    if super::columnar::has_unflushed_pending(rel) {
+    if unsafe { super::columnar::has_unflushed_pending(rel) } {
         return Ok(None);
     }
-    let plan = super::columnar::plan_columnar_scan(rel, Some(&proj))?;
+    let plan = unsafe { super::columnar::plan_columnar_scan(rel, Some(&proj))? };
     // Read the byte total BEFORE the plan is moved into the stream — afterwards it is unreachable.
     let varlena_bytes = plan.varlena_raw_len_max_per_column();
     let mut inner = super::columnar::ColumnarChunkStream::new(rel, plan);
     // Probe: the schema has to be exact before DataFusion executes, and only decoded data reveals it.
-    let first = inner.next(predicates, skip)?;
+    let first = unsafe { inner.next(predicates, skip)? };
     let Some(cols) = first else {
         return Ok(None); // nothing visible — caller falls back to the batch path, which handles empty correctly
     };
@@ -1419,7 +1431,7 @@ pub(super) unsafe fn run_columnar_topk(
             proj_names.push(key.clone());
         }
     }
-    let filter = build_filter_expr(rel, predicates, text_predicates, in_predicates);
+    let filter = unsafe { build_filter_expr(rel, predicates, text_predicates, in_predicates) };
     let order_by: Vec<_> =
         sort_keys.iter().map(|(name, asc, nf)| col(name.as_str()).sort(*asc, *nf)).collect();
 
@@ -1432,14 +1444,16 @@ pub(super) unsafe fn run_columnar_topk(
     // eager path below stays as the fallback for the one case the stream cannot serve (nothing visible), and
     // because a source that yields zero batches is exactly the empty-but-green result the oracles guard against.
     if super::columnar_agg::ENABLE_COLUMNAR_TOPK_STREAM.get()
-        && let Some((part, _varlena_bytes)) = open_streaming_source(
-            rel,
-            &proj_names,
-            predicates,
-            text_predicates,
-            in_predicates,
-            skip,
-        )?
+        && let Some((part, _varlena_bytes)) = unsafe {
+            open_streaming_source(
+                rel,
+                &proj_names,
+                predicates,
+                text_predicates,
+                in_predicates,
+                skip,
+            )?
+        }
     {
         // O top-k IGNORA o total de bytes, e a razão é de ESCOPO, não de segurança: o eager daqui materializa a
         // relação inteira do mesmo jeito, então tem o MESMO teto de offsets i32 — o fail-open abaixo pode cair
@@ -1453,14 +1467,16 @@ pub(super) unsafe fn run_columnar_topk(
         // `ORDER BY … LIMIT 500000` largo que o caminho eager servia passa a ERRAR por default, e a única saída
         // seria uma GUC que o usuário não sabe que existe (achado de review). Cair no eager custa uma re-execução
         // no caminho de falha e nada no caminho feliz — mesma forma do decline de linhas pendentes acima.
-        match run_df_collect_streaming(part, move |df| {
-            let df = match filter_stream {
-                Some(f) => df.filter(f)?,
-                None => df,
-            };
-            df.sort(order_stream)?.limit(0, Some(k))
-        }) {
-            Ok(batches) => return rows_from_batches(&batches, proj_cols),
+        match unsafe {
+            run_df_collect_streaming(part, move |df| {
+                let df = match filter_stream {
+                    Some(f) => df.filter(f)?,
+                    None => df,
+                };
+                df.sort(order_stream)?.limit(0, Some(k))
+            })
+        } {
+            Ok(batches) => return unsafe { rows_from_batches(&batches, proj_cols) },
             // TIPADO, não catch-all. O fail-open existe por UM motivo: a retenção do `TopK` cresce com `k`
             // enquanto a pool do streaming é constante, então um `k` grande pode estourar o que o caminho eager
             // servia. Esse caso é `ResourcesExhausted` e nada mais.
@@ -1515,19 +1531,22 @@ pub(super) unsafe fn run_columnar_topk(
         }
     }
 
-    let batch =
-        decode_to_batch(rel, &proj_names, predicates, text_predicates, in_predicates, skip)?;
+    let batch = unsafe {
+        decode_to_batch(rel, &proj_names, predicates, text_predicates, in_predicates, skip)?
+    };
     // filter (WHERE, the final authority — D3) → sort by the key (PG order for numeric/temporal/det-collation text) →
     // limit k (DataFusion's TopK: a bounded heap, never materializing all N as tuples).
-    let batches = run_df_collect(batch, move |df| {
-        let df = match filter {
-            Some(f) => df.filter(f)?,
-            None => df,
-        };
-        df.sort(order_by)?.limit(0, Some(k))
-    })?;
+    let batches = unsafe {
+        run_df_collect(batch, move |df| {
+            let df = match filter {
+                Some(f) => df.filter(f)?,
+                None => df,
+            };
+            df.sort(order_by)?.limit(0, Some(k))
+        })?
+    };
 
-    rows_from_batches(&batches, proj_cols)
+    unsafe { rows_from_batches(&batches, proj_cols) }
 }
 
 /// M168 — the streaming twin of `run_df_collect`: registers a lazy `PartitionStream` instead of one materialized
@@ -1553,7 +1572,7 @@ where
     let rt = tokio::runtime::Builder::new_current_thread()
         .build()
         .map_err(|e| DataFusionError::Execution(format!("df_executor: tokio runtime: {e}")))?;
-    let work_mem_bytes = (pg_sys::work_mem.max(64) as usize) * 1024;
+    let work_mem_bytes = (unsafe { pg_sys::work_mem.max(64) } as usize) * 1024;
     // O caminho eager dimensionava `max(work_mem, 2*batch) + 64MB`. Aqui não há batch gigante — esse é o ponto —
     // mas o TopK ainda retém k linhas, e o guard do M167 limita bytes FÍSICOS (comprimidos), não a pegada Arrow.
     // Dimensionar só por `work_mem` fazia um top-k largo com k grande, que o caminho eager servia, falhar com
@@ -1900,16 +1919,18 @@ fn const_out_datum(val: i64, typoid: u32) -> Result<(pg_sys::Datum, bool), Strin
 /// Run `count(*)`, `sum(<num_col>)` over the columnar table and format `count=N;sum=X` (Phase A/B test driver — the
 /// planner-integrated automatic path is Phase C `columnar_agg.rs`).
 unsafe fn run_columnar_agg(rel: pg_sys::Relation, num_col: &str) -> Result<String, String> {
-    let r = run_columnar_aggs(
-        rel,
-        &[AggSpec::CountStar, AggSpec::SumFloat8(num_col.to_string())],
-        &[],
-        &[],
-        &[],
-        false,
-    )?;
-    let c = i64::from_datum(r[0].0, r[0].1).unwrap_or(0);
-    let s = f64::from_datum(r[1].0, r[1].1).unwrap_or(0.0);
+    let r = unsafe {
+        run_columnar_aggs(
+            rel,
+            &[AggSpec::CountStar, AggSpec::SumFloat8(num_col.to_string())],
+            &[],
+            &[],
+            &[],
+            false,
+        )?
+    };
+    let c = unsafe { i64::from_datum(r[0].0, r[0].1).unwrap_or(0) };
+    let s = unsafe { f64::from_datum(r[1].0, r[1].1).unwrap_or(0.0) };
     Ok(format!("count={c};sum={s:.4}"))
 }
 
