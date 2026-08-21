@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-94 items — **Open** 12 · **In flight** 14 · **Closed** 68
+94 items — **Open** 12 · **In flight** 13 · **Closed** 69
 
 ### Open (12)
 
@@ -82,19 +82,18 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-008`](#b-008--lakehouse-4-funções-expostas-escala-e-formatos-nunca-medidos----) | Lakehouse: 4 funções expostas, escala e formatos nunca medidos | `raw` | — |
 | [`B-010`](#b-010--maturidade-zero-uso-real-e-é-o-gargalo-de-todos-os-pilares----) | Maturidade: zero uso real, e é o gargalo de todos os pilares | `raw` | — |
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
+| [`B-043`](#b-043--o-qps-lexical-satura-em-20-clientes-numa-máquina-de-16-vcpu-e-não-sobe-mais----) | O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais | `triaged` | — |
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
-| [`B-094`](#b-094--o-arnês-é-65-mais-lento-que-o-pgbench-sob-carga-e-é-ele-que-publicamos----) | O arnês é 6,5× mais lento que o `pgbench` sob carga, e é ele que publicamos | `triaged` | — |
 
-### In flight (14)
+### In flight (13)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada----) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `planned` | — |
 | [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `planned` | — |
 | [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta----) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `planned` | — |
-| [`B-043`](#b-043--o-qps-lexical-satura-em-20-clientes-numa-máquina-de-16-vcpu-e-não-sobe-mais----) | O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais | `planned` | — |
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `planned` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
@@ -106,7 +105,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `planned` | — |
 | [`B-093`](#b-093--o-ndcg-publicado-do-pilar-lexical-foi-medido-com-agregação-que-trunca-e-o-arnês-já-não-trunca----) | O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca | `planned` | — |
 
-### Closed (68)
+### Closed (69)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -178,6 +177,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-089`](#b-089--um-vetor-zero-na-tabela-derruba-a-busca-por-cosseno-no-índice-hnsw-no-ef_search-default---x) | Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default | `shipped` | — |
 | [`B-090`](#b-090--94-arquivos-de-teste-sob-claude-e-nenhum-workflow-os-roda---x) | 94 arquivos de teste sob `.claude/` e nenhum workflow os roda | `shipped` | — |
 | [`B-092`](#b-092--o-índice-hnsw-ocupa-178-o-disco-do-pgvector-e-é-isso-que-tira-o-índice-do-plano---x) | O índice HNSW ocupa 1,78× o disco do pgvector, e é isso que tira o índice do plano | `killed` | — |
+| [`B-094`](#b-094--o-arnês-é-65-mais-lento-que-o-pgbench-sob-carga-e-é-ele-que-publicamos---x) | O arnês é 6,5× mais lento que o `pgbench` sob carga, e é ele que publicamos | `killed` | — |
 
 <!-- BACKLOG-INDEX:END -->
 
@@ -2004,8 +2004,24 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-13 no droplet `g-16vcpu-64gb`, MS MARCO 100K, caso `FTSBm25Performance`. Curva de concorrência (clientes → QPS): 1 → 251,2 · 5 → 1.025,9 · 10 → 1.460,4 · **20 → 1.613,2** · 30 → 1.507,3 · 40 → 1.592,6 · 60 → 1.616,4 · 80 → 1.600,0. A latência p99 cresce de 0,005 s a 0,112 s no mesmo intervalo. Ou seja: **de 20 a 80 clientes o throughput não sobe 1%, e a p99 cresce 4×** — a fila cresce contra capacidade fixa. A p99 serial é 4,8 ms, o que a 16 núcleos daria um teto teórico bem acima de 1.616.
 why_now: o pilar lexical acabou de ganhar seu primeiro número público (`wiki/benchmarks/b040-theodb-fts-msmarco.md`), e o teto de vazão é a métrica que uma instalação real encontra primeiro. **A causa não está medida** e há pelo menos três candidatas que exigem instrumentos diferentes: saturação de CPU real (o trabalho por consulta é simplesmente caro), contenção no índice lexical compartilhado (trava), ou teto do cliente Python do arnês — que a esta escala é hipótese séria, porque o B-035 já declarou que a 50 mil vetores boa parte do custo é round-trip. Publicar a curva sem investigar deixa o leitor concluir o que quiser.
-status: planned
-resultado_2026_08_21: **a hipótese do cliente Python está CONFIRMADA — o teto era do instrumento.**
+status: triaged
+retratacao_2026_08_21: **⚠ O RESULTADO ABAIXO ESTÁ ERRADO, e o erro é do meu desenho de medição.**
+  O `run_concurrent` emitia total FIXO de 300 operações independente do número de clientes — a 80
+  clientes são **3,75 consultas por cliente**, e a abertura de conexão domina a janela inteira.
+  Medido lado a lado no mesmo processo: com total fixo, 80 clientes dão **277,7 QPS**; com a contagem
+  escalando, **827,0**. Re-medido pelo benchmark corrigido, a curva **sobe e satura** (354 · 1.020 ·
+  1.262 · 1.225 · 1.302 · 1.281) em vez de colapsar, e a razão contra o `pgbench` é **~1,27×** e não
+  6,5×.
+  .
+  **A resposta à pergunta do item inverte:** o platô é real e é **do servidor**. Os dois geradores
+  saturam, e a distância entre eles é de 27%.
+  .
+  Caíram junto: o **GIL está refutado** (processos não são mais rápidos que threads — 0,98× a 20
+  clientes, 1,00× a 40), e os **dois relógios que acrescentei não discriminam em laço fechado**
+  (`response` ≡ `service`, porque sem agendamento não há atraso a medir).
+  .
+  Fica registrado por acréscimo: o resultado foi citado no CHANGELOG e lançado em `v0.166.0`.
+resultado_2026_08_21_RETRATADO: **a hipótese do cliente Python está CONFIRMADA — o teto era do instrumento.**
   `wiki/benchmarks/b043-teto-lexical-e-o-cliente.md`.
   .
   | clientes | pgbench TPS | arnês QPS | o arnês é |
@@ -4306,7 +4322,7 @@ dod:
 
 > Registrado 2026-08-21 pelo ciclo que matou o [[B-014]]. O bullet 2 daquele item sobreviveu à refutação
 > da premissa; os outros dois já estavam satisfeitos.
-## B-094 — O arnês é 6,5× mais lento que o `pgbench` sob carga, e é ele que publicamos   [ ]
+## B-094 — O arnês é 6,5× mais lento que o `pgbench` sob carga, e é ele que publicamos   [x]
 
 domain: arnes
 repo: theodb-bench
@@ -4314,7 +4330,20 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-21 (`wiki/benchmarks/b043-teto-lexical-e-o-cliente.md`), droplet `g-16vcpu-64gb`, mesma máquina, mesmo corpus, mesma função `bm25_search`. O `pgbench` estabiliza em **~4.150 TPS** a partir de 20 clientes e fica lá até 80 (queda de 2%), com latência linear. O arnês **pica em 1.617,7 a 10 clientes e colapsa para 623,4 a 80** — queda de 61%. A 80 clientes a razão é **6,53×**; com **um** cliente já é 1,64×.
 why_now: o `docs/methodology/PUBLICATION.md` estabelece que medição fora do arnês não é publicável, e o [[B-069]] existe para fazer valer isso. **Um arnês 6,5× mais lento que o `pgbench` sob carga não mede o teto de vazão de nada — ele mede a si mesmo.** Todo número de concorrência que publicarmos por ele é um limite do instrumento apresentado como propriedade do produto, e o [[B-043]] é a prova de que isso já aconteceu uma vez.
-status: triaged
+status: killed
+kill_reason: 2026-08-21, no mesmo dia em que foi aberto — **a premissa era artefato do meu desenho de
+  medição.** Os 6,5× e o colapso de 61% vinham de o `run_concurrent` emitir um total FIXO de 300
+  operações independente do número de clientes: a 80 clientes, 3,75 consultas cada, e a abertura de
+  conexão dominando a janela. Corrigido para escalar por cliente, a curva **sobe e satura** e a razão
+  contra o `pgbench` é **~1,27×**.
+  .
+  Vinte e sete por cento não sustentam a frase que abriu este item — *"não mede o teto de vazão de
+  nada, mede a si mesmo"*. Um instrumento 27% mais lento que o `pgbench` mede o platô do servidor com
+  folga; o `pgbench` tem vantagem de consulta fixa que infla parte disso e não foi medida.
+  .
+  **O que sobrevive e vale registrar:** o arnês é mais lento que um gerador em C, e isso é esperado e
+  agora quantificado. Se algum dia a razão voltar a passar de 2×, o item se reabre com número novo.
+  `wiki/benchmarks/b043-teto-lexical-e-o-cliente.md` § Retratação.
 dod:
   - a causa do colapso é **nomeada e medida**, não inferida — GIL, round-trip por consulta, ou o pool de conexões; um perfil do processo cliente a 10 e a 80 clientes distingue as três
   - depois da mudança, a curva do arnês **não colapsa**: ela satura e fica plana, como a do `pgbench`
