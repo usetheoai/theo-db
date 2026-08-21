@@ -14,6 +14,18 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **A extensão `vector` deixou de dizer que tem `halfvec`.** Ela declarava `0.7.0`, que é a versão em
+  que o pgvector introduziu `halfvec`/`sparsevec` — e uma aplicação que faz a checagem de capacidade
+  padrão (`extversion >= '0.7.0'`) recebia **sim** e quebrava na primeira coluna. Passou a declarar
+  `0.6.0`, que é a superfície de fato entregue. Uma instalação já feita se corrige com
+  `ALTER EXTENSION vector UPDATE TO '0.6.0'`, sem perder capacidade. (#B-038)
+
+### Removed
+- **`halfvec` e `sparsevec` declarados fora de escopo**, por decisão registrada e não por omissão —
+  o produto respondia `type "halfvec" does not exist` sem que ninguém tivesse decidido dar essa
+  resposta. `wiki/decisions/0063-*`. (#B-038)
+
+### Fixed
 - **O portão de CHANGELOG deixou de bloquear depois de um merge limpo.** Um merge não introduz
   trabalho próprio e não lista arquivos, então o checador saía com "não pude inspecionar" — e o hook
   tratava qualquer não-zero como violação, colapsando *"não pude perguntar"* com *"perguntei e a
