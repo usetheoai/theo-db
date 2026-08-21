@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-91 items — **Open** 27 · **In flight** 7 · **Closed** 57
+91 items — **Open** 27 · **In flight** 3 · **Closed** 61
 
 ### Open (27)
 
@@ -102,19 +102,15 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 | [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `triaged` | — |
 
-### In flight (7)
+### In flight (3)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
-| [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança----) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
-| [`B-088`](#b-088--o-gate-de-changelog-checa-presença-de-arquivo-não-de-entrada----) | O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA | `planned` | — |
-| [`B-089`](#b-089--um-vetor-zero-na-tabela-derruba-a-busca-por-cosseno-no-índice-hnsw-no-ef_search-default----) | Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default | `planned` | — |
-| [`B-090`](#b-090--94-arquivos-de-teste-sob-claude-e-nenhum-workflow-os-roda----) | 94 arquivos de teste sob `.claude/` e nenhum workflow os roda | `planned` | — |
 
-### Closed (57)
+### Closed (61)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -154,6 +150,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-052`](#b-052--workspace-não-tem-portão-73-commits-e-13-arquivos-rust-sem-um-gate-olhar---x) | `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar | `shipped` | — |
 | [`B-053`](#b-053--o-núcleo-de-distância-vetorial-é-puro-por-uma-linha-e-é-ela-que-prende-o-micro-bench-na-suíte---x) | O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte | `shipped` | — |
 | [`B-054`](#b-054--toda-iteração-em-rust-custa-8-minutos-e-2m34s-deles-eram-um-cp--r---x) | Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r` | `shipped` | — |
+| [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança---x) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `shipped` | — |
 | [`B-060`](#b-060--o-arnês-verifica-que-o-índice-foi-usado-e-não-verifica-que-o-knob-de-busca-pegou---x) | O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou | `shipped` | — |
 | [`B-061`](#b-061--só-duas-suites-registradas-as-duas-vetoriais-o-colunar-não-tem-onde-ser-comparado---x) | Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado | `shipped` | — |
 | [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default---x) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `shipped` | — |
@@ -175,6 +172,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-085`](#b-085--a-imagem-era-construída-onze-vezes-por-corrida-e-nenhum-job-dependia-de-outro---x) | A imagem era construída onze vezes por corrida, e nenhum job dependia de outro | `shipped` | — |
 | [`B-086`](#b-086--o-teste-que-prova-o-alias-do-ef_search-passa-quando-o-guc-está-inerte---x) | O teste que prova o alias do `ef_search` passa quando o GUC está inerte | `shipped` | — |
 | [`B-087`](#b-087--o-pacote-do-arnês-diz-010dev0-enquanto-as-releases-dizem-v010-e-v020---x) | O pacote do arnês diz `0.1.0.dev0` enquanto as releases dizem `v0.1.0` e `v0.2.0` | `shipped` | — |
+| [`B-088`](#b-088--o-gate-de-changelog-checa-presença-de-arquivo-não-de-entrada---x) | O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA | `shipped` | — |
+| [`B-089`](#b-089--um-vetor-zero-na-tabela-derruba-a-busca-por-cosseno-no-índice-hnsw-no-ef_search-default---x) | Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default | `shipped` | — |
+| [`B-090`](#b-090--94-arquivos-de-teste-sob-claude-e-nenhum-workflow-os-roda---x) | 94 arquivos de teste sob `.claude/` e nenhum workflow os roda | `shipped` | — |
 
 <!-- BACKLOG-INDEX:END -->
 
@@ -2312,7 +2312,7 @@ dod:
 >
 > Publicar a recomendação sem este número teria sido conselho por intuição, que é a classe que este projeto
 > persegue em toda parte.
-## B-055 — Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança"   [ ]
+## B-055 — Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança"   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -2340,7 +2340,7 @@ README é justamente a que faz alguém não verificar antes. **Nada aqui foi exe
 a diferença importa: eu não medi se o `ef_search` de fato se perde entre transações nem se os contadores de
 fato se misturam. São predições fundamentadas, não resultados, e publicar a matriz sem medir seria o
 `cobertura-alegada-sem-execucao` que este projeto persegue.
-status: planned
+status: shipped
 status_nota: 2026-08-20 — os cinco bullets fecharam, tudo POR EXECUÇÃO contra
   `ghcr.io/usetheoai/theo-db:latest` com PgBouncer 1.25.2. Matriz em
   `wiki/benchmarks/b055-pgbouncer-compat.md`.
@@ -3752,7 +3752,7 @@ dod:
 
 > Registrado 2026-08-20 durante o corte da `v0.2.0`. **Não retrata nenhum número**: nenhum bundle
 > publicado foi verificado ainda quanto a esse campo, e é isso que o terceiro bullet pede.
-## B-088 — O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA   [ ]
+## B-088 — O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA   [x]
 
 domain: governanca
 repo: theo-db
@@ -3770,7 +3770,7 @@ why_now: a omissão só apareceu porque o corte de release me fez comparar a lis
 lista de itens citados — ou seja, **uma sessão depois**, e por acaso. Um gate que passa quando o arquivo foi
 tocado por outra razão é a mesma classe do `assert_index_used` ([[B-063]]) e do `recall_at_10` ([[B-086]]):
 existe, roda, e não afirma o que diz afirmar.
-status: planned
+status: shipped
 status_nota: 2026-08-20 — os três bullets fecharam. (1) `scripts/check_changelog_entry.py` conta bullets
   **acrescentados dentro do `[Unreleased]`**, ignorando edição em versão já lançada, e uma reescrita
   conta como uma entrada e não duas. (2) Provado contra o commit REAL: `check_changelog_entry.py
@@ -3789,7 +3789,7 @@ dod:
 > Registrado 2026-08-20 pelo corte da `0.161.0`. **É sobre o meu próprio erro**, e é por isso que vale: eu
 > segui o procedimento, o gate disse OK, e a entrada não existia. Nenhum humano teria notado antes do
 > release, e o release é tarde demais — o CHANGELOG é o contrato com quem consome.
-## B-089 — Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default   [ ]
+## B-089 — Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default   [x]
 
 domain: vetorial
 repo: theo-db
@@ -3817,7 +3817,7 @@ uma linha zero e o mesmo `ef=64`, a consulta passa.
 why_now: vetor zero não é patológico em dado real — é o que sobra de um embedding que falhou, de um documento
 vazio ou de padding. E `ef_search=64` é o **default**: quem nunca ajustou o knob é exatamente quem encontra o
 erro. O `<->` funcionando na mesma tabela torna o sintoma confuso — parece defeito do dado, não do AM.
-status: planned
+status: shipped
 status_nota: 2026-08-20 — os quatro bullets fecharam. **Causa-raiz**: a mensagem parece do PostgreSQL e é do
   **Rust** — `slice::sort_by` detecta comparador inconsistente desde a 1.81, e havia **19 sítios** em 9
   arquivos com `partial_cmp(..).unwrap_or(Ordering::Equal)`, que sobre NaN devolve `Equal` para todo par e
@@ -3841,7 +3841,7 @@ dod:
 > falhadas** — uma linha zero em 3000 não basta, dois índices na mesma coluna não bastam, zero presente na
 > construção não basta. O que discrimina é o `ef_search`, e eu só cheguei nele depois de parar de adivinhar e
 > varrer o parâmetro. Fica registrado porque a próxima pessoa vai tentar as mesmas seis.
-## B-090 — 94 arquivos de teste sob `.claude/` e nenhum workflow os roda   [ ]
+## B-090 — 94 arquivos de teste sob `.claude/` e nenhum workflow os roda   [x]
 
 domain: governanca
 repo: theo-db
@@ -3858,7 +3858,7 @@ why_now: esta sessão mexeu em oito desses scripts e rodou as suítes **à mão*
 Nada no sistema exigiu isso e nada teria notado a ausência — que é literalmente o texto do [[B-052]] aplicado
 a outro diretório, e o B-052 já foi entregue para o Rust. E o [[B-088]], que acabou de entrar, é o gate de
 CHANGELOG: se ele quebrar, quem descobre é a próxima sessão, pelo silêncio.
-status: planned
+status: shipped
 status_nota: 2026-08-20 — os três bullets fecharam. (1) `.github/workflows/tooling-tests.yml` roda
   `run_slice_tests.sh` (31 slices, um processo pytest por slice — o script explica no cabeçalho por que
   um `pytest` largo colide), mais `check_xrefs.py` e o checador do registro. Na forma que o
