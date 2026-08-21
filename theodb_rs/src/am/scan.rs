@@ -429,7 +429,14 @@ unsafe fn scan_ivf_structured(
     // below is simply empty when there are no centroids, and the pending fold still runs.
     let mut cd: Vec<(f64, usize)> =
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
-    cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    // `total_cmp` e nao `partial_cmp(..).unwrap_or(Equal)`: sobre NaN o segundo devolve `Equal`
+    // para TODO par, o que quebra a transitividade (NaN "igual" a 1 e a 2, mas 1 != 2). Desde a
+    // 1.81 o `sort_by` do Rust detecta isso e entra em panico com "user-provided comparison
+    // function does not correctly implement a total order" — uma mensagem que parece do PostgreSQL
+    // sem ser. E NaN nao e hipotetico aqui: cosseno de vetor zero e NaN, e vetor zero e o que sobra
+    // de um embedding que falhou (B-089). `total_cmp` poe NaN por ultimo, que e onde o `float8` do
+    // PostgreSQL o poe — o caminho de seqscan ja fazia isso, e o do indice nao.
+    cd.sort_by(|a, b| a.0.total_cmp(&b.0));
     let probes = probes.clamp(1, meta.centroids.len().max(1));
     let dim = meta.dim as usize;
     let entry = 8 + dim * 4;
@@ -514,7 +521,7 @@ unsafe fn scan_ivf_aq(
 
     let mut cd: Vec<(f64, usize)> =
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
-    cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    cd.sort_by(|a, b| a.0.total_cmp(&b.0));
     let probes = probes.clamp(1, meta.centroids.len().max(1));
     // M84 — AQ rerank pool = base 64 × over_fetch factor. Fixes a latent no-op: the old `over_fetch().max(64)`
     // was ALWAYS 64 (over_fetch ≤ 64, so the .max(64) floor always won), so `theodb_hnsw.over_fetch` never
@@ -594,7 +601,7 @@ unsafe fn scan_ivf_aq_split(
 
     let mut cd: Vec<(f64, usize)> =
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
-    cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    cd.sort_by(|a, b| a.0.total_cmp(&b.0));
     let probes = probes.clamp(1, meta.centroids.len().max(1));
     // M84 — AQ rerank pool = base 64 × over_fetch factor. Fixes a latent no-op: the old `over_fetch().max(64)`
     // was ALWAYS 64 (over_fetch ≤ 64, so the .max(64) floor always won), so `theodb_hnsw.over_fetch` never
@@ -702,7 +709,7 @@ unsafe fn scan_ivf_aq_split_v7(
 
     let mut cd: Vec<(f64, usize)> =
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
-    cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    cd.sort_by(|a, b| a.0.total_cmp(&b.0));
     let probes = probes.clamp(1, meta.centroids.len().max(1));
     let rerank_pool = rerank_pool.max(1);
 
@@ -840,7 +847,7 @@ unsafe fn scan_ivf_aq_split_sq8(
 
     let mut cd: Vec<(f64, usize)> =
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
-    cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    cd.sort_by(|a, b| a.0.total_cmp(&b.0));
     let probes = probes.clamp(1, meta.centroids.len().max(1));
     // M87: `rerank_pool` is a parameter — the iterative re-search widens it (once all lists are probed, the pool
     // caps the distinct emitted; a selective filter needs more reranked). Floored at 1 for a degenerate call.
@@ -911,7 +918,7 @@ unsafe fn scan_ivf_aq_split_rabitq(
 
     let mut cd: Vec<(f64, usize)> =
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
-    cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    cd.sort_by(|a, b| a.0.total_cmp(&b.0));
     let probes = probes.clamp(1, meta.centroids.len().max(1));
     let rerank_pool = rerank_pool.max(1);
 
@@ -1202,9 +1209,7 @@ mod tests {
 
         // Reference: the exact comparator the old scan used (partial_cmp by dist, then tid).
         let mut expected = candidates.clone();
-        expected.sort_by(|a, b| {
-            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0))
-        });
+        expected.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
 
         // Under test: heapify + pop-all.
         let mut heap = heapify(candidates);
@@ -1311,6 +1316,90 @@ mod tests {
         assert!(
             r1 < 1.0,
             "probes=1 lê uma célula; por contagem não pode conter os {K} exatos (recall {r1:.3})"
+        );
+    }
+
+    /// B-089 — um vetor ZERO na tabela derrubava a busca por cosseno no `ef_search` default.
+    ///
+    /// `'[0,…,0]' <=> q` e NaN, e o caminho de varredura ordenava com
+    /// `partial_cmp(..).unwrap_or(Ordering::Equal)`. Sobre NaN isso devolve `Equal` para TODO par,
+    /// o que quebra a transitividade: NaN "igual" a 1 e "igual" a 2, mas 1 != 2. Desde a 1.81 o
+    /// `slice::sort_by` do Rust DETECTA comparador inconsistente e entra em panico com
+    /// `user-provided comparison function does not correctly implement a total order` — a mensagem
+    /// que o usuario via, e que parece do PostgreSQL sem ser.
+    ///
+    /// Medido contra `ghcr.io/usetheoai/theo-db:latest` em 2026-08-20:
+    ///
+    /// | condicao | `ef_search` | resultado |
+    /// |---|---|---|
+    /// | 3000 linhas com 3 vetores zero, cosseno, indice | **64 (default)** | **ERRO** |
+    /// | mesmos dados sem os zeros | 64 | 5 linhas |
+    /// | mesmos dados com zeros, **L2** | 64 | 5 linhas |
+    /// | mesmos dados com zeros, cosseno, `ef` <= 16 | 16 | 5 linhas |
+    /// | mesmos dados com zeros, cosseno, **seqscan** | — | 5 linhas |
+    ///
+    /// A dependencia de `ef` e o que discrimina: o erro so ocorre quando a busca VISITA uma linha
+    /// zero. Por isso a repro precisa deste corpus e nao de tres linhas — seis tentativas menores
+    /// falharam antes desta.
+    ///
+    /// Vetor zero nao e patologico em dado real: e o que sobra de um embedding que falhou, de um
+    /// documento vazio ou de padding.
+    #[pgrx::pg_test]
+    fn b089_a_zero_vector_does_not_break_cosine_index_scan() {
+        Spi::run("CREATE TABLE b089z (id int PRIMARY KEY, e vector(8))").unwrap();
+        // `g*7919%1000` zera em g=1000/2000/3000 — tres vetores zero, como no corpus que expos isto.
+        Spi::run(
+            "INSERT INTO b089z SELECT g, ('['||(g*7919%1000)||','||(g*6971%1000)||','\
+             ||(g*5843%1000)||','||(g*4507%1000)||','||(g*3571%1000)||','||(g*2683%1000)||','\
+             ||(g*1789%1000)||','||(g*997%1000)||']')::vector FROM generate_series(1,3000) g",
+        )
+        .unwrap();
+        Spi::run("CREATE INDEX b089z_cos ON b089z USING theodb_hnsw (e theodb_hnsw_cosine_ops)")
+            .unwrap();
+        Spi::run("ANALYZE b089z").unwrap();
+
+        let zeros =
+            Spi::get_one::<i64>("SELECT count(*) FROM b089z WHERE e = '[0,0,0,0,0,0,0,0]'::vector")
+                .unwrap()
+                .unwrap();
+        assert_eq!(zeros, 3, "a repro depende de haver vetor zero no corpus");
+
+        let n = Spi::connect(|c| {
+            c.select(
+                "SET enable_seqscan=off; SET enable_bitmapscan=off; SET theodb_hnsw.ef_search=64",
+                None,
+                &[],
+            )
+            .ok();
+            c.select(
+                "SELECT id FROM b089z ORDER BY e <=> '[1,2,3,4,5,6,7,8]'::vector LIMIT 5",
+                None,
+                &[],
+            )
+            .unwrap()
+            .len()
+        });
+        assert_eq!(
+            n, 5,
+            "a busca por cosseno no indice deve devolver 5 linhas mesmo com vetor zero na tabela. \
+             NaN e um resultado legitimo de distancia; o caminho de seqscan ja o ordena por ultimo, \
+             como o `float8` do PostgreSQL faz, e o do indice tem de fazer o mesmo."
+        );
+    }
+
+    /// O comparador tem de ser ordem TOTAL: com NaN presente, `unwrap_or(Equal)` quebra a
+    /// transitividade e o `sort_by` do Rust reprova. `total_cmp` e a resposta da stdlib, e poe NaN
+    /// por ultimo — a mesma posicao que o `float8` do PostgreSQL lhe da.
+    #[pgrx::pg_test]
+    fn b089_total_cmp_survives_nan_where_partial_cmp_does_not() {
+        let mut v: Vec<(f64, i64)> =
+            vec![(3.0, 1), (f64::NAN, 2), (1.0, 3), (f64::NAN, 4), (2.0, 5)];
+        v.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        let ids: Vec<i64> = v.iter().map(|x| x.1).collect();
+        assert_eq!(
+            ids,
+            vec![3, 5, 1, 2, 4],
+            "os finitos em ordem crescente e os NaN por ultimo, com desempate estavel por tid"
         );
     }
 }

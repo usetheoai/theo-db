@@ -140,7 +140,25 @@ if [ -f "CHANGELOG.md" ]; then
     | grep -vE '(_test|\.test|\.spec)\.[a-z]+$' \
     | grep -vE '(^|/)(node_modules|vendor|dist|build|target|\.venv|__pycache__)/' \
     || true)
-  if [ -n "$CODE_CHANGED" ] && ! echo "$ALL_FILES" | grep -qE '^CHANGELOG\.md$'; then
+  # B-088 — "o arquivo esta no diff" NAO e "a entrada existe". Medido sobre esta propria sessao:
+  # o commit `c52dfda` entregou o B-081, tocou o CHANGELOG por OUTRAS razoes, e nao acrescentou
+  # entrada nenhuma — o gate passou, e a falta so apareceu no corte da release, uma sessao depois.
+  #
+  # Quando ha commit na sessao, a pergunta passa a ser sobre a ENTRADA. O checador espelha a
+  # definicao de "codigo de producao" logo acima, de proposito: duas definicoes no mesmo
+  # repositorio divergem, e a segunda mudaria em silencio o que o portao significa.
+  #
+  # O caminho antigo (presenca de arquivo) fica para o estado NAO COMMITADO, onde nao ha revisao a
+  # inspecionar. E menos rigoroso e e o melhor disponivel ali — dize-lo e melhor que fingir.
+  ENTRY_CHECKER=""
+  for c in "$ECO/scripts/check_changelog_entry.py" ".claude/scripts/check_changelog_entry.py"; do
+    [ -f "$c" ] && { ENTRY_CHECKER="$c"; break; }
+  done
+  if [ -n "$CODE_CHANGED" ] && [ -n "$ENTRY_CHECKER" ] && [ -n "$LAST_COMMIT" ] \
+     && ! python3 "$ENTRY_CHECKER" --rev HEAD >/dev/null 2>&1; then
+    msg="CHANGELOG.md foi tocado mas o ultimo commit NAO acrescentou entrada ao [Unreleased], e ele muda codigo de producao (Inquebravel Rule 6; B-088). Tocar o arquivo nao e registrar a mudanca."
+    if [ "$WARN_ONLY" = "1" ]; then WARNINGS+=("$msg"); else BLOCKERS+=("$msg"); fi
+  elif [ -n "$CODE_CHANGED" ] && ! echo "$ALL_FILES" | grep -qE '^CHANGELOG\.md$'; then
     msg="CHANGELOG.md not updated despite production source changes (Inquebrável Rule 6; cycle-review BLOCKER). Add an entry to [Unreleased] before stopping. Override with STOP_VALIDATION_WARN_ONLY=1 only when the change is a bulk reorg with the rationale documented separately."
     if [ "$WARN_ONLY" = "1" ]; then
       WARNINGS+=("$msg")

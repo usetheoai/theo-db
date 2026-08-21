@@ -100,7 +100,7 @@ mod tests {
     fn brute(corpus: &[(i64, Vec<f32>)], q: &[f32], k: usize, metric: Metric) -> Vec<i64> {
         let mut d: Vec<(f64, i64)> =
             corpus.iter().map(|(id, v)| (metric.dist(q, v), *id)).collect();
-        d.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal).then(a.1.cmp(&b.1)));
+        d.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
         d.into_iter().take(k).map(|(_, id)| id).collect()
     }
 

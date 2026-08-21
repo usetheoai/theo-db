@@ -40,7 +40,7 @@ impl PartialOrd for Cand {
 }
 impl Ord for Cand {
     fn cmp(&self, o: &Self) -> std::cmp::Ordering {
-        self.d.partial_cmp(&o.d).unwrap_or(std::cmp::Ordering::Equal)
+        self.d.total_cmp(&o.d)
     }
 }
 
@@ -316,9 +316,7 @@ pub(crate) unsafe fn traverse(
             reads += 1;
             reranked.push((cand.tid, d));
         }
-        reranked.sort_by(|a, b| {
-            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0))
-        });
+        reranked.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
         reranked.truncate(ef); // return the ef best by exact f32; the scan takes top-k
         reranked
     } else {

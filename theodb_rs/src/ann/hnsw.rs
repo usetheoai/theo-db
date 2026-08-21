@@ -404,9 +404,7 @@ impl HnswIndex {
             for (id, v) in pending {
                 out.push((*id, self.metric.dist_simd(q, v)));
             }
-            out.sort_by(|a, b| {
-                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0))
-            });
+            out.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
             out.truncate(k);
         }
         out
