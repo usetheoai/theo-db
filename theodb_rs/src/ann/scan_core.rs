@@ -67,7 +67,7 @@ impl<N> PartialOrd for Ranked<N> {
 }
 impl<N> Ord for Ranked<N> {
     fn cmp(&self, o: &Self) -> Ordering {
-        self.d.partial_cmp(&o.d).unwrap_or(Ordering::Equal)
+        self.d.total_cmp(&o.d)
     }
 }
 
@@ -169,9 +169,7 @@ pub(crate) fn ground_search_nodes<S: NeighborSource>(
     let candidates_seen = visited.len();
     let mut out: Vec<(S::Node, f64)> = result.into_iter().map(|r| (r.node, r.d)).collect();
     // Ascending by distance, tie-broken by tid for determinism (same order the collapsed form produced).
-    out.sort_by(|a, b| {
-        a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal).then(src.tid(&a.0).cmp(&src.tid(&b.0)))
-    });
+    out.sort_by(|a, b| a.1.total_cmp(&b.1).then(src.tid(&a.0).cmp(&src.tid(&b.0))));
     Ok((out, candidates_seen))
 }
 
@@ -286,9 +284,7 @@ impl<N: Copy> ResumableGround<N> {
             }
         }
         let mut out: Vec<(N, f64)> = result.into_iter().map(|r| (r.node, r.d)).collect();
-        out.sort_by(|a, b| {
-            a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal).then(src.tid(&a.0).cmp(&src.tid(&b.0)))
-        });
+        out.sort_by(|a, b| a.1.total_cmp(&b.1).then(src.tid(&a.0).cmp(&src.tid(&b.0))));
         Ok(out)
     }
 }

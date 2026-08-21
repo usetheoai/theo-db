@@ -13,6 +13,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Um vetor zero na tabela derrubava a busca por cosseno no índice, no `ef_search` default.**
+  `'[0,…,0]' <=> q` é NaN, e o caminho de varredura ordenava com um comparador que devolvia "igual"
+  para todo par envolvendo NaN — o que quebra a transitividade, e o `sort_by` do Rust reprova desde a
+  1.81 com uma mensagem que parece do PostgreSQL sem ser. A consulta abortava inteira. O mesmo dado
+  com `<->` funcionava, e com seqscan funcionava, o que tornava o sintoma confuso. Vetor zero não é
+  patológico: é o que sobra de um embedding que falhou. O `pgvector` no mesmo corpus funciona e põe
+  as linhas NaN por último — que é agora onde elas ficam aqui. (#B-089)
+
 ### Changed
 - **A compatibilidade com PgBouncer deixou de ser análise de código e passou a ser medição.** Nos três
   modos, contra a imagem lançada: sob `session` nada muda; sob `transaction` e `statement` o

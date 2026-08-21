@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-89 items — **Open** 27 · **In flight** 5 · **Closed** 57
+90 items — **Open** 27 · **In flight** 6 · **Closed** 57
 
 ### Open (27)
 
@@ -100,9 +100,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala----) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
-| [`B-089`](#b-089--um-vetor-zero-na-tabela-derruba-a-busca-por-cosseno-no-índice-hnsw-no-ef_search-default----) | Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default | `triaged` | — |
+| [`B-090`](#b-090--94-arquivos-de-teste-sob-claude-e-nenhum-workflow-os-roda----) | 94 arquivos de teste sob `.claude/` e nenhum workflow os roda | `triaged` | — |
 
-### In flight (5)
+### In flight (6)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -111,6 +111,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-088`](#b-088--o-gate-de-changelog-checa-presença-de-arquivo-não-de-entrada----) | O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA | `planned` | — |
+| [`B-089`](#b-089--um-vetor-zero-na-tabela-derruba-a-busca-por-cosseno-no-índice-hnsw-no-ef_search-default----) | Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default | `planned` | — |
 
 ### Closed (57)
 
@@ -3815,7 +3816,16 @@ uma linha zero e o mesmo `ef=64`, a consulta passa.
 why_now: vetor zero não é patológico em dado real — é o que sobra de um embedding que falhou, de um documento
 vazio ou de padding. E `ef_search=64` é o **default**: quem nunca ajustou o knob é exatamente quem encontra o
 erro. O `<->` funcionando na mesma tabela torna o sintoma confuso — parece defeito do dado, não do AM.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — os quatro bullets fecharam. **Causa-raiz**: a mensagem parece do PostgreSQL e é do
+  **Rust** — `slice::sort_by` detecta comparador inconsistente desde a 1.81, e havia **19 sítios** em 9
+  arquivos com `partial_cmp(..).unwrap_or(Ordering::Equal)`, que sobre NaN devolve `Equal` para todo par e
+  quebra a transitividade. Trocados por `total_cmp` (stdlib, ordem total IEEE, NaN por último).
+  **Bullet 3 medido**: o `pgvector 0.8.6` no MESMO corpus devolve as 5 linhas — era lacuna real de drop-in —
+  e põe as linhas NaN **por último** na ordem ascendente, que é exatamente onde o `total_cmp` as põe. A
+  semântica escolhida não foi arbitrada: foi copiada do que o shim promete imitar.
+  **Bullet 4**: suíte completa 483 passed, 0 failed (de 481 + os dois novos) — nenhuma consulta que já
+  funcionava mudou de resultado.
 dod:
   - a repro entra como teste: tabela com vetor zero, índice de cosseno, `ef` default, e o teste falha contra
     o código atual
@@ -3830,3 +3840,32 @@ dod:
 > falhadas** — uma linha zero em 3000 não basta, dois índices na mesma coluna não bastam, zero presente na
 > construção não basta. O que discrimina é o `ef_search`, e eu só cheguei nele depois de parar de adivinhar e
 > varrer o parâmetro. Fica registrado porque a próxima pessoa vai tentar as mesmas seis.
+## B-090 — 94 arquivos de teste sob `.claude/` e nenhum workflow os roda   [ ]
+
+domain: governanca
+repo: theo-db
+suggested_mode: review
+source: discover-review
+evidence: medido em 2026-08-20 ao mergear o PR #258, que levou `.claude/scripts/check_changelog_entry.py`
+(código, com testes) e **não disparou check nenhum**. Verificado:
+`find .claude -name "test_*.py" -not -path "*/__pycache__/*" | wc -l` devolve **94**;
+`grep -rn "pytest\|run_slice_tests" .github/workflows/*.yml` devolve **apenas um comentário**, nenhuma
+invocação. As três ocorrências de `.claude/**` nos workflows são `paths-ignore` — exclusões, não inclusões.
+Ou seja: o ferramental que **decide se o trabalho deste repositório passa** — os checadores de plano, o
+portão do backlog, o gate de CHANGELOG, os scripts de implementação — não tem gate nenhum olhando por ele.
+why_now: esta sessão mexeu em oito desses scripts e rodou as suítes **à mão**, porque eu sabia que existiam.
+Nada no sistema exigiu isso e nada teria notado a ausência — que é literalmente o texto do [[B-052]] aplicado
+a outro diretório, e o B-052 já foi entregue para o Rust. E o [[B-088]], que acabou de entrar, é o gate de
+CHANGELOG: se ele quebrar, quem descobre é a próxima sessão, pelo silêncio.
+status: triaged
+dod:
+  - existe workflow que roda as suítes Python de `.claude/` quando elas ou o código que elas cobrem mudam,
+    e ele reprova quando um teste falha
+  - a decisão sobre RODAR ou NÃO está escrita: `.claude/` é checkout do kit, e há argumento legítimo de que
+    o dono do teste é o kit — se for essa a decisão, ela fica registrada com o custo declarado (este
+    repositório fica sem gate sobre o que decide os seus próprios gates)
+  - o custo em execuções é medido e comparado, como o [[B-052]] exigiu — não estimado
+
+> Registrado 2026-08-20 ao mergear o #258. **É o B-052 outra vez, um diretório adiante**: um portão que não
+> olha um código é indistinguível de um portão que aprova aquele código, e a diferença só aparece quando
+> alguém quebra alguma coisa.
