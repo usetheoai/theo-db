@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "objectives": [
+    {
+      "metric": "throughput_per_second",
+      "direction": "maximize"
+    },
+    {
+      "metric": "recall",
+      "direction": "maximize"
+    }
+  ],
+  "points": [
+    {
+      "label": "hnsw m=16 ef_search=40",
+      "values": {
+        "throughput_per_second": 626.7336376851272,
+        "recall": 0.9188
+      },
+      "dominated_by": []
+    },
+    {
+      "label": "hnsw m=16 ef_search=64",
+      "values": {
+        "throughput_per_second": 491.19464729236074,
+        "recall": 0.958
+      },
+      "dominated_by": []
+    },
+    {
+      "label": "hnsw m=16 ef_search=128",
+      "values": {
+        "throughput_per_second": 273.9297742322988,
+        "recall": 0.9884000000000001
+      },
+      "dominated_by": []
+    },
+    {
+      "label": "hnsw m=16 ef_search=256",
+      "values": {
+        "throughput_per_second": 167.5739619779997,
+        "recall": 0.9967999999999999
+      },
+      "dominated_by": []
+    }
+  ],
+  "frontier": [
+    "hnsw m=16 ef_search=40",
+    "hnsw m=16 ef_search=64",
+    "hnsw m=16 ef_search=128",
+    "hnsw m=16 ef_search=256"
+  ]
+}

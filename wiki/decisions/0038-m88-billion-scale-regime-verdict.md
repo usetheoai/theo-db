@@ -11,7 +11,7 @@ milestone: M88
 generated: { by: claude-code/opus-5, at: 2026-08-07T16:12:05Z }
 sources:
   - id: adr0038
-    resource: git:f7c7b93:docs/adr/0038-m88-billion-scale-verdict.md
+    resource: git:f7c7b93:docs/adr/0038-m88-billion-scale-regime-verdict.md
     title: ADR-0038 — M88 veredito billion-scale
     last_modified: 2026-07-12
 ---

@@ -147,3 +147,96 @@ def test_a_merge_commit_is_not_a_violation() -> None:
 
         _pytest.skip("sem merge commit neste checkout")
     assert _rc(merge) == 0
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-21 — dois defeitos no proprio gate, e o segundo o fazia PASSAR POR ACIDENTE.
+# ---------------------------------------------------------------------------
+
+_ARQUIVO = """# Changelog
+
+## [Unreleased]
+
+### Added
+- entrada existente, linha um
+  continuacao dela
+
+### Fixed
+- outra entrada
+
+## [1.0.0] - 2026-01-01
+
+### Added
+- coisa antiga
+"""
+
+
+def test_amending_an_unreleased_entry_counts(tmp_path: Path) -> None:
+    """Emendar entrada NAO LANCADA e registrar a mudanca.
+
+    O `CLAUDE.md` proibe editar entradas de versoes JA RELEASED — o que implica que as de
+    `[Unreleased]` podem ser editadas. Exigir bullet NOVO empurrava para escrever duas entradas
+    para uma mudanca que sai uma vez, o que e changelog pior.
+    """
+    del tmp_path
+    diff = (
+        "--- a/CHANGELOG.md\n"
+        "+++ b/CHANGELOG.md\n"
+        "@@ -6,3 +6,4 @@\n"
+        " - entrada existente, linha um\n"
+        "   continuacao dela\n"
+        "+  e agora tambem isto, que o leitor precisa saber\n"
+    )
+    assert added_unreleased_bullets(diff, _ARQUIVO) == 1
+
+
+def test_a_hunk_without_the_section_header_is_still_located(tmp_path: Path) -> None:
+    """O DEFEITO GRAVE: a secao era descoberta pelo CONTEXTO DO DIFF.
+
+    Num hunk fundo na secao o cabecalho `## [Unreleased]` nao aparece no diff, entao o cursor
+    nunca entrava na secao e a contagem dava ZERO. **O gate vinha passando por acidente** — so
+    quando o hunk calhava de incluir o cabecalho, isto e, quando a entrada ia para o topo.
+
+    Medido no commit que motivou o conserto: hunk `@@ -20,7 +20,13 @@`, sem cabecalho, cinco
+    linhas de conteudo acrescentadas dentro da secao, contagem 0.
+    """
+    del tmp_path
+    diff = (
+        "--- a/CHANGELOG.md\n"
+        "+++ b/CHANGELOG.md\n"
+        "@@ -6,2 +6,3 @@\n"
+        " - entrada existente, linha um\n"
+        "+  linha nova bem longe do cabecalho da secao\n"
+    )
+    assert "## [Unreleased]" not in diff, "o teste so mede o que se propoe se o cabecalho faltar"
+    assert added_unreleased_bullets(diff, _ARQUIVO) == 1
+    # E o comportamento antigo, sem o arquivo, e exatamente o que falhava:
+    assert added_unreleased_bullets(diff) == 0
+
+
+def test_an_edit_in_a_released_section_still_counts_nothing(tmp_path: Path) -> None:
+    """A propriedade que o B-088 existe para garantir NAO pode ter sido afrouxada."""
+    del tmp_path
+    diff = (
+        "--- a/CHANGELOG.md\n"
+        "+++ b/CHANGELOG.md\n"
+        "@@ -18,2 +18,3 @@\n"
+        " - coisa antiga\n"
+        "+- coisa acrescentada numa versao JA LANCADA\n"
+    )
+    assert added_unreleased_bullets(diff, _ARQUIVO) == 0
+
+
+def test_blank_lines_and_category_headers_do_not_count(tmp_path: Path) -> None:
+    """Acrescentar `### Added` vazio ou linhas em branco nao registra nada a quem consome."""
+    del tmp_path
+    diff = (
+        "--- a/CHANGELOG.md\n"
+        "+++ b/CHANGELOG.md\n"
+        "@@ -3,1 +3,4 @@\n"
+        " ## [Unreleased]\n"
+        "+\n"
+        "+### Security\n"
+        "+   \n"
+    )
+    assert added_unreleased_bullets(diff, _ARQUIVO) == 0

@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-21T10:25:20.205704Z",
+  "hostname": "paulohenriquevn",
+  "cpu": {
+    "vendor": "GenuineIntel",
+    "model": "13th Gen Intel(R) Core(TM) i7-1355U",
+    "microarchitecture": {
+      "absent": "unavailable",
+      "detail": "not derivable from /proc/cpuinfo"
+    },
+    "sockets": 1,
+    "physical_cores": 10,
+    "logical_cpus": 12,
+    "smt_enabled": true,
+    "frequency_policy": "powersave",
+    "numa_nodes": 1,
+    "cache": {
+      "L1d": "48K",
+      "L1i": "32K",
+      "L2u": "1280K",
+      "L3u": "12288K"
+    }
+  },
+  "memory": {
+    "total_bytes": 16439533568,
+    "swap_total_bytes": 10367242240,
+    "hugepages": "2097152 bytes",
+    "numa_distribution": {
+      "node0": 16439533568
+    }
+  },
+  "storage": [
+    {
+      "device": "/dev/nvme0n1p3",
+      "mountpoint": "/",
+      "filesystem": "ext4",
+      "mount_options": "rw,relatime,errors=remount-ro",
+      "rotational": false,
+      "capacity_bytes": 489206685696
+    },
+    {
+      "device": "/dev/nvme0n1p1",
+      "mountpoint": "/boot/efi",
+      "filesystem": "vfat",
+      "mount_options": "rw,relatime,fmask=0077,dmask=0077,codepage=437,iocharset=iso8859-1,shortname=mixed,errors=remount-ro",
+      "rotational": false,
+      "capacity_bytes": 1044381696
+    }
+  ],
+  "software": {
+    "os": "Ubuntu 22.04.5 LTS",
+    "kernel": "6.8.0-136-generic",
+    "libc": "glibc 2.35",
+    "compiler": "cc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0",
+    "rust_toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "python": "3.10.12",
+    "postgres": "psql (PostgreSQL) 14.23 (Ubuntu 14.23-0ubuntu0.22.04.1)",
+    "theodb": {
+      "absent": "unavailable",
+      "detail": "reported by the system adapter, not by the host"
+    },
+    "container_runtime": "Docker version 29.3.0, build 5927d80",
+    "benchmark_runner": "theodb-bench 0.4.0"
+  },
+  "capabilities": {
+    "perf_events": false,
+    "cgroup_v2": true,
+    "cpu_affinity": true,
+    "numa_control": false
+  },
+  "source_control": {
+    "benchmark_commit": "86ff52dcdaeb34e172944f1c562548f890e37294",
+    "benchmark_dirty": true
+  }
+}

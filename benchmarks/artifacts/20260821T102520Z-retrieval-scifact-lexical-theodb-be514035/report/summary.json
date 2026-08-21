@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "run_id": "20260821T102520Z-retrieval-scifact-lexical-theodb-be514035",
+  "status": "EXPLORATORY",
+  "profile": "research",
+  "publishable": false,
+  "benchmark": {
+    "id": "retrieval/scifact/lexical",
+    "version": 1,
+    "commit": "86ff52dcdaeb34e172944f1c562548f890e37294"
+  },
+  "system": {
+    "id": "theodb",
+    "version": null
+  },
+  "environment_digest": "sha256:c5f4c76f0982a88332fb4ced51edfe12",
+  "headline": {
+    "configuration": "pipeline=lexical",
+    "throughput_per_second": 214.83093925175345,
+    "latency_p50_ms": 4.315735001000576,
+    "latency_p95_ms": 6.230984853027623,
+    "latency_p99_ms": 7.2694749834772665
+  },
+  "limitations": [
+    "profile 'research' is not publishable",
+    "run status is EXPLORATORY",
+    "pipeline=lexical: unstable (latency_p99_ms cv=0.188)"
+  ],
+  "dataset": {
+    "id": "beir-scifact",
+    "version": "beir-2021-03-19",
+    "sha256": "536e14446a0ba56ed1398ab1055f39fe852686ecad24a6306c80c490fa8e0165"
+  }
+}

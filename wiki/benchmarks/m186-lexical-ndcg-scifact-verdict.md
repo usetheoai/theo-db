@@ -2,13 +2,13 @@
 type: Measurement
 title: m186 — a busca lexical own-code entrega 2,08× o nDCG@10 do ts_rank_cd nativo em corpus público
 description: Primeira medição de qualidade de recuperação do pilar lexical, contra o BEIR SciFact e contra o baseline que o usuário já tem no Postgres — com significância pareada e o limite de método que provavelmente subestima o nosso número.
-resource: benchmarks/artifacts/m186/lexical-ndcg-scifact.json
+resource: git:7cd157d^:benchmarks/artifacts/m186/lexical-ndcg-scifact.json
 tags: [benchmark, m186, lexical, bm25, ndcg, beir, significancia, qualidade-de-recuperacao]
 milestone: M186
 generated: { by: claude-code/opus-5, at: 2026-08-09T20:00:00Z }
 sources:
   - id: ndcg
-    resource: benchmarks/artifacts/m186/lexical-ndcg-scifact.json
+    resource: git:7cd157d^:benchmarks/artifacts/m186/lexical-ndcg-scifact.json
     title: nDCG@10 sobre 300 consultas do SciFact com julgamento humano
 ---
 
@@ -63,6 +63,20 @@ comemoração.
 > **Consequência prática:** o `0,6269` continua sendo um piso, mas a correção é barata — o adapter atual
 > (`theodb-bench/src/adapters/postgres.py:1590`) já manda `query.text` inteiro numa chamada. Re-medir é
 > [[B-093]]. O [[B-014]], aberto para "expor busca multi-termo", foi morto pela mesma medição: já existe.
+>
+> **RE-MEDIDO em 2026-08-21, DENTRO do arnês: nDCG@10 = 0,6864.** Contra os 0,6269 desta página,
+> **+0,0595 pontos, +9,5% relativo** — determinístico (stdev 0,0 em 3 repetições), recall@10 0,8227,
+> QPS 213,5 (CV 2,1%). Corpus `beir-scifact` verificado por sha256, benchmark registrado
+> `retrieval/scifact/lexical`, artefato em
+> `benchmarks/artifacts/20260821T102520Z-retrieval-scifact-lexical-theodb-be514035/`.
+>
+> **O 0,6269 era piso, e a razão do piso não era a que esta página deu.** Não era normalização —
+> era truncamento: somar top-k por termo perde o documento que não entra no top-k de nenhum termo
+> isolado mas entraria no combinado.
+>
+> É também o **primeiro número lexical deste projeto produzido dentro do arnês**, o que era o pedido
+> do [[B-069]]. Para chegar lá, a família `retrieval` teve de deixar de ser órfã: ela trazia a
+> pipeline inteira e nenhum benchmark registrado a alcançava.
 
 **`bm25_search` aceita um termo por chamada.** Para uma consulta multi-termo eu somei os scores por termo —
 aproximação grosseira do BM25 multi-termo real, que receberia a consulta inteira e normalizaria uma vez.

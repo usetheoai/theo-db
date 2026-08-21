@@ -13,6 +13,52 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.165.0] - 2026-08-21
+
+### Added
+- **Um número publicado e o artefato que o sustenta deixaram de poder divergir.** Novo gate
+  (`check_bundle_citations.py`, ligado ao `stop-validation.sh`): um documento que cita um bundle tem de
+  citar um que **existe** — em disco, ou sob `git:<sha>:<caminho>`, a forma que o acervo já usa para o
+  que foi removido de propósito. Ele **não** exige que todo documento cite bundle; exige que quem cita,
+  cite algo que resolve. Não ter prova é uma coisa; alegar uma prova inexistente é outra, e pior.
+  Ao entrar, encontrou **26 citações quebradas em 9 arquivos**, todas resíduo de uma remoção deliberada
+  (`7cd157d`) que ninguém tinha visto porque nada olhava. Convertidas para a forma `git:`.
+  .
+  O gate distingue **"não existe"** de **"não deu para perguntar"**: o CI clona raso, e ali um
+  `git cat-file` sobre commit antigo responde ausência quando a verdade é que a cópia não tem a
+  história. Ele reporta quantas citações não pôde verificar e **não emite veredito sobre elas** — a
+  primeira versão colapsou as duas e reprovou o próprio PR que a introduziu, acusando 557 ponteiros
+  válidos de mortos. (#B-069)
+
+### Changed
+- **O nDCG@10 do pilar lexical no SciFact é 0,6864, e não os 0,6269 que publicávamos.** Re-medido
+  DENTRO do arnês, com corpus verificado por sha256 e benchmark registrado: **+9,5% relativo**,
+  determinístico, recall@10 0,8227. O número antigo era um piso, e a razão do piso **não era a que a
+  página dava**: não era normalização, era truncamento — somar top-k por termo perde o documento que
+  não entra no top-k de nenhum termo isolado mas entraria no combinado. É o primeiro número lexical
+  deste projeto produzido dentro do arnês, o que era o pedido do [[B-069]]. (#B-093)
+- **A recall casado o déficit contra o pgvector vai de 3,4% a 19,6%, e é MENOR no alto recall.**
+  Fronteira completa em SIFT1M com pgvector 0.8.6 e theodb 1.5.0 no **mesmo PostgreSQL 18.6**, mesma
+  máquina, mesmos parâmetros. Dois dos três pontos casam recall diretamente (quarta casa decimal):
+  em 0,9574 o déficit é **19,6%**, em **0,9890 é 3,4%**. O "16,3%" que registrávamos descreve um ponto
+  num corpus de 1536d/cosseno — aqui, em 128d/L2, o déficit **fecha conforme o recall sobe**, e o alto
+  recall é o regime que um RAG de produção usa. Nenhum ponto é paridade; o que muda é a magnitude e a
+  direção em que ela se move. (#B-046)
+- **O build do HNSW é 1,82× mais lento, não 3,6× — e a diferença era paridade de workers.** Com
+  `max_parallel_maintenance_workers=8` declarado nos dois lados (a medição original comparou contra o
+  default de 2 do pgvector): **142,0 s** contra **78,0 s**. E um eixo nunca medido corta a nosso favor:
+  nosso índice é **7,4% menor**, 724,1 MB contra 782,4 MB. (#B-042)
+
+### Fixed
+- **O gate de CHANGELOG vinha passando por acidente, e dois defeitos o causavam.** (1) Ele descobria
+  a seção `[Unreleased]` pelo **contexto do diff** — num hunk fundo na seção o cabeçalho não aparece,
+  então o cursor nunca entrava nela e a contagem dava **zero**. Só funcionava quando a entrada ia para
+  o topo da seção, que por acaso é como quase toda entrada foi escrita. Agora a seção é localizada por
+  **número de linha no arquivo**, que é dado que o diff sempre traz. (2) Ele exigia **bullet novo**, o
+  que reprovava emendar uma entrada ainda não lançada — e o `CLAUDE.md` proíbe editar apenas as de
+  versões **já released**. Exigir bullet novo empurrava para duas entradas para uma mudança que sai
+  uma vez. Passa a contar conteúdo; cabeçalho de categoria e linha em branco continuam não contando,
+  e editar seção já lançada continua contando zero. (#B-088)
 ## [0.164.0] - 2026-08-21
 
 ### Added

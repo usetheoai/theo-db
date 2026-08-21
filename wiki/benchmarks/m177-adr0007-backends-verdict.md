@@ -2,13 +2,13 @@
 type: Measurement
 title: m177 — o footgun do ADR 0007 medido: a latência escala com a concorrência, os backends não
 description: Cada theodb.embed prende um backend pela latência inteira do modelo, mas a saturação do servidor chega antes de max_connections — o custo real é a latência do usuário, não o esgotamento de conexões.
-resource: benchmarks/artifacts/m177/adr0007-backends.json
+resource: git:7cd157d^:benchmarks/artifacts/m177/adr0007-backends.json
 tags: [benchmark, m177, adr-0007, backend, max-connections, concorrencia, postgres-no-laco]
 milestone: M177
 generated: { by: claude-code/opus-5, at: 2026-08-08T03:30:00Z }
 sources:
   - id: adr7
-    resource: benchmarks/artifacts/m177/adr0007-backends.json
+    resource: git:7cd157d^:benchmarks/artifacts/m177/adr0007-backends.json
     title: theodb.embed sob concorrência, com PostgreSQL no laço (1–16 clientes)
 ---
 
