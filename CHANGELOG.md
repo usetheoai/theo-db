@@ -13,6 +13,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Correção no registro: o `B-002` estava marcado `shipped` por engano de edição — ele segue aberto e é
+  decisão do owner. O `B-007`, que está entregue, estava marcado `raw`. Ambos corrigidos (B-002, B-007)
+
+### Added
+- `B-095` — `group_by_category` não usa o caminho colunar; o plano cai para `GroupAggregate` em todas as
+  seis escalas medidas. Não é quebra, é lacuna de pushdown (B-095)
+- `B-096` — `read_parquet` devolve `SETOF jsonb`, e a materialização por documento é o que custa os 142×
+  contra o heap — não o parser (B-096)
+
+
 ## [0.167.0] - 2026-08-21
 
 ### Added

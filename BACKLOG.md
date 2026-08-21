@@ -68,16 +68,16 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-94 items — **Open** 11 · **In flight** 13 · **Closed** 70
+96 items — **Open** 13 · **In flight** 13 · **Closed** 70
 
-### Open (11)
+### Open (13)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
+| [`B-002`](#b-002--o-objetivo-definir-e-medir-o-que-torna-o-theodb-atrativo-já-que-superar-todo-benchmark-é-impossível----) | O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível | `raw` | — |
 | [`B-003`](#b-003--vetorial-o-teto-é-o-build-não-a-busca--100m-nunca-foi-atingido----) | Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido | `raw` | — |
 | [`B-005`](#b-005--híbrido-o-ganho-da-fusão-sobre-o-vetorial-puro-é-estatisticamente-não-significativo----) | Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo | `raw` | — |
 | [`B-006`](#b-006--colunar-43-queries-do-clickbench-medidas-a-suíte-completa-nunca----) | Colunar: 43 queries do ClickBench medidas, a suíte completa nunca | `raw` | — |
-| [`B-007`](#b-007--grafo-23-funções-expostas-e-nenhuma-medição-contra-peer-algum---x) | Grafo: 23 funções expostas e nenhuma medição contra peer algum | `raw` | — |
 | [`B-008`](#b-008--lakehouse-4-funções-expostas-escala-e-formatos-nunca-medidos----) | Lakehouse: 4 funções expostas, escala e formatos nunca medidos | `raw` | — |
 | [`B-010`](#b-010--maturidade-zero-uso-real-e-é-o-gargalo-de-todos-os-pilares----) | Maturidade: zero uso real, e é o gargalo de todos os pilares | `raw` | — |
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
@@ -85,6 +85,8 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
+| [`B-095`](#b-095--group_by_category-não-usa-o-caminho-colunar-e-o-plano-cai-para-groupaggregate----) | `group_by_category` não usa o caminho colunar, e o plano cai para `GroupAggregate` | `triaged` | — |
+| [`B-096`](#b-096--read_parquet-devolve-setof-jsonb-e-é-isso-que-custa-142----) | `read_parquet` devolve `SETOF jsonb`, e é isso que custa 142× | `triaged` | — |
 
 ### In flight (13)
 
@@ -109,8 +111,8 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-001`](#b-001--cargo-pgrx-test-não-roda-o-binário-de-teste-morre-em-currentmemorycontext---x) | `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext` | `shipped` | — |
-| [`B-002`](#b-002--o-objetivo-definir-e-medir-o-que-torna-o-theodb-atrativo-já-que-superar-todo-benchmark-é-impossível----) | O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível | `shipped` | — |
 | [`B-004`](#b-004--lexical-qualidade-de-recuperação-nunca-foi-medida-contra-um-corpus-público---x) | Lexical: qualidade de recuperação nunca foi medida contra um corpus público | `shipped` | — |
+| [`B-007`](#b-007--grafo-23-funções-expostas-e-nenhuma-medição-contra-peer-algum---x) | Grafo: 23 funções expostas e nenhuma medição contra peer algum | `shipped` | — |
 | [`B-011`](#b-011--o-vector-join-do-hnsw-perde-exatamente-um-elemento---x) | O vector-join do HNSW perde exatamente um elemento | `shipped` | — |
 | [`B-012`](#b-012--as-outras-18-falhas-da-suíte-seguem-sem-causa-capturada---x) | As outras 18 falhas da suíte seguem sem causa capturada | `shipped` | — |
 | [`B-013`](#b-013--a-suíte-não-roda-no-ci-então-a-próxima-regressão-espera-meses---x) | A suíte não roda no CI, então a próxima regressão espera meses | `shipped` | — |
@@ -426,7 +428,7 @@ suggested_mode: evolve
 source: human
 evidence: none-yet
 why_now: o M73 mediu que superar o ScaNN/AlloyDB no vetorial é **não-alcançável** por extensão PG permissiva (gap 25–44× a recall 0.99, causa de paradigma). O owner reformulou o alvo em 2026-08-09: não precisamos vencer todos os benchmarks, precisamos ser atrativos. Hoje não existe artefato que diga **o que** torna o produto atrativo nem **como se mede** isso — e sem essa definição os demais itens deste lote otimizam eixos escolhidos por intuição. O ADR-0033 (reposicionamento do North Star) segue proposto, sem assinatura, desde 2026-07-10.
-status: shipped
+status: raw
 dod:
   - um ADR assinado define os eixos de atratividade e, para cada um, a medição que o sustenta
   - cada eixo tem um número medido ou um `não medido` explícito — nenhum eixo fica em afirmação
@@ -537,7 +539,7 @@ suggested_mode: review
 source: human
 evidence: `wiki/benchmarks/b007-grafo-vs-sql-recursivo.md` — run `20260821T142720Z-…-e65961cc`, suíte `graph/synthetic/vs-recursive-sql`
 why_now: o M184 mediu 23 funções de grafo no binário default e 35 testes — a maior superfície pública depois do vetorial. **Não existe um único artefato comparando o pilar com qualquer outro sistema**, nem um número de latência publicado. Qualquer afirmação sobre o grafo hoje, em qualquer direção, é sem lastro; e ele é superfície que o usuário recebe.
-status: raw
+status: shipped
 dod:
   - latência e throughput medidos em ao menos duas operações de travessia, com dataset e método publicados
   - comparação contra um baseline — SQL recursivo no próprio Postgres serve, e é o que o usuário faria sem nós
@@ -4362,3 +4364,40 @@ dod:
 
 > Registrado 2026-08-21 pelo ciclo do [[B-043]]. É o item mais desconfortável do backlog: o produto
 > que este projeto publica como instrumento de medição não sustenta a carga que se propõe a medir.
+
+## B-095 — `group_by_category` não usa o caminho colunar, e o plano cai para `GroupAggregate`   [ ]
+
+domain: colunar
+repo: theo-db
+suggested_mode: review
+source: discover-review
+evidence: `benchmarks/artifacts/20260821T122336Z-analytical-crossover-row-count-theodb-eed87401/result.json` — `status_detail` do ponto `group_by_category via columnar`: *"'theodb_columnar_agg' is absent … Plan: GroupAggregate"*, em **todas as seis escalas** (10k a 2M)
+why_now: o sweep de crossover de 2026-08-21 é a primeira medição que pede prova de caminho de acesso em vez de aceitar residência, e ela reprovou esta consulta nas seis escalas. A consulta **não quebra** — devolve o resultado certo pelo fallback; o que falta é cobertura de pushdown de agregação para `GROUP BY`. Sem isto, o colunar tem um número publicável a menos e a promessa de "aceleração analítica" vale para agregação simples e não para agrupamento, sem que nada diga isso ao usuário.
+status: triaged
+dod:
+  - medido quais formas de `GROUP BY` o `theodb_columnar_agg` cobre hoje e quais caem para `GroupAggregate`
+  - ou o pushdown passa a cobrir `group_by_category`, ou a lacuna vira limite declarado em `wiki/`
+  - o sweep de crossover volta a reportar um número `measured` para esta consulta, ou um `unsupported` com razão
+
+> Registrado em 2026-08-21 ao avaliar um plano de ação externo que tratava isto como "colapso a debugar".
+> **Não é colapso**, e a diferença muda o trabalho: não há crash para caçar, há cobertura de pushdown para
+> estender. O portão `assert_analytical_path` fez exatamente o que existe para fazer — recusou publicar um
+> número "colunar" para uma consulta que não passou pelo colunar.
+
+## B-096 — `read_parquet` devolve `SETOF jsonb`, e é isso que custa 142×   [ ]
+
+domain: colunar
+repo: theo-db
+suggested_mode: evolve
+source: discover-review
+evidence: `theodb_rs` via `src/adapters/postgres.py:1558-1563` — *"`read_parquet` returns SETOF jsonb, so the columns are projected out of the jsonb document"*; medido em `…122336Z-analytical-crossover…/result.json`: **0,1 QPS contra 18,4 do heap** a 2M linhas, em todas as quatro consultas e todas as seis escalas
+why_now: a leitura fácil do número (142× mais lento) é "o parser de Parquet é lento", e ela leva a reescrever o componente errado. A causa está na **interface**: cada linha é materializada como documento JSON e as colunas são extraídas de dentro dele, o que desfaz exatamente a propriedade pela qual se escolhe Parquet. Enquanto a assinatura for `SETOF jsonb`, nenhuma otimização de parsing muda a ordem de grandeza.
+status: triaged
+dod:
+  - medido o custo separando parsing de projeção — quanto do tempo é a materialização jsonb
+  - uma interface tipada/colunar para `read_parquet` é prototipada e medida contra a atual no mesmo sweep
+  - se o ganho não justificar, o limite é declarado em `wiki/` e o Parquet deixa de ser comparado como caminho de consulta quente
+
+> Registrado em 2026-08-21. Relacionado a [[B-008]] (lakehouse nunca medido — agora está) e a [[B-058]].
+> A pergunta aberta que o item **não** resolve: se o caminho Parquet deve sequer ser comparado em QPS por
+> consulta, ou se o uso pretendido é varredura em lote, caso em que a métrica está errada e não o código.
