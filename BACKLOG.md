@@ -68,17 +68,16 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-94 items — **Open** 12 · **In flight** 13 · **Closed** 69
+94 items — **Open** 11 · **In flight** 13 · **Closed** 70
 
-### Open (12)
+### Open (11)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
-| [`B-002`](#b-002--o-objetivo-definir-e-medir-o-que-torna-o-theodb-atrativo-já-que-superar-todo-benchmark-é-impossível----) | O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível | `raw` | — |
 | [`B-003`](#b-003--vetorial-o-teto-é-o-build-não-a-busca--100m-nunca-foi-atingido----) | Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido | `raw` | — |
 | [`B-005`](#b-005--híbrido-o-ganho-da-fusão-sobre-o-vetorial-puro-é-estatisticamente-não-significativo----) | Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo | `raw` | — |
 | [`B-006`](#b-006--colunar-43-queries-do-clickbench-medidas-a-suíte-completa-nunca----) | Colunar: 43 queries do ClickBench medidas, a suíte completa nunca | `raw` | — |
-| [`B-007`](#b-007--grafo-23-funções-expostas-e-nenhuma-medição-contra-peer-algum----) | Grafo: 23 funções expostas e nenhuma medição contra peer algum | `raw` | — |
+| [`B-007`](#b-007--grafo-23-funções-expostas-e-nenhuma-medição-contra-peer-algum---x) | Grafo: 23 funções expostas e nenhuma medição contra peer algum | `raw` | — |
 | [`B-008`](#b-008--lakehouse-4-funções-expostas-escala-e-formatos-nunca-medidos----) | Lakehouse: 4 funções expostas, escala e formatos nunca medidos | `raw` | — |
 | [`B-010`](#b-010--maturidade-zero-uso-real-e-é-o-gargalo-de-todos-os-pilares----) | Maturidade: zero uso real, e é o gargalo de todos os pilares | `raw` | — |
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
@@ -105,11 +104,12 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `planned` | — |
 | [`B-093`](#b-093--o-ndcg-publicado-do-pilar-lexical-foi-medido-com-agregação-que-trunca-e-o-arnês-já-não-trunca----) | O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca | `planned` | — |
 
-### Closed (69)
+### Closed (70)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-001`](#b-001--cargo-pgrx-test-não-roda-o-binário-de-teste-morre-em-currentmemorycontext---x) | `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext` | `shipped` | — |
+| [`B-002`](#b-002--o-objetivo-definir-e-medir-o-que-torna-o-theodb-atrativo-já-que-superar-todo-benchmark-é-impossível----) | O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível | `shipped` | — |
 | [`B-004`](#b-004--lexical-qualidade-de-recuperação-nunca-foi-medida-contra-um-corpus-público---x) | Lexical: qualidade de recuperação nunca foi medida contra um corpus público | `shipped` | — |
 | [`B-011`](#b-011--o-vector-join-do-hnsw-perde-exatamente-um-elemento---x) | O vector-join do HNSW perde exatamente um elemento | `shipped` | — |
 | [`B-012`](#b-012--as-outras-18-falhas-da-suíte-seguem-sem-causa-capturada---x) | As outras 18 falhas da suíte seguem sem causa capturada | `shipped` | — |
@@ -426,7 +426,7 @@ suggested_mode: evolve
 source: human
 evidence: none-yet
 why_now: o M73 mediu que superar o ScaNN/AlloyDB no vetorial é **não-alcançável** por extensão PG permissiva (gap 25–44× a recall 0.99, causa de paradigma). O owner reformulou o alvo em 2026-08-09: não precisamos vencer todos os benchmarks, precisamos ser atrativos. Hoje não existe artefato que diga **o que** torna o produto atrativo nem **como se mede** isso — e sem essa definição os demais itens deste lote otimizam eixos escolhidos por intuição. O ADR-0033 (reposicionamento do North Star) segue proposto, sem assinatura, desde 2026-07-10.
-status: raw
+status: shipped
 dod:
   - um ADR assinado define os eixos de atratividade e, para cada um, a medição que o sustenta
   - cada eixo tem um número medido ou um `não medido` explícito — nenhum eixo fica em afirmação
@@ -529,13 +529,13 @@ dod:
   - o hardware e o método de reprodução no artefato
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `colunar-clickbench-completo`).
-## B-007 — Grafo: 23 funções expostas e nenhuma medição contra peer algum   [ ]
+## B-007 — Grafo: 23 funções expostas e nenhuma medição contra peer algum   [x]
 
 domain: colunar
 repo: theo-db
 suggested_mode: review
 source: human
-evidence: none-yet
+evidence: `wiki/benchmarks/b007-grafo-vs-sql-recursivo.md` — run `20260821T142720Z-…-e65961cc`, suíte `graph/synthetic/vs-recursive-sql`
 why_now: o M184 mediu 23 funções de grafo no binário default e 35 testes — a maior superfície pública depois do vetorial. **Não existe um único artefato comparando o pilar com qualquer outro sistema**, nem um número de latência publicado. Qualquer afirmação sobre o grafo hoje, em qualquer direção, é sem lastro; e ele é superfície que o usuário recebe.
 status: raw
 dod:
@@ -544,6 +544,16 @@ dod:
   - o veredito é publicado mesmo se desfavorável
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `grafo-sem-baseline`).
+>
+> **Fechado 2026-08-21, com veredito desfavorável na maior parte da faixa.** O CSR **perde** para
+> `WITH RECURSIVE` indexado a 1 salto (2,17×) e a 2 saltos (1,90×), e só ganha do 3º em diante
+> (2,26×). Ganha em espaço sempre: 14,4 MB contra 30 MB de índices B-tree. A DoD pedia o veredito
+> publicado mesmo se desfavorável — está em `wiki/benchmarks/b007-grafo-vs-sql-recursivo.md`.
+>
+> A medição encontrou **cinco defeitos no arnês antes de encontrar qualquer coisa no produto**, e
+> nenhum era do produto. O mais grave: os dois lados da comparação mediam semânticas diferentes
+> (não-dirigido com semente vs. dirigido sem), o que tornaria a razão entre os tempos um número sem
+> referente. Todos corrigidos e cobertos por teste.
 ## B-008 — Lakehouse: 4 funções expostas, escala e formatos nunca medidos   [ ]
 
 domain: colunar
