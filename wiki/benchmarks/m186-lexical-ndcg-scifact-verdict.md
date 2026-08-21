@@ -63,6 +63,20 @@ comemoração.
 > **Consequência prática:** o `0,6269` continua sendo um piso, mas a correção é barata — o adapter atual
 > (`theodb-bench/src/adapters/postgres.py:1590`) já manda `query.text` inteiro numa chamada. Re-medir é
 > [[B-093]]. O [[B-014]], aberto para "expor busca multi-termo", foi morto pela mesma medição: já existe.
+>
+> **RE-MEDIDO em 2026-08-21, DENTRO do arnês: nDCG@10 = 0,6864.** Contra os 0,6269 desta página,
+> **+0,0595 pontos, +9,5% relativo** — determinístico (stdev 0,0 em 3 repetições), recall@10 0,8227,
+> QPS 213,5 (CV 2,1%). Corpus `beir-scifact` verificado por sha256, benchmark registrado
+> `retrieval/scifact/lexical`, artefato em
+> `benchmarks/artifacts/20260821T102520Z-retrieval-scifact-lexical-theodb-be514035/`.
+>
+> **O 0,6269 era piso, e a razão do piso não era a que esta página deu.** Não era normalização —
+> era truncamento: somar top-k por termo perde o documento que não entra no top-k de nenhum termo
+> isolado mas entraria no combinado.
+>
+> É também o **primeiro número lexical deste projeto produzido dentro do arnês**, o que era o pedido
+> do [[B-069]]. Para chegar lá, a família `retrieval` teve de deixar de ser órfã: ela trazia a
+> pipeline inteira e nenhum benchmark registrado a alcançava.
 
 **`bm25_search` aceita um termo por chamada.** Para uma consulta multi-termo eu somei os scores por termo —
 aproximação grosseira do BM25 multi-termo real, que receberia a consulta inteira e normalizaria uma vez.

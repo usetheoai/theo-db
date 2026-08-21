@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "run_id": "20260821T100946Z-vector-sift1m-frontier-pgvector-08f2a02c",
+  "status": "EXPLORATORY",
+  "profile": "research",
+  "publishable": false,
+  "benchmark": {
+    "id": "vector/sift1m/frontier",
+    "version": 1,
+    "commit": null
+  },
+  "system": {
+    "id": "pgvector",
+    "version": null
+  },
+  "environment_digest": "sha256:77ec97f3f26cc3fc45548262c28572c6",
+  "headline": {
+    "configuration": "hnsw m=16 ef_search=40",
+    "throughput_per_second": 626.7336376851272,
+    "recall": 0.9188,
+    "latency_p50_ms": 1.5425709999590254,
+    "latency_p95_ms": 1.8149243499976815,
+    "latency_p99_ms": 1.9777128399721278
+  },
+  "limitations": [
+    "profile 'research' is not publishable",
+    "run status is EXPLORATORY"
+  ],
+  "dataset": {
+    "id": "sift-128-euclidean",
+    "version": "ann-benchmarks-2018",
+    "sha256": "dd6f0a6ed6b7ebb8934680f861a33ed01ff33991eaee4fd60914d854a0ca5984"
+  }
+}
