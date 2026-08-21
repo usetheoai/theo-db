@@ -13,14 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed
-- **Medido: baixar o default de `theodb_hnsw.ef_search` para 40 custa 7 pontos de recall, e a decisão é
-  não baixar.** SIFT1M completo, 3 repetições, no arnês: `ef=40` dá **901,2 QPS** e recall@10 **0,8316**;
-  `ef=64` dá 654,4 e **0,9018**. Baixar compra **1,377× de QPS** (IC95 [1,355×, 1,402×], p = 0,0003) e
-  custa **7,02 pontos de recall** — e o pilar sustenta paridade de recall classe-pgvector, então sete
-  pontos não são tuning, são a alegação. **O pgvector paga o mesmo preço:** em `ef=64` ele também larga
-  o índice na junção filtrada; o default de 40 dele compra o plano com os mesmos 7 pontos. A saída é por
-  consulta — `SET LOCAL theodb_hnsw.ef_search`. ADR-0066. (#B-018)
+## [0.164.0] - 2026-08-21
 
 ### Added
 - **Os seis caminhos de erro do `theodb.embed_batch` passaram a ter teste.** O mapeamento
@@ -32,6 +25,28 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   erro sinaliza: resposta **fora de ordem** é mapeada por `index` e não por posição — com mapeamento por
   posição os vetores sairiam trocados em silêncio. Extração pura, sem mudança de comportamento; 496
   testes verdes. (#B-009)
+
+### Changed
+- **Medido: baixar o default de `theodb_hnsw.ef_search` para 40 custa 7 pontos de recall, e a decisão é
+  não baixar.** SIFT1M completo, 3 repetições, no arnês: `ef=40` dá **901,2 QPS** e recall@10 **0,8316**;
+  `ef=64` dá 654,4 e **0,9018**. Baixar compra **1,377× de QPS** (IC95 [1,355×, 1,402×], p = 0,0003) e
+  custa **7,02 pontos de recall** — e o pilar sustenta paridade de recall classe-pgvector, então sete
+  pontos não são tuning, são a alegação. **O pgvector paga o mesmo preço:** em `ef=64` ele também larga
+  o índice na junção filtrada; o default de 40 dele compra o plano com os mesmos 7 pontos. A saída é por
+  consulta — `SET LOCAL theodb_hnsw.ef_search`. ADR-0066. (#B-018)
+
+- **As 1.444 operações inseguras sem bloco explícito passaram a ser 0, e o lint virou erro.** Dentro
+  de uma `unsafe fn` sem `unsafe {}`, o corpo inteiro é implicitamente inseguro e some a capacidade de
+  apontar quais linhas são as perigosas — num banco onde um panic atravessando a fronteira C derruba o
+  backend, essa é a diferença entre revisar o que está marcado e reler o arquivo. O crate passa a
+  declarar `#![deny(unsafe_op_in_unsafe_fn)]`, então o número não pode crescer em silêncio: o build
+  para. **A marcação é por operação, nunca por corpo** — o `cargo fix` do próprio rustc envolve o
+  corpo, o que satisfaz o lint e preserva o status quo exatamente (uma deref acrescentada amanhã
+  continua sem avisar); ele foi aplicado, medido e revertido. Sem mudança de comportamento: 488 testes
+  passando. `wiki/decisions/0065-*`. (#B-032)
+- **O número registrado era o dobro do real.** Medido: 1.444, não 2.872 — e cada um dos seis arquivos
+  citados bate em precisamente metade, porque `cargo pgrx test` compila o crate duas vezes e emite
+  cada aviso duas vezes. (#B-032)
 
 ### Fixed
 - **O planner larga o HNSW numa junção com filtro seletivo, e a causa é o nosso default de
@@ -47,21 +62,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (v vector_cosine_ops)` é recusado — o nome é `theodb_hnsw_cosine_ops`. Uma aplicação migrando do
   pgvector precisa reescrever o `CREATE INDEX`, e isso não estava na compatibilidade que o shim promete.
   Registrado, ainda não corrigido. (#B-018)
-
-### Changed
-- **As 1.444 operações inseguras sem bloco explícito passaram a ser 0, e o lint virou erro.** Dentro
-  de uma `unsafe fn` sem `unsafe {}`, o corpo inteiro é implicitamente inseguro e some a capacidade de
-  apontar quais linhas são as perigosas — num banco onde um panic atravessando a fronteira C derruba o
-  backend, essa é a diferença entre revisar o que está marcado e reler o arquivo. O crate passa a
-  declarar `#![deny(unsafe_op_in_unsafe_fn)]`, então o número não pode crescer em silêncio: o build
-  para. **A marcação é por operação, nunca por corpo** — o `cargo fix` do próprio rustc envolve o
-  corpo, o que satisfaz o lint e preserva o status quo exatamente (uma deref acrescentada amanhã
-  continua sem avisar); ele foi aplicado, medido e revertido. Sem mudança de comportamento: 488 testes
-  passando. `wiki/decisions/0065-*`. (#B-032)
-- **O número registrado era o dobro do real.** Medido: 1.444, não 2.872 — e cada um dos seis arquivos
-  citados bate em precisamente metade, porque `cargo pgrx test` compila o crate duas vezes e emite
-  cada aviso duas vezes. (#B-032)
-
 ## [0.163.0] - 2026-08-21
 
 ### Added
