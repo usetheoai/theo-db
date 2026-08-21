@@ -52,27 +52,71 @@ def touches_production_source(arquivos: list[str]) -> bool:
     )
 
 
-def added_unreleased_bullets(diff: str) -> int:
-    """Quantas linhas de bullet FORAM ACRESCENTADAS dentro da secao `[Unreleased]`.
+def _faixa_unreleased(arquivo: str) -> tuple[int, int]:
+    """Linhas (1-based, inclusivo) que a secao `[Unreleased]` ocupa no arquivo. `(0, 0)` se ausente."""
+    inicio = fim = 0
+    for n, linha in enumerate(arquivo.splitlines(), start=1):
+        alvo = linha.strip()
+        if not alvo.startswith("## ["):
+            continue
+        if alvo.startswith("## [Unreleased]"):
+            inicio = n
+        elif inicio:
+            return inicio, n - 1
+    return (inicio, len(arquivo.splitlines())) if inicio else (0, 0)
 
-    Conta linhas `+` que comecam um bullet, e apenas enquanto o cursor esta dentro do
-    `[Unreleased]` — uma edicao numa versao ja lancada nao acrescenta nada ao contrato pendente.
 
-    Uma reescrita (`-` seguido de `+`) conta como UMA entrada, que e o que ela e. O gate pergunta
-    "ha entrada nova?", nao "quantas linhas mudaram?".
+def added_unreleased_bullets(diff: str, arquivo: str | None = None) -> int:
+    """Quanto CONTEUDO foi acrescentado dentro da secao `[Unreleased]`.
+
+    DOIS DEFEITOS CORRIGIDOS EM 2026-08-21, e o segundo e o grave.
+
+    (1) Contava so linhas que COMECAM um bullet (`- `), o que reprovava o caso legitimo de
+    **emendar uma entrada ainda nao lancada**. O `CLAUDE.md` diz "NUNCA edite entradas de versoes JA
+    RELEASED", o que implica que as de `[Unreleased]` podem ser editadas, e o Keep a Changelog trata
+    a secao como mutavel ate o corte. Exigir bullet novo empurrava para escrever duas entradas para
+    uma mudanca que sai uma vez — changelog PIOR.
+
+    (2) **Descobria a secao lendo o CONTEXTO DO DIFF.** Num hunk fundo na secao o cabecalho
+    `## [Unreleased]` nao aparece no diff, entao o cursor nunca entrava na secao e a contagem dava
+    zero. Medido: o commit que motivou este conserto tem hunk `@@ -20,7 +20,13 @@`, sem o cabecalho,
+    e contava 0 apesar de acrescentar cinco linhas de conteudo dentro da secao.
+
+    **O gate vinha passando por acidente** — so quando o hunk calhava de incluir o cabecalho, isto e,
+    quando a entrada era acrescentada no topo. Agora a secao vem do ARQUIVO (`arquivo`), e os numeros
+    de linha vem dos cabecalhos de hunk, que o diff sempre traz.
+
+    Sem `arquivo`, cai no comportamento antigo (contexto do diff) — o que mantem os testes que
+    passam so o diff, e e honesto: sem o arquivo nao ha como saber onde a secao termina.
     """
+    faixa = _faixa_unreleased(arquivo) if arquivo is not None else None
     dentro = False
+    linha_nova = 0
     total = 0
     for linha in diff.splitlines():
-        if linha.startswith(("+++", "---", "@@")):
+        if linha.startswith("@@"):
+            m = re.search(r"\+(\d+)", linha)
+            linha_nova = int(m.group(1)) if m else 0
+            continue
+        if linha.startswith(("+++", "---")):
             continue
         conteudo = linha[1:] if linha[:1] in "+- " else linha
         cabecalho = conteudo.strip()
-        if cabecalho.startswith("## ["):
+        if faixa is None and cabecalho.startswith("## ["):
             dentro = cabecalho.startswith("## [Unreleased]")
+            linha_nova += 1
             continue
-        if dentro and linha.startswith("+") and conteudo.lstrip().startswith("- "):
+        eh_add = linha.startswith("+")
+        na_secao = (faixa[0] <= linha_nova <= faixa[1]) if faixa else dentro
+        if (
+            eh_add
+            and na_secao
+            and conteudo.strip()
+            and not cabecalho.startswith(("###", "## ["))
+        ):
             total += 1
+        if eh_add or not linha.startswith("-"):
+            linha_nova += 1
     return total
 
 
@@ -106,7 +150,12 @@ def main() -> int:
         print(f"OK: {args.rev} nao toca codigo de producao")
         return 0
 
-    bullets = added_unreleased_bullets(_git("show", args.rev, "--", "CHANGELOG.md"))
+    # O ARQUIVO no estado da revisao, e nao so o diff: a secao `[Unreleased]` tem de ser localizada
+    # por numero de linha, porque um hunk fundo na secao nao traz o cabecalho dela.
+    bullets = added_unreleased_bullets(
+        _git("show", args.rev, "--", "CHANGELOG.md"),
+        _git("show", f"{args.rev}:CHANGELOG.md"),
+    )
     if bullets:
         print(f"OK: {args.rev} acrescentou {bullets} entrada(s) ao [Unreleased]")
         return 0
