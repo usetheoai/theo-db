@@ -7,6 +7,24 @@ from __future__ import annotations
 
 import pytest
 
+# B-090 — estes testes exercitam o parser tree-sitter, e a dep dele e declarada OPCIONAL pelo
+# proprio modulo (`check_symbol_fab.tree_sitter_available`, e o golden rule trata ferramenta ausente
+# como `auditor_unavailable_{tool}`, um soft cap — nao uma falha).
+#
+# Sem este guard, a ausencia da dep produzia oito falhas com `assert False` e `assert [] == [...]`,
+# que reportam "o parser esta quebrado" quando o verdadeiro estado e "o parser nao foi carregado".
+# Um teste que falha pela razao errada e pior que um teste que pula dizendo por que.
+#
+# A dep ESTA declarada em `.claude/requirements-dev.txt`, entao no CI eles rodam de verdade; o skip
+# e para quem trabalha sem ela instalada.
+from scripts.check_symbol_fab import tree_sitter_available
+
+pytestmark = pytest.mark.skipif(
+    not tree_sitter_available(),
+    reason="tree-sitter-languages ausente — o modulo declara a dep como opcional",
+)
+
+
 from scripts.check_symbol_fab import ExtractedSymbol, extract_imports_and_calls
 
 

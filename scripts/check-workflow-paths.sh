@@ -49,7 +49,13 @@ WF_DIR="$ROOT/.github/workflows"
 # Prefixos de diretórios do repositório que um workflow pode invocar. Deliberadamente uma
 # lista fechada: casar qualquer coisa com barra produziria falso positivo em URL, imagem
 # docker e caminho de runner (`/usr/bin/...`).
-PREFIXOS='scripts|packaging|benchmarks|hooks|\.github'
+# `\.claude` vem PRIMEIRO na alternancia e a ordem importa por causa da semantica do grep:
+# `-oE` casa o match mais a ESQUERDA, entao `.claude/scripts/x.sh` casa inteiro em vez de casar so
+# `scripts/x.sh` a partir do meio. Sem isso o checador reportava AUSENTE para um arquivo que existe,
+# porque procurava `scripts/run_slice_tests.sh` na raiz (B-090). Um falso positivo aqui e caro: a
+# mensagem do proprio checador diz que "um job que falha por arquivo ausente e indistinguivel de uma
+# regressao real", e ela vale nos dois sentidos.
+PREFIXOS='\.claude|scripts|packaging|benchmarks|hooks|\.github'
 
 ausentes=0
 dinamicos=0
