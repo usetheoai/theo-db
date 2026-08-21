@@ -43,6 +43,13 @@ pub(crate) static EF_SEARCH: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_EF
 // Faixas idênticas às dos nomes próprios de propósito (ADR D3 do plano `b034-guc-alias`): aceitar um
 // valor que o motor não honra seria o mesmo defeito noutra forma.
 pub(crate) static ALIAS_EF_SEARCH: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_EF_SEARCH);
+
+/// B-076 — orcamento de memoria para o build do `theodb_hnsw`, em MB. `0` = derivar do host.
+///
+/// Nao e um limite que o build respeita: HNSW nao e streamavel, entao nao ha rota de memoria
+/// limitada para escolher. E o numero contra o qual a PROJECAO e comparada antes de tentar, para
+/// que uma recusa clara substitua um servidor reiniciado pelo OOM killer.
+pub(crate) static HNSW_BUILD_MEMORY_MB: GucSetting<i32> = GucSetting::<i32>::new(0);
 pub(crate) static ALIAS_PROBES: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_PROBES);
 
 /// M51 — `SET theodb_hnsw.over_fetch = N`: for an SBQ index, widen the Hamming-ranked candidate pool by ×N before
@@ -377,6 +384,16 @@ pub(crate) fn init() {
         GucFlags::default(),
     );
     GucRegistry::define_int_guc(
+        c"theodb_hnsw.build_memory_mb",
+        c"Memory budget in MB against which a theodb_hnsw index build is projected before it starts",
+        c"0 derives the budget from the host's MemAvailable. The build does not stream — this is the number the projection is compared against, so a clear refusal replaces an OOM-killed backend (B-076).",
+        &HNSW_BUILD_MEMORY_MB,
+        0,
+        i32::MAX,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_int_guc(
         c"theodb_hnsw.ef_search",
         c"Size of the dynamic candidate list a theodb_hnsw scan keeps at the ground layer",
         c"Higher value increases recall at the cost of speed; bounds both quality and result count.",
@@ -576,6 +593,11 @@ fn resolve_alias(native: i32, native_default: i32, alias: i32) -> i32 {
 }
 
 /// The effective `ef_search` for a theodb_hnsw scan (never below 1).
+/// O orcamento declarado para o build do HNSW, em MB. `0` = derivar do host (B-076).
+pub(crate) fn hnsw_build_memory_mb() -> i32 {
+    HNSW_BUILD_MEMORY_MB.get()
+}
+
 pub(crate) fn ef_search() -> usize {
     resolve_alias(EF_SEARCH.get(), DEFAULT_EF_SEARCH, ALIAS_EF_SEARCH.get()).max(MIN_EF_SEARCH)
         as usize

@@ -13,6 +13,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Um `CREATE INDEX ... USING theodb_hnsw` grande demais passa a ser recusado com números, em vez de
+  derrubar o servidor.** Até aqui o build materializava o corpus e o operador descobria o limite por um
+  backend morto pelo OOM killer e um servidor reiniciado — sem pista nenhuma. Agora o pico é projetado
+  antes (`184 MB + 3,45 × corpus`, modelo ajustado sobre dois pontos medidos que ele reproduz
+  exatamente) e comparado com `theodb_hnsw.build_memory_mb` ou, sem ele, com o `MemAvailable` do host.
+  A recusa nomeia a projeção, o orçamento e o knob. (#B-076)
+
 ### Fixed
 - **A extensão `vector` deixou de dizer que tem `halfvec`.** Ela declarava `0.7.0`, que é a versão em
   que o pgvector introduziu `halfvec`/`sparsevec` — e uma aplicação que faz a checagem de capacidade
