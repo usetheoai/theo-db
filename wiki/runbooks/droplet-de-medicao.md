@@ -40,27 +40,48 @@ A conta tem outros dois droplets que **não são de medição e não se toca**: 
 
 # O procedimento
 
+**Um comando, da máquina de desenvolvimento.** É o caminho provado ponta a ponta, e o único que
+garante a destruição do droplet:
+
+```bash
+cd theodb-bench/ops
+SUITE=analytical/crossover/row-count TAGS="base:HEAD~1 fix:HEAD" ./bench-droplet.sh
+```
+
+Ele cria o droplet a partir do snapshot, envia o arnês, roda o portão de capacidades, **constrói uma
+imagem por ref git**, roda o smoke barato, mede, colhe em `./resultados/` e destrói. Medido: **~2 min
+até a primeira medição** partindo do snapshot.
+
+`TAGS` na forma `nome:ref` é o que permite comparar dois commits com honestidade — mesma máquina,
+mesmo dia, mesmos parâmetros, diferindo só no código. `MANTER=1` mantém o host de pé para depuração,
+avisando o custo por hora.
+
+**A destruição é `trap EXIT`, não uma linha no fim** — e é a diferença que decidiu o desperdício de
+2026-08-21: o dinheiro não foi embora num droplet caro, foi num droplet **ocioso**, depois de o
+script morrer. Um droplet cujos resultados **não** foram colhidos não é destruído: ficar de pé
+cobrando é ruim, destruir dado que custou uma hora de host é pior e é irreversível.
+
+## O caminho manual, quando se quer olhar de perto
+
 ```bash
 doctl compute droplet create theo-<item>-<data> \
-  --region nyc3 --size g-16vcpu-64gb --image ubuntu-24-04-x64 \
+  --region nyc1 --size g-16vcpu-64gb --image <snapshot-ou-ubuntu-24-04-x64> \
   --ssh-keys 58598100 --tag-names theo-test,ephemeral --wait
 
-# no host — provisiona E verifica. O `--verify` sozinho e idempotente e barato.
-./theodb-bench/ops/provision.sh          # instala tudo, inclusive docker-buildx e o extra [postgres]
-./theodb-bench/ops/provision.sh --verify # reprova em ~2 s se faltar qualquer capacidade
+# NO HOST, depois de enviar ops/ e o arnês em /root/bench:
+/root/provision.sh --verify   # ~2 s; reprova se faltar qualquer capacidade
+/root/provision.sh            # só se o --verify reprovar
 
 # o arnês NÃO sobe o servidor — ele mede um que já exista, no DSN `postgresql:///postgres`.
 # Essa divisão é deliberada: o arnês mede, não faz deploy. O executor abaixo sobe o servidor,
 # cria o diretório de Parquet (armadilha 5), prova a proveniência LENDO DO SERVIDOR, roda um
 # smoke barato e só então libera o sweep caro.
-SUITE=analytical/crossover/row-count TAGS="base fix" ./theodb-bench/ops/bench-run.sh
+SUITE=analytical/crossover/row-count TAGS="base fix" /root/bench-run.sh
 
 doctl compute droplet delete <id> --force        # SEMPRE
 ```
 
-**Partindo do snapshot** (o caminho rápido; ver § A imagem de bench): o `provision.sh` já rodou, e
-`--verify` é o que confirma isso antes de medir. Partindo de uma `ubuntu-24-04-x64` limpa, rode o
-`provision.sh` inteiro — são ~40 s de pacotes mais o venv.
+Neste caminho a destruição é sua responsabilidade, e é exatamente por isso que ele não é o padrão.
 
 **Os parâmetros do servidor são declarados, não default.** Um `maintenance_work_mem` de 8 GB não é o
 que um usuário recebe; ele está aqui porque o build de HNSW o usa, e um artefato que não declara isso
