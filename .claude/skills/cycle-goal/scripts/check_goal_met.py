@@ -45,6 +45,7 @@ import argparse
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 GREEN_VERDICTS = {"ACCEPTED", "ACCEPTED_WITH_CAVEATS"}
@@ -73,6 +74,69 @@ def _acceptance_verdict(acceptance_dir: Path, milestone_id: str) -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+#: Status do `BACKLOG.md` que ENCERRAM a cadeia de um item. `killed` entra deliberadamente: matar um
+#: item e um desfecho de SUCESSO do ciclo (`cycle-discover.md` diz isso em texto — a corrida que
+#: mata uma hipotese protegeu o ciclo de planejamento). Um gate que exigisse `shipped` criaria o
+#: incentivo de enviar hipotese fraca em vez de mata-la.
+CLOSED_STATUS = {"shipped", "killed"}
+
+_ITEM_RE_TEMPLATE = r"^##\s+{bid}\s+[—\-]{{1,2}}.*?^status:\s*(\S+)\s*$"
+
+
+def _backlog_status(backlog_text: str, item_id: str) -> str | None:
+    """Status declarado no bloco de `item_id`, ou `None` quando o item nao esta no registro."""
+    match = re.search(
+        _ITEM_RE_TEMPLATE.format(bid=re.escape(item_id)),
+        backlog_text,
+        re.MULTILINE | re.DOTALL,
+    )
+    return match.group(1) if match else None
+
+
+def evaluate_backlog_items(
+    item_ids: list[str], backlog_text: str, runs_dir: Path
+) -> list[str]:
+    """Uma razao de bloqueio por item nao encerrado; lista vazia = objetivo cumprido.
+
+    A CONTRAPARTE DE `evaluate` PARA UM ECOSSISTEMA BACKLOG-DRIVEN (B-056). O `cycle-roadmap` foi
+    aposentado e este repositorio nao tem `ROADMAP.md` com milestones, entao o par
+    (registro de acceptance + checkbox) nao tem como julgar um objetivo expresso em itens. Foi esse
+    descompasso que produziu cinco bloqueios seguidos em 2026-08-13/14, com o trabalho entregue,
+    commitado e empurrado — e na quinta recusa o proprio gate concedeu o ponto por escrito.
+
+    O VEREDITO VEM DO `status` NO REGISTRO, e nao do registro de execucao. A ordem importa: um item
+    so chega a `shipped` atravessando os gates do sub-ciclo, entao o `status` JA E o resumo do que
+    foi verificado. O `maintenance-runs/{B-NNN}-*.md` e o rastro de auditoria — evidencia de
+    primeira classe para quem le depois, nao um segundo portao. Exigir os dois faria o gate reprovar
+    trabalho legitimo feito antes de o registro existir, que e a classe de bloqueio que este item
+    existe para remover.
+    """
+    if not runs_dir.exists():
+        return [
+            f"MISCONFIGURED: {runs_dir} does not exist, so no maintenance-run record can ever be "
+            "found there and this gate would block forever for a false reason. Re-arm with "
+            "--runs-dir pointing at the repo that holds the cycle artifacts, or clear the goal."
+        ]
+
+    reasons: list[str] = []
+    for item_id in item_ids:
+        status = _backlog_status(backlog_text, item_id)
+        if status is None:
+            reasons.append(
+                f"{item_id}: não está no BACKLOG.md. Um id ausente é diferente de um item aberto, "
+                "e confundir os dois faria o gate bloquear para sempre por uma razão que ninguém "
+                "entenderia — verifique o id ou limpe o objetivo."
+            )
+            continue
+        if status not in CLOSED_STATUS:
+            reasons.append(
+                f"{item_id}: status é `{status}`, e a cadeia só encerra em "
+                f"{sorted(CLOSED_STATUS)}. Matar o item com `kill_reason` é um desfecho legítimo — "
+                "o que não é legítimo é declarar `shipped` sem o release que o sub-ciclo exige."
+            )
+    return reasons
 
 
 def evaluate(milestones: list[str], roadmap_text: str, acceptance_dir: Path) -> list[str]:
@@ -131,53 +195,91 @@ def main() -> int:
 
         state = json.loads(args.state.read_text(encoding="utf-8"))
         milestones = state.get("milestones") or []
-        if not milestones:
+        # B-056 — um objetivo pode ser expresso em MILESTONES (roadmap-driven) ou em ITENS de
+        # backlog (maintenance-driven). Os dois coexistem porque os dois existem: `cycle-roadmap`
+        # foi aposentado neste ecossistema, mas o formato continua valido onde ha roadmap.
+        items = state.get("items") or []
+        if not milestones and not items:
             return 0
 
         blocks = int(state.get("blocks", 0))
         max_blocks = int(state.get("max_blocks", DEFAULT_MAX_BLOCKS))
 
-        roadmap_path = args.project_root / state.get("roadmap", "ROADMAP.md")
-        if not roadmap_path.exists():
-            print(json.dumps({
-                "systemMessage": f"cycle-goal: {roadmap_path} not found — goal gate stood down.",
-            }))
-            return 0
+        reasons: list[str] = []
 
-        acceptance_dir = args.project_root / state.get(
-            "acceptance_dir", "knowledge-base/acceptance"
-        )
-        reasons = evaluate(
-            milestones, roadmap_path.read_text(encoding="utf-8"), acceptance_dir
-        )
+        if milestones:
+            roadmap_path = args.project_root / state.get("roadmap", "ROADMAP.md")
+            if not roadmap_path.exists():
+                print(json.dumps({
+                    "systemMessage": f"cycle-goal: {roadmap_path} not found — goal gate stood down.",
+                }))
+                return 0
+            acceptance_dir = args.project_root / state.get(
+                "acceptance_dir", "knowledge-base/acceptance"
+            )
+            reasons += evaluate(
+                milestones, roadmap_path.read_text(encoding="utf-8"), acceptance_dir
+            )
+
+        if items:
+            backlog_path = args.project_root / state.get("backlog", "BACKLOG.md")
+            if not backlog_path.exists():
+                print(json.dumps({
+                    "systemMessage": f"cycle-goal: {backlog_path} not found — goal gate stood down.",
+                }))
+                return 0
+            runs_dir = args.project_root / state.get(
+                "runs_dir", "knowledge-base/maintenance-runs"
+            )
+            reasons += evaluate_backlog_items(
+                items, backlog_path.read_text(encoding="utf-8"), runs_dir
+            )
 
         if not reasons:
             args.state.unlink(missing_ok=True)
             print(json.dumps({
-                "systemMessage": "cycle-goal: every milestone accepted and flipped — goal met, gate cleared.",
+                "systemMessage": "cycle-goal: every declared milestone/item is closed — goal met, gate cleared.",
             }))
             return 0
 
         if blocks >= max_blocks:
             print(json.dumps({
                 "systemMessage": (
-                    f"cycle-goal: released after {blocks} blocks without the goal being met. "
+                    f"cycle-goal: released after {blocks} blocks"
+                    + (
+                        f" spanning {state['first_block_at']}..{state.get('last_block_at', '?')}"
+                        if state.get("first_block_at") else ""
+                    )
+                    + " without the goal being met. "
                     "The gate stops holding rather than loop forever — the milestone is NOT done. "
                     + " | ".join(reasons)
                 ),
             }))
             return 0
 
+        # B-056 bullet 4 — o custo dos bloqueios repetidos tem de ser mensuravel. O numero
+        # historico da sessao de 2026-08-13/14 esta PERDIDO: nem o registro de manutencao nem
+        # nenhum outro artefato capturou contagem ou tempo, e reconstrui-lo seria invencao. O que
+        # da para fazer e nao repetir a perda — com a marca do primeiro e do ultimo bloqueio,
+        # `last - first` responde "quantos minutos" e `blocks` responde "quantas vezes".
+        agora = datetime.now(timezone.utc).isoformat(timespec="seconds")
         state["blocks"] = blocks + 1
+        state.setdefault("first_block_at", agora)
+        state["last_block_at"] = agora
         args.state.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
         print(json.dumps({
             "decision": "block",
             "reason": (
-                "The active cycle-goal is not met. The stop criterion is the acceptance run, "
-                "and nothing else ends it — not a green test suite, not READY_TO_MERGE, not "
-                "RELEASED, not a published tag, not your own judgement that the work looks "
-                "finished.\n\n" + "\n".join(f"- {r}" for r in reasons) +
+                # B-056 — o texto era so de milestone e afirmava que "o criterio e a corrida de
+                # acceptance", o que fica FALSO para um objetivo em itens de backlog. Um gate que
+                # descreve errado a propria condicao e um gate que ninguem consegue satisfazer de
+                # proposito — foi o que produziu cinco recusas seguidas em 2026-08-13/14.
+                "The active cycle-goal is not met. The stop criterion is the ARTIFACT ON DISK — "
+                "the acceptance record for a milestone, the item's `status` in BACKLOG.md for a "
+                "backlog item — and nothing else ends it: not a green test suite, not "
+                "READY_TO_MERGE, not RELEASED, not a published tag, not your own judgement that "
+                "the work looks finished.\n\n" + "\n".join(f"- {r}" for r in reasons) +
                 "\n\nContinue the cycle. If the GOAL itself is wrong, clear it with:\n"
                 "  python3 .claude/skills/cycle-goal/scripts/install_goal_hook.py --clear"
             ),

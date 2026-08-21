@@ -14,6 +14,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **O portão de sessão passou a saber julgar objetivo expresso em ITENS de backlog.** Ele só sabia o
+  par (registro de acceptance + checkbox do ROADMAP), e este ecossistema é backlog-driven desde que o
+  `cycle-roadmap` foi aposentado — o descompasso produziu cinco bloqueios seguidos com o trabalho já
+  entregue, commitado e empurrado. O texto da recusa também dizia "o critério é a corrida de
+  acceptance", falso para itens: um portão que descreve errado a própria condição é um portão que
+  ninguém consegue satisfazer de propósito. (#B-056)
+
+### Fixed
 - **O lint de copy pública deixou de avisar sobre o texto que cumpre a regra.** Ele apontava
   `production-ready` nas quatro ocorrências do README, e as quatro eram **negações** — "Não é
   production-ready", "Sem afirmação de production-ready até haver evidência". Um aviso sobre o texto
