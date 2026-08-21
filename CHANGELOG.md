@@ -13,6 +13,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **O opclass do `theodb_hnsw` não atende pelo nome do pgvector.** `CREATE INDEX ... USING theodb_hnsw
+  (v vector_cosine_ops)` é recusado — o nome é `theodb_hnsw_cosine_ops`. Uma aplicação migrando do
+  pgvector precisa reescrever o `CREATE INDEX`, e isso não estava na compatibilidade que o shim promete.
+  Registrado, ainda não corrigido. (#B-018)
+
 ### Changed
 - **As 1.444 operações inseguras sem bloco explícito passaram a ser 0, e o lint virou erro.** Dentro
   de uma `unsafe fn` sem `unsafe {}`, o corpo inteiro é implicitamente inseguro e some a capacidade de

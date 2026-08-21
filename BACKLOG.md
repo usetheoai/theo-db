@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-91 items — **Open** 17 · **In flight** 11 · **Closed** 63
+92 items — **Open** 18 · **In flight** 11 · **Closed** 63
 
-### Open (17)
+### Open (18)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -91,6 +91,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
+| [`B-092`](#b-092--o-índice-hnsw-ocupa-178-o-disco-do-pgvector-e-é-isso-que-tira-o-índice-do-plano----) | O índice HNSW ocupa 1,78× o disco do pgvector, e é isso que tira o índice do plano | `triaged` | — |
 
 ### In flight (11)
 
@@ -979,10 +980,43 @@ dod:
 > hipóteses baratas — parâmetro vs literal, generic plan, estatística ausente, ordem de criação do
 > índice — **não são o gatilho**.
 >
-> **Próxima medição, e ela é cara por natureza:** rodar a suíte do `theo-rag` em laço até a ocorrência,
-> capturando o plano (o teste já o imprime na mensagem de falha desde o #167). Um evento de 1-em-11 exige
-> repetição, não outro cenário inventado. Enquanto isso o item fica `raw`, com o espaço de busca
-> reduzido — que é o resultado honesto desta rodada.
+> **REPRODUZIDO em 2026-08-21, deterministicamente, e a causa NÃO é a que o item supunha.**
+> `wiki/benchmarks/b018-planner-hnsw-juncao.md`.
+>
+> O sétimo cenário — que os seis não tocaram — é um **filtro seletivo na tabela juntada**
+> (`WHERE d.tenant = 't1'`). Sem ele, `embeddings` dirige e o HNSW serve a ordenação. Com ele, a ordem
+> de junção inverte, `embeddings` vai para o lado interno de um Nested Loop por `chunk_id`, e o `Sort`
+> aparece — a forma exata do relato. Com `enable_sort = off` o plano não muda (`Disabled: true`): não
+> há caminho alternativo a gerar.
+>
+> **A margem é de 24% no melhor caso**, e é isso que explica a intermitência de 1-em-11 que seis
+> cenários determinísticos não pegaram. Não é aleatoriedade: é uma comparação no fio da navalha, e nove
+> arquivos de teste do `theo-rag` escrevendo em paralelo movem o custo do lado concorrente.
+>
+> | `ef_search` | partida do HNSW | plano |
+> |---|---|---|
+> | 40 | 425,60 | HNSW (vence o Sort de 559,36 por 24%) |
+> | **64 (nosso default)** | acima de 559 | **Sort** |
+>
+> **A causa não é o modelo de custo** (a hipótese herdada do `m175`). O `am/cost.rs` é port FIEL do
+> `hnsw.c` do pgvector 0.8 — mesma fórmula de ratio, mesmo `scalingFactor = 0.55`, mesma correção TOAST.
+> O controle justo (pgvector **0.8.6**, mesmo dado) escolhe o HNSW inclusive em `ef_search = 64`, com
+> partida 342,40 contra os nossos >559.
+>
+> **A causa é o TAMANHO do índice:** 680 páginas contra 382 do pgvector para o mesmo dado — **1,78×**,
+> que casa com a razão de custo medida de **1,769×**. O `genericcostestimate` cobra por páginas, então
+> a divergência de custo é consequência aritmética da de tamanho. O conserto mora no layout de
+> armazenamento, não em `am/cost.rs` — inflar a fórmula para compensar seria mentir ao planner sobre um
+> custo que é verdadeiro.
+>
+> **Retratação registrada:** o primeiro controle usou pgvector **0.5.1** e teria concluído "defeito
+> nosso, o pgvector não tem". Estava errado — o 0.5.1 tem um modelo anterior e muito mais cru
+> (`numIndexTuples = (entryLevel+2)*m`, `startup = total`), então aquilo mediu a distância entre duas
+> gerações do modelo, não entre duas implementações dele.
+>
+> **Próximo passo, agora barato e específico:** medir POR QUE 680 contra 382 para vetores idênticos de
+> 384 dimensões — ver [[B-092]].
+
 ## B-019 — `CREATE INDEX` de HNSW não é idempotente: estoura em vez de ser no-op   [ ]
 
 domain: vetorial
@@ -4032,3 +4066,21 @@ dod:
 > Registrado 2026-08-20 ao verificar a própria edição que fiz no README para o [[B-055]]. **Encontrado
 > porque eu duvidei do meu próprio "passou"**: o lint saiu 0 sem output, e 0-sem-output é ausência de
 > resposta, não resposta.
+## B-092 — O índice HNSW ocupa 1,78× o disco do pgvector, e é isso que tira o índice do plano   [ ]
+
+domain: vetorial
+repo: theo-db
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-21 (`wiki/benchmarks/b018-planner-hnsw-juncao.md`). Mesmo dado — 3000 vetores de 384 dimensões, `documents`/`chunks`/`embeddings` — o `theodb_hnsw` ocupa **680 páginas** e o `hnsw` do pgvector 0.8.6 ocupa **382**. O `genericcostestimate` cobra proporcionalmente a páginas de índice, e a razão de custo medida (**1,769×**, partida 425,60 contra 240,62 em `ef_search=40`) casa com a razão de tamanho (**1,78×**).
+why_now: o [[B-018]] reproduziu e a causa dele é esta. O custo maior é VERDADEIRO — o índice é maior mesmo —, então não há conserto em `am/cost.rs`: inflar ou desinflar a fórmula seria mentir ao planner. Enquanto o índice for 1,78× maior, toda comparação de plano com `LIMIT` corre com esse handicap, e a do `theo-rag` já perde por uma margem de 24%.
+status: triaged
+dod:
+  - medido POR QUE 680 contra 382 — o que ocupa as 298 páginas de diferença (layout de nó, fator de preenchimento, cópia do vetor, metadados por vizinho)
+  - decidido em ADR se a diferença é essencial (o nosso nó carrega algo que o deles não carrega e que serve a um requisito) ou acidental
+  - se acidental, o índice do mesmo dado passa a caber em páginas comparáveis, e a junção filtrada do [[B-018]] escolhe o HNSW no `ef_search` default
+  - recall@10 medido antes e depois: encolher o nó não pode ser pago em recall sem que o número apareça
+
+> Registrado 2026-08-21 pelo ciclo que reproduziu o [[B-018]]. Separado dele porque o B-018 é "o
+> planner larga o índice" e este é "o índice é grande demais" — o primeiro é sintoma do segundo, e
+> fundi-los faria o conserto ser avaliado pelo sintoma.
