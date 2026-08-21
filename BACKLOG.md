@@ -4385,6 +4385,13 @@ evidence_final: medido em 2026-08-21, executando o sistema contra droplets reais
 > cpu_governor"*. **Nenhum número medido em droplet DigitalOcean pode ser `publishable` pelas regras do
 > próprio arnês — inclusive os já publicados.** Não os invalida como evidência; significa que a palavra
 > correta para eles é `EXPLORATORY`/`research`.
+>
+> **`nightly` ALCANÇADO em 2026-08-21 — veredito `VALID`**, com `cpu_limit`, `memory_limit`,
+> `process_containment`, `repetitions_completed` e `clean_source_tree` todos em `PASS`. Chegar lá
+> exigiu consertar **dois perfis mortos por construção** no próprio arnês: a CLI nunca construía um
+> `IsolationPlan`, e `apply_isolation` nunca marcava `memory_limit_applied = True` (aconselhava rodar
+> sob cgroup externo e nunca verificava se alguém o fizera). Nenhum dos dois era limitação de máquina.
+> Para claim **público** a única saída segue sendo bare metal com controle de `cpufreq`.
 dod:
   - `ops/provision.sh` versionado é a fonte de verdade do que o host precisa, com modo `--verify` idempotente que reprova ANTES de qualquer trabalho caro
   - `ops/bench-run.sh` roda um smoke barato (um N, três caminhos) e só libera o sweep caro se ele passar

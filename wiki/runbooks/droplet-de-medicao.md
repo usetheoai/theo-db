@@ -189,10 +189,46 @@ eles é `EXPLORATORY` ou `research`, e que dizer "release" sobre qualquer um ser
 Tudo o mais do host passa: SMT desligado, swap desligado, NUMA único, 16 núcleos físicos. É um bom
 host de medição — exceto na única coisa que uma VM não entrega.
 
-**As saídas, e as três são decisão do owner:** aceitar `nightly` como teto em nuvem (ele não exige
-governor, mas exige CPU set e limite de memória declarados — medido: `INVALID: cpu_limit,
-memory_limit`); alugar bare metal para as corridas que forem virar claim público; ou mudar a regra do
-arnês, que exige ADR e enfraquece o portão.
+**`nightly` é o teto em nuvem, e agora está ALCANÇADO.** Ele não exige governor, mas exige CPU set e
+limite de memória declarados **e aplicados** — e chegar lá exigiu consertar duas coisas no arnês
+(§ abaixo). Medido em 2026-08-21:
+
+```bash
+SUITE=analytical/crossover/row-count TAGS="base:HEAD~1 fix:HEAD" \
+PROFILE=nightly CPU_SET="0-11" MEM_MAX="48G" ./bench-droplet.sh
+```
+
+```
+VEREDITO: VALID
+  repetitions_completed  PASS   required=True
+  process_containment    PASS   required=True
+  cpu_limit              PASS   required=True
+  memory_limit           PASS   required=True
+  clean_source_tree      PASS
+```
+
+Para claim **público** (`publishable`), a única saída continua sendo **bare metal** com controle de
+`cpufreq` — nenhuma quantidade de software resolve isso numa VM.
+
+## Dois perfis estavam mortos por construção, e não era o hardware
+
+Ao perseguir `nightly` apareceram dois defeitos no arnês, e ambos tornavam `nightly` e `release`
+inalcançáveis **em qualquer máquina**:
+
+1. **A CLI nunca construía um `IsolationPlan`.** Os dois perfis declaram `isolation_required`, o que
+   torna `cpu_limit` e `memory_limit` obrigatórios — e `RunRequest.isolation` ficava sempre no default
+   vazio. Não era limitação de máquina: era superfície faltando. Corrigido com `--cpu-set`,
+   `--memory` e `--numa-node`.
+
+2. **`apply_isolation` nunca marcava `memory_limit_applied = True`.** Os dois ramos devolviam
+   ausência, e um deles aconselhava *"run under an externally created cgroup instead"* — conselho que
+   o arnês nunca verificava. Corrigido lendo o limite do cgroup em que o processo já roda: aplicar
+   exigiria privilégio e teria efeito colateral sobre o host; ler não tem nenhum dos dois.
+
+E uma armadilha de unidade que custou uma corrida: **`systemd` lê `48G` como 48 GiB** (base 1024) e o
+parser lia como 48 GB (base 1000). O mesmo texto ia para os dois lugares significando coisas
+diferentes, o cgroup ficava mais frouxo que a declaração, e o portão reprovava — com razão. O parser
+passou a seguir systemd e docker no sufixo simples.
 
 # As seis armadilhas — e a regra que torna a lista obsoleta
 
