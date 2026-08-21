@@ -76,3 +76,4 @@ code-review-output/
 
 # Cache de fixtures gerado pela suíte de benchmarks (pytest)
 .cache*/
+.testout.txt
