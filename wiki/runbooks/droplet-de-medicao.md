@@ -146,29 +146,53 @@ O snapshot foi tirado de um host que já havia medido, então trouxe `~1 MB` de 
 porque parece completo.** O `bench-run.sh` passou a registrar qual corrida acabou de rodar, e a coleta
 leva só essa.
 
-# Tarball ou `git clone`: o que decide o veredito
+# O teto de veredito, medido — e não é o que eu supunha
 
-O arnês valida `clean_source_tree`, e ele **reprova com código enviado por tarball**:
+Duas coisas separadas limitavam o veredito. **Uma eu consertei; a outra é da máquina e não tem
+conserto em nuvem.**
+
+## `clean_source_tree`: era o arnês, não o `theo-db` — e está resolvido
+
+O portão roda `git status --porcelain` na árvore **do próprio arnês** (o campo é `benchmark_dirty`, e
+a descrição diz *"Benchmark source tree was committed"*). Enviar o arnês por tarball não leva `.git`,
+então `git status` falha e o portão fica `UNAVAILABLE`.
+
+**Isso nunca precisou de deploy key.** Um `git bundle` é um repositório completo num arquivo: o host
+clona dele e fica com árvore limpa num SHA conhecido, sem credencial e sem rede. Medido:
+
+| envio | `git status` | `HEAD` | portão |
+|---|---|---|---|
+| tarball | rc=128, falha | — | `UNAVAILABLE` |
+| clone do bundle | rc=0 | `61552a6f` | **`PASS`** |
+
+O `bench-droplet.sh` passou a enviar bundle. A afirmação anterior deste runbook — de que só `git
+clone` do GitHub levantaria o teto, e que faltava uma credencial — **estava errada**, e fica
+registrada aqui em vez de apagada, porque baseou uma recomendação ao owner.
+
+## `cpu_governor`: o teto é a CLASSE DE MÁQUINA, e vale para tudo já publicado
+
+Medido em 2026-08-21 num `g-16vcpu-64gb` com swap desligado e `cpupower` tentado:
 
 ```
-clean_source_tree   UNAVAILABLE   unavailable: git status failed
+N/A * cpu_governor    unavailable: cpufreq governor not exposed
+Host may NOT run a 'release' benchmark. Blocking: cpu_governor
 ```
 
-O [[b058-crossover-colunar]] carrega exatamente essa ressalva, e é por ela — junto com CPU set e
-limite de memória não declarados — que seu veredito é `EXPLORATORY` e não `release`.
+`cpufreq` não é exposto ao hóspede numa VM, e `is_blocking_for` trata **qualquer coisa que não seja
+PASS** como bloqueio quando o perfil declara o check obrigatório — o que `release` faz.
 
-**Enquanto o código chegar por tarball ou por imagem publicada, nenhuma corrida deste projeto pode
-ser `release`.** As três vias, com o teto de cada uma:
+**Consequência para o projeto inteiro, e ela é maior que este item: nenhum número medido em droplet
+DigitalOcean pode ser `publishable` pelas regras do próprio arnês.** Isso inclui os já publicados —
+todos saíram de droplets. Nada disso os invalida como evidência; significa que a palavra correta para
+eles é `EXPLORATORY` ou `research`, e que dizer "release" sobre qualquer um seria falso.
 
-| via | serve para | teto de veredito |
-|---|---|---|
-| `git clone` num SHA | qualquer commit, inclusive não publicado | **`release`** (única via) |
-| `docker pull` da imagem publicada | só código já publicado | `EXPLORATORY` |
-| tarball via `scp` | commit não publicado, sem credencial no host | `EXPLORATORY` |
+Tudo o mais do host passa: SMT desligado, swap desligado, NUMA único, 16 núcleos físicos. É um bom
+host de medição — exceto na única coisa que uma VM não entrega.
 
-O `git clone` tem um pré-requisito **em aberto**: o host precisa de deploy key ou token de leitura, e
-hoje não tem — foi por isso que a medição do [[B-097]] foi por tarball. Enquanto isso não existir, o
-teto é `EXPLORATORY`, e dizer o contrário sobre qualquer número daqui seria falso.
+**As saídas, e as três são decisão do owner:** aceitar `nightly` como teto em nuvem (ele não exige
+governor, mas exige CPU set e limite de memória declarados — medido: `INVALID: cpu_limit,
+memory_limit`); alugar bare metal para as corridas que forem virar claim público; ou mudar a regra do
+arnês, que exige ADR e enfraquece o portão.
 
 # As seis armadilhas — e a regra que torna a lista obsoleta
 
