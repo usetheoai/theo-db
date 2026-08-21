@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-91 items — **Open** 23 · **In flight** 6 · **Closed** 62
+91 items — **Open** 22 · **In flight** 6 · **Closed** 63
 
-### Open (23)
+### Open (22)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -94,7 +94,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela----) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `triaged` | — |
 | [`B-066`](#b-066--a-contenção-escritascan-não-é-medível-não-existe-arnês-concorrente----) | A contenção escrita×scan não é medível: não existe arnês concorrente | `triaged` | — |
-| [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala----) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 
@@ -109,7 +108,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `planned` | — |
 
-### Closed (62)
+### Closed (63)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -157,6 +156,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado---x) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `shipped` | — |
 | [`B-064`](#b-064--o-eixo-theodb-do-próprio-arnês-não-constrói-índice-ele-emite-a-sintaxe-do-pgvector-contra-os-ams-do-theodb---x) | O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB | `shipped` | — |
 | [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada---x) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `shipped` | — |
+| [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala---x) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `shipped` | — |
 | [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala---x) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `shipped` | — |
 | [`B-071`](#b-071--seis-módulos-do-arnês-estão-implementados-e-desconectados-incluindo-o-núcleo-estatístico---x) | Seis módulos do arnês estão implementados e desconectados, incluindo o núcleo estatístico | `shipped` | — |
 | [`B-072`](#b-072--dois-flags-de-perfil-prometem-gates-que-não-existem---x) | Dois flags de perfil prometem gates que não existem | `shipped` | — |
@@ -2941,7 +2941,7 @@ dod:
   - o artefato do benchmark carrega os campos da família de workload que rodou, sem campos vetoriais vazios
     fingindo forma
   - `theodb-bench list` mostra a suíte analítica ao lado das vetoriais
-## B-068 — A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala   [ ]
+## B-068 — A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala   [x]
 
 domain: arnes
 repo: theodb-bench
@@ -2961,7 +2961,19 @@ access method em vez da biblioteca, e a ressalva decisiva da sua resposta é **e
 carga linha-a-linha, cada iteração dessa medição custa dezenas de minutos, o que na prática empurra o arnês para
 escalas onde a pergunta não é a mesma. O oráculo de recall, que tinha o mesmo tipo de problema (10,5 GB de RSS
 por causa de um `np.tile` de 4 GB), já foi consertado no mesmo dia; a carga é a metade que sobrou.
-status: triaged
+status: shipped
+status_nota: 2026-08-20 — os quatro bullets fecharam, e o trabalho **já estava entregue e lançado** no commit
+  `5372910` do theodb-bench, contido em `v0.1.0`. Verificado um a um: (1) `_copy_vectors` emite
+  `COPY ... WITH (FORMAT BINARY)` quando o adapter suporta e `COPY ... FROM STDIN` (texto) quando não,
+  com três testes nomeados — `test_the_vector_load_streams_through_binary_copy`,
+  `test_the_analytical_load_streams_through_copy`, `test_every_row_reaches_the_copy_stream`. (2) O
+  antes e o depois estão medidos no docstring: `executemany` **122 s** para 1M × SIFT-128, COPY texto
+  **75 s** (dos quais 72 s eram encoding em Python), COPY binário sem Python por valor. (3)
+  `LoadOutcome` continua contando as linhas, e há teste para isso. (4) `COPY_BATCH` desapareceu —
+  virou `COPY_CHUNK_ROWS`, que descreve o que o código faz.
+  **O CHANGELOG nunca creditou o item** (zero menções a `B-068`), que é a mesma classe do [[B-012]] e
+  do [[B-015]]: entregue, lançado, e invisível para quem lê o registro. É exatamente o que o portão do
+  [[B-088]] passou a impedir daqui em diante.
 dod:
   - a carga usa `COPY` binário via `cursor.copy()`, e um teste prova que o caminho emitido é `COPY` e não
     `INSERT`
