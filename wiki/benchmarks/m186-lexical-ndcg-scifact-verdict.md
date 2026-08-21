@@ -43,6 +43,27 @@ comemoração.
 
 # O limite de método, que corta a nosso favor
 
+> **CORREÇÃO POR ACRÉSCIMO, 2026-08-21.** A seção abaixo atribui ao PRODUTO um limite que era do SCRIPT
+> de medição, e a atribuição está errada.
+>
+> **Medido hoje:** `bm25_search(900, 'machine learning', 5)` devolve `doc1 = 1,0599`, que é exatamente
+> `0,5300 + 0,5300` — as contribuições dos dois termos, somadas numa passagem pelo `QueryParser` do
+> Tantivy. A função **aceita consulta multi-termo**, e o `git log` mostra que aceita **desde a
+> introdução** (M140.3, `3bb6ddb`, 2026-07-22): a assinatura sempre foi
+> `bm25_search(index_id, query: &str, k)`.
+>
+> Uma segunda afirmação abaixo também é falsa: **o BM25 multi-termo real É a soma das contribuições por
+> termo.** Não existe "normalizar uma vez sobre a consulta inteira" — a saturação e a normalização por
+> comprimento são por termo, por definição.
+>
+> O que **de fato** subestima o número não é normalização, é **truncamento**: somar top-k por termo
+> perde o documento que não entra no top-k de nenhum termo isolado mas entraria no top-k combinado.
+> Esse erro é real e corta na direção declarada; a explicação dada para ele não era.
+>
+> **Consequência prática:** o `0,6269` continua sendo um piso, mas a correção é barata — o adapter atual
+> (`theodb-bench/src/adapters/postgres.py:1590`) já manda `query.text` inteiro numa chamada. Re-medir é
+> [[B-093]]. O [[B-014]], aberto para "expor busca multi-termo", foi morto pela mesma medição: já existe.
+
 **`bm25_search` aceita um termo por chamada.** Para uma consulta multi-termo eu somei os scores por termo —
 aproximação grosseira do BM25 multi-termo real, que receberia a consulta inteira e normalizaria uma vez.
 

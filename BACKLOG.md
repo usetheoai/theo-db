@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-92 items — **Open** 17 · **In flight** 11 · **Closed** 64
+93 items — **Open** 17 · **In flight** 11 · **Closed** 65
 
 ### Open (17)
 
@@ -82,7 +82,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-008`](#b-008--lakehouse-4-funções-expostas-escala-e-formatos-nunca-medidos----) | Lakehouse: 4 funções expostas, escala e formatos nunca medidos | `raw` | — |
 | [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada----) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `raw` | — |
 | [`B-010`](#b-010--maturidade-zero-uso-real-e-é-o-gargalo-de-todos-os-pilares----) | Maturidade: zero uso real, e é o gargalo de todos os pilares | `raw` | — |
-| [`B-014`](#b-014--bm25_search-aceita-um-termo-por-chamada-consulta-de-usuário-tem-vários----) | `bm25_search` aceita um termo por chamada; consulta de usuário tem vários | `raw` | — |
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
 | [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off----) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `triaged` | — |
 | [`B-042`](#b-042--o-build-do-hnsw-é-36-mais-lento-que-o-do-pgvector-usando-8-mais-threads-e-o-grafo-sai-pior----) | O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior | `triaged` | — |
@@ -91,6 +90,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
+| [`B-093`](#b-093--o-ndcg-publicado-do-pilar-lexical-foi-medido-com-agregação-que-trunca-e-o-arnês-já-não-trunca----) | O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca | `triaged` | — |
 
 ### In flight (11)
 
@@ -108,7 +108,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
 | [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `planned` | — |
 
-### Closed (64)
+### Closed (65)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -117,6 +117,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-011`](#b-011--o-vector-join-do-hnsw-perde-exatamente-um-elemento---x) | O vector-join do HNSW perde exatamente um elemento | `shipped` | — |
 | [`B-012`](#b-012--as-outras-18-falhas-da-suíte-seguem-sem-causa-capturada---x) | As outras 18 falhas da suíte seguem sem causa capturada | `shipped` | — |
 | [`B-013`](#b-013--a-suíte-não-roda-no-ci-então-a-próxima-regressão-espera-meses---x) | A suíte não roda no CI, então a próxima regressão espera meses | `shipped` | — |
+| [`B-014`](#b-014--bm25_search-aceita-um-termo-por-chamada-consulta-de-usuário-tem-vários---x) | `bm25_search` aceita um termo por chamada; consulta de usuário tem vários | `killed` | — |
 | [`B-015`](#b-015--cinco-testes-falham-com-contador-em-zero-instrumentação-ou-o-chunk-skip-não-poda---x) | Cinco testes falham com contador em zero: instrumentação ou o chunk-skip não poda? | `shipped` | — |
 | [`B-016`](#b-016--os-testes-de-egress-esbarram-na-guarda-ssrf-do-próprio-produto---x) | Os testes de egress esbarram na guarda SSRF do próprio produto | `shipped` | — |
 | [`B-019`](#b-019--create-index-de-hnsw-não-é-idempotente-estoura-em-vez-de-ser-no-op----) | `CREATE INDEX` de HNSW não é idempotente: estoura em vez de ser no-op | `killed` | — |
@@ -724,7 +725,7 @@ dod:
 >
 > **O que este item NÃO cobre, e virou [[B-052]]:** a suíte só roda em `push` para `develop`/`main`. Sobre
 > `workspace`, onde todo trabalho nasce, ela não roda — 73 commits desde a última execução.
-## B-014 — `bm25_search` aceita um termo por chamada; consulta de usuário tem vários   [ ]
+## B-014 — `bm25_search` aceita um termo por chamada; consulta de usuário tem vários   [x]
 
 domain: lexical
 repo: theo-db
@@ -732,7 +733,18 @@ suggested_mode: evolve
 source: human
 evidence: none-yet
 why_now: descoberto ao medir a qualidade do pilar contra o BEIR (`wiki/benchmarks/m186-lexical-ndcg-scifact-verdict.md`). Para avaliar uma consulta multi-termo eu tive de **somar os scores por termo do lado de fora** — aproximação grosseira que o BM25 real não faz, porque ele normaliza uma vez sobre a consulta inteira. O pilar entrou no binário default em 2026-08-09 expondo `bm25_search(index, termo, k)`: **nenhuma consulta real de usuário é um termo só.**
-status: raw
+status: killed
+kill_reason: 2026-08-21 — **a premissa é falsa, e sempre foi.** Medido num TheoDB real:
+  `bm25_search(900, 'machine learning', 5)` devolve `doc1 = 1,0599`, que é exatamente `0,5300 + 0,5300` —
+  as duas contribuições somadas NUMA passagem pelo `QueryParser` do Tantivy. O `git log` mostra que a
+  assinatura é `bm25_search(index_id, query: &str, k)` **desde a introdução** (M140.3, `3bb6ddb`,
+  2026-07-22). O limite era do SCRIPT de medição do m186, não da superfície — e o adapter atual
+  (`theodb-bench/src/adapters/postgres.py:1590`) já manda a consulta inteira numa chamada. Bullets 1 e 3
+  do DoD já estavam satisfeitos sem nenhuma mudança. **Segunda afirmação falsa, no `why_now`:** BM25
+  multi-termo É a soma das contribuições por termo; não existe normalização sobre a consulta inteira. O
+  que de fato subestimava era TRUNCAMENTO (somar top-k por termo perde o documento que não entra no top-k
+  de nenhum termo isolado), erro real com explicação errada. Bullet 2 — re-medir o nDCG do m186 — sobrevive
+  e virou [[B-093]]. `wiki/benchmarks/m186-lexical-ndcg-scifact-verdict.md`.
 dod:
   - `bm25_search` aceita uma consulta multi-termo e a pontua numa passagem, sem agregação externa
   - o nDCG@10 é re-medido nos dois corpora do m186 com a nova assinatura — a expectativa é SUBIR, já que a agregação atual subestima
@@ -4094,3 +4106,19 @@ dod:
 > Registrado 2026-08-21 pelo ciclo que reproduziu o [[B-018]]. Separado dele porque o B-018 é "o
 > planner larga o índice" e este é "o índice é grande demais" — o primeiro é sintoma do segundo, e
 > fundi-los faria o conserto ser avaliado pelo sintoma.
+## B-093 — O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca   [ ]
+
+domain: lexical
+repo: theodb-bench
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-21. O `m186` publica nDCG@10 de **0,6269** no SciFact e declara tê-lo obtido somando scores por termo do lado de fora. Somar top-k por termo **trunca**: o documento que não entra no top-k de nenhum termo isolado, mas entraria no top-k combinado, é perdido. O adapter atual (`theodb-bench/src/adapters/postgres.py:1590`) já manda `query.text` inteiro numa chamada — o caminho correto existe e está pronto, e foi introduzido depois do m186 (`a8910c0`, 2026-08-17).
+why_now: o `0,6269` é citado como o número do pilar e é um PISO, não a medição. A correção não exige código novo — só re-rodar os dois corpora do m186 pelo adapter que já existe. Enquanto não for re-medido, publicamos um número que sabemos estar subestimado e não sabemos por quanto.
+status: triaged
+dod:
+  - nDCG@10 re-medido nos dois corpora do m186 pelo adapter atual, com N corridas e IC (a ferramenta do [[B-049]])
+  - o conceito do m186 atualizado por acréscimo com o número novo e a diferença medida
+  - se a diferença for nula, isso também é registrado — significa que o truncamento não mordia nesses corpora
+
+> Registrado 2026-08-21 pelo ciclo que matou o [[B-014]]. O bullet 2 daquele item sobreviveu à refutação
+> da premissa; os outros dois já estavam satisfeitos.
