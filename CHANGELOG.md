@@ -14,6 +14,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **O planner larga o HNSW numa junção com filtro seletivo, e a causa é o nosso default de
+  `ef_search`.** Reproduzido deterministicamente: com `WHERE d.tenant = 't1'` a ordem de junção inverte,
+  `embeddings` deixa de dirigir e um `Sort` aparece. Em `ef_search = 64` — o nosso default, herdado do
+  `SCAN_EF` fixo pré-M35 — o pgvector 0.8.6 produz **plano e custos idênticos aos nossos** (567,66 /
+  559,36 / 560,45 / 552,13, número por número); em 40, o dele, os dois escolhem o índice. No mesmo `ef`
+  nosso index scan custa **425,60** contra **469,68** e nosso índice ocupa **680 páginas** contra **751**.
+  Não é defeito de implementação; é a escolha do default, e baixá-la troca recall por plano. Diagnóstico
+  registrado, mudança do default pendente de recall@10 medido. `wiki/benchmarks/b018-planner-hnsw-juncao.md`.
+  (#B-018)
 - **O opclass do `theodb_hnsw` não atende pelo nome do pgvector.** `CREATE INDEX ... USING theodb_hnsw
   (v vector_cosine_ops)` é recusado — o nome é `theodb_hnsw_cosine_ops`. Uma aplicação migrando do
   pgvector precisa reescrever o `CREATE INDEX`, e isso não estava na compatibilidade que o shim promete.

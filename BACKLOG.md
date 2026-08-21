@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-92 items — **Open** 18 · **In flight** 11 · **Closed** 63
+92 items — **Open** 17 · **In flight** 11 · **Closed** 64
 
-### Open (18)
+### Open (17)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -91,7 +91,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
-| [`B-092`](#b-092--o-índice-hnsw-ocupa-178-o-disco-do-pgvector-e-é-isso-que-tira-o-índice-do-plano----) | O índice HNSW ocupa 1,78× o disco do pgvector, e é isso que tira o índice do plano | `triaged` | — |
 
 ### In flight (11)
 
@@ -109,7 +108,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
 | [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `planned` | — |
 
-### Closed (63)
+### Closed (64)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -176,6 +175,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-088`](#b-088--o-gate-de-changelog-checa-presença-de-arquivo-não-de-entrada---x) | O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA | `shipped` | — |
 | [`B-089`](#b-089--um-vetor-zero-na-tabela-derruba-a-busca-por-cosseno-no-índice-hnsw-no-ef_search-default---x) | Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default | `shipped` | — |
 | [`B-090`](#b-090--94-arquivos-de-teste-sob-claude-e-nenhum-workflow-os-roda---x) | 94 arquivos de teste sob `.claude/` e nenhum workflow os roda | `shipped` | — |
+| [`B-092`](#b-092--o-índice-hnsw-ocupa-178-o-disco-do-pgvector-e-é-isso-que-tira-o-índice-do-plano---x) | O índice HNSW ocupa 1,78× o disco do pgvector, e é isso que tira o índice do plano | `killed` | — |
 
 <!-- BACKLOG-INDEX:END -->
 
@@ -980,48 +980,42 @@ dod:
 > hipóteses baratas — parâmetro vs literal, generic plan, estatística ausente, ordem de criação do
 > índice — **não são o gatilho**.
 >
-> **REPRODUZIDO em 2026-08-21, deterministicamente, e a causa NÃO é a que o item supunha.**
+> **REPRODUZIDO em 2026-08-21, deterministicamente. A causa é o DEFAULT de `ef_search`.**
 > `wiki/benchmarks/b018-planner-hnsw-juncao.md`.
 >
-> O sétimo cenário — que os seis não tocaram — é um **filtro seletivo na tabela juntada**
-> (`WHERE d.tenant = 't1'`). Sem ele, `embeddings` dirige e o HNSW serve a ordenação. Com ele, a ordem
-> de junção inverte, `embeddings` vai para o lado interno de um Nested Loop por `chunk_id`, e o `Sort`
-> aparece — a forma exata do relato. Com `enable_sort = off` o plano não muda (`Disabled: true`): não
-> há caminho alternativo a gerar.
+> **Gatilho:** um filtro seletivo na tabela juntada (`WHERE d.tenant = 't1'`) — o sétimo cenário, que os
+> seis não tocaram. Com ele a ordem de junção inverte, `embeddings` sai da posição de dirigir, e o `Sort`
+> aparece. Com `enable_sort = off` o plano não muda (`Disabled: true`): não há caminho alternativo.
 >
-> **A margem é de 24% no melhor caso**, e é isso que explica a intermitência de 1-em-11 que seis
-> cenários determinísticos não pegaram. Não é aleatoriedade: é uma comparação no fio da navalha, e nove
-> arquivos de teste do `theo-rag` escrevendo em paralelo movem o custo do lado concorrente.
+> **Não é defeito de implementação nosso.** Sobre 3000 vetores DISTINTOS de 384 dims, esquema idêntico:
 >
-> | `ef_search` | partida do HNSW | plano |
-> |---|---|---|
-> | 40 | 425,60 | HNSW (vence o Sort de 559,36 por 24%) |
-> | **64 (nosso default)** | acima de 559 | **Sort** |
+> | motor | `ef_search` | custo do `Limit` | plano |
+> |---|---|---|---|
+> | TheoDB | 40 | 434,34 | **HNSW** |
+> | TheoDB | **64 (nosso default)** | **567,66** | **Sort** |
+> | pgvector 0.8.6 | 40 (default dele) | 478,41 | **HNSW** |
+> | pgvector 0.8.6 | **64** | **567,66** | **Sort** |
 >
-> **A causa não é o modelo de custo** (a hipótese herdada do `m175`). O `am/cost.rs` é port FIEL do
-> `hnsw.c` do pgvector 0.8 — mesma fórmula de ratio, mesmo `scalingFactor = 0.55`, mesma correção TOAST.
-> O controle justo (pgvector **0.8.6**, mesmo dado) escolhe o HNSW inclusive em `ef_search = 64`, com
-> partida 342,40 contra os nossos >559.
+> Em `ef=64` o pgvector dá plano e custos IDÊNTICOS aos nossos — 567,66/559,36/560,45/552,13, número por
+> número. No mesmo `ef=40`, nosso index scan custa **425,60** contra os **469,68** dele, e nosso índice
+> ocupa **680 páginas** contra **751**: somos mais baratos e menores nos dois eixos. O `am/cost.rs` é port
+> fiel do `hnsw.c` do pgvector 0.8.
 >
-> **A causa é o TAMANHO do índice:** 680 páginas contra 382 do pgvector para o mesmo dado — **1,78×**,
-> que casa com a razão de custo medida de **1,769×**. O `genericcostestimate` cobra por páginas, então
-> a divergência de custo é consequência aritmética da de tamanho. O conserto mora no layout de
-> armazenamento, não em `am/cost.rs` — inflar a fórmula para compensar seria mentir ao planner sobre um
-> custo que é verdadeiro.
+> **A diferença inteira é o default:** 64 nosso (herdado do `SCAN_EF` fixo pré-M35, `am/guc.rs:22`) contra
+> 40 dele. E como a margem em `ef=40` é apertada (434,34 contra 567,66), mudanças pequenas nas estimativas
+> de linha atravessam o fio — que é a intermitência de 1-em-11 que seis cenários determinísticos não
+> pegaram.
 >
-> **Retratação registrada:** o primeiro controle usou pgvector **0.5.1** e teria concluído "defeito
-> nosso, o pgvector não tem". Estava errado — o 0.5.1 tem um modelo anterior e muito mais cru
-> (`numIndexTuples = (entryLevel+2)*m`, `startup = total`), então aquilo mediu a distância entre duas
-> gerações do modelo, não entre duas implementações dele.
+> **Conserto:** baixar o default para 40 é de uma linha e TROCA RECALL POR PLANO. Exige recall@10 medido
+> nos dois valores no arnês antes — é isso, e não o número, que decide.
 >
-> **CORREÇÃO POR ACRÉSCIMO (mesmo dia, algumas horas depois):** o "1,78×" acima saiu de UMA amostra de
-> cada lado. O índice do pgvector varia entre builds — 444/416/482 páginas, CV de 7,4% —, o nosso é
-> determinístico em 680. A razão honesta é **1,52× (IC 95% [1,41×, 1,63×], p = 0,0067, n=3 de cada)**,
-> pela ferramenta do [[B-049]] entregue nesta mesma sessão. A diferença segue real e significativa; a
-> precisão que três algarismos sugeriam não era.
->
-> **Próximo passo, agora barato e específico:** medir POR QUE ~680 contra ~447 para vetores idênticos de
-> 384 dimensões — ver [[B-092]].
+> **DUAS RETRATAÇÕES, preservadas no conceito da wiki.** (1) O primeiro controle usou pgvector **0.5.1**,
+> cujo modelo de custo é de outra geração — mediu a distância entre duas gerações, não entre duas
+> implementações. (2) A conclusão "a causa é o tamanho do índice, 1,78× depois corrigido para 1,52×" caiu
+> por **dados degenerados**: a subconsulta do `INSERT` não era correlacionada, virou InitPlan e **todos os
+> 3000 vetores eram idênticos** (`count(DISTINCT) = 1`). O pgvector deduplica vetores iguais — 854 tuplas
+> de elemento para 2000 linhas, medido por `pageinspect` —, o que fazia o índice dele parecer pequeno.
+> Refeito com vetores distintos, o resultado INVERTE.
 
 ## B-019 — `CREATE INDEX` de HNSW não é idempotente: estoura em vez de ser no-op   [ ]
 
@@ -4072,7 +4066,7 @@ dod:
 > Registrado 2026-08-20 ao verificar a própria edição que fiz no README para o [[B-055]]. **Encontrado
 > porque eu duvidei do meu próprio "passou"**: o lint saiu 0 sem output, e 0-sem-output é ausência de
 > resposta, não resposta.
-## B-092 — O índice HNSW ocupa 1,78× o disco do pgvector, e é isso que tira o índice do plano   [ ]
+## B-092 — O índice HNSW ocupa 1,78× o disco do pgvector, e é isso que tira o índice do plano   [x]
 
 domain: vetorial
 repo: theo-db
@@ -4080,7 +4074,17 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-21 (`wiki/benchmarks/b018-planner-hnsw-juncao.md`), com **três builds de cada lado**. O `theodb_hnsw` ocupa **680/680/680** páginas — determinístico. O `hnsw` do pgvector 0.8.6 ocupa **444/416/482** — média 447,3, CV 7,4%, porque a atribuição de nível do HNSW é aleatória. Razão **1,52× (IC 95% [1,41×, 1,63×], p = 0,0067)** pela ferramenta do [[B-049]]. O `genericcostestimate` cobra proporcionalmente a páginas de índice, e foi essa diferença que tirou o HNSW do plano da junção filtrada do [[B-018]] (partida 425,60 contra 240,62 em `ef_search=40`).
 why_now: o [[B-018]] reproduziu e a causa dele é esta. O custo maior é VERDADEIRO — o índice é maior mesmo —, então não há conserto em `am/cost.rs`: inflar ou desinflar a fórmula seria mentir ao planner. Enquanto o índice for 1,78× maior, toda comparação de plano com `LIMIT` corre com esse handicap, e a do `theo-rag` já perde por uma margem de 24%.
-status: triaged
+status: killed
+kill_reason: 2026-08-21, no mesmo dia em que foi aberto — **a premissa era falsa por dados degenerados**. A
+  subconsulta do `INSERT` que gerou os vetores não era correlacionada com a linha externa, então o PostgreSQL
+  a içou para InitPlan e a avaliou UMA vez: `count(DISTINCT vector) = 1` em 3000 linhas. O pgvector deduplica
+  vetores idênticos num elemento com vários heap TIDs — 854 tuplas de elemento para 2000 linhas, medido por
+  `pageinspect` —, o que fazia o índice dele parecer pequeno e produziu o "1,78×". Refeito com vetores
+  DISTINTOS, o resultado **inverte**: 680 páginas nossas contra 751 dele em N=3000, e 454 contra 501 em
+  N=2000, ambos determinísticos em três builds. **Nosso índice é menor; não há gap de tamanho a consertar.**
+  A causa real do [[B-018]] é o default de `ef_search` (64 nosso, 40 do pgvector) e está registrada lá.
+  Hipótese de compressão também testada e refutada no caminho: vetores de expoente repetido e de expoente
+  disperso dão o mesmo tamanho. `wiki/benchmarks/b018-planner-hnsw-juncao.md`.
 dod:
   - medido POR QUE ~680 contra ~447 — o que ocupa as ~233 páginas de diferença (layout de nó, fator de preenchimento, cópia do vetor, metadados por vizinho)
   - decidido em ADR se a diferença é essencial (o nosso nó carrega algo que o deles não carrega e que serve a um requisito) ou acidental
