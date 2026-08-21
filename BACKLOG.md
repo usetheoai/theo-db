@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-88 items — **Open** 27 · **In flight** 4 · **Closed** 57
+89 items — **Open** 27 · **In flight** 5 · **Closed** 57
 
 ### Open (27)
 
@@ -92,7 +92,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-046`](#b-046--paridade-de-qps-com-o-pgvector-a-recall-casado-hoje-o-déficit-medido-é-163----) | Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3% | `triaged` | — |
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `triaged` | — |
 | [`B-050`](#b-050--o-conserto-do-cliente-opensearch-é-do-upstream-e-o-fork-tem-saída-declarada----) | O conserto do cliente OpenSearch é do upstream, e o fork tem saída declarada | `triaged` | — |
-| [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança----) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `triaged` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `triaged` | — |
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
@@ -101,11 +100,13 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala----) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
+| [`B-089`](#b-089--um-vetor-zero-na-tabela-derruba-a-busca-por-cosseno-no-índice-hnsw-no-ef_search-default----) | Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default | `triaged` | — |
 
-### In flight (4)
+### In flight (5)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
+| [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança----) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
@@ -2337,7 +2338,22 @@ README é justamente a que faz alguém não verificar antes. **Nada aqui foi exe
 a diferença importa: eu não medi se o `ef_search` de fato se perde entre transações nem se os contadores de
 fato se misturam. São predições fundamentadas, não resultados, e publicar a matriz sem medir seria o
 `cobertura-alegada-sem-execucao` que este projeto persegue.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — os cinco bullets fecharam, tudo POR EXECUÇÃO contra
+  `ghcr.io/usetheoai/theo-db:latest` com PgBouncer 1.25.2. Matriz em
+  `wiki/benchmarks/b055-pgbouncer-compat.md`.
+  **Hipótese (a) confirmada no eixo e ERRADA na direção**: o item previa PERDA do ajuste; o medido é
+  CONTAMINAÇÃO — sob `transaction` e `statement` o `SET theodb_hnsw.ef_search = 7` de um cliente é lido
+  como `7` por outro (sob `session`, lê `64`). Contaminação é pior: degrada quem NÃO ajustou nada.
+  **Hipótese (b) REFUTADA**: os contadores de `explain_scan` não contaminam — mesmo backend (pid=1337),
+  B rodou `ef=512` com `pages=1281`, e A logo depois com `ef=8` leu `pages=139`, idêntico ao valor
+  direto sem pooler. **Hipótese (c) confirmada**: temp table e prepared statement vazam entre clientes
+  sob `transaction`/`statement` — mas isso é comportamento documentado do PgBouncer, não defeito nosso.
+  O README foi atualizado com o resultado, substituindo a ressalva que dizia "ainda não foi medida".
+  **Nota de método**: a primeira corrida passou em tudo e não provava nada — com `default_pool_size`
+  padrão e um cliente só, o PgBouncer devolve sempre a mesma conexão. Medir `pg_backend_pid()` ao lado
+  do valor revelou isso, e `pool_size=1` com dois clientes é o que tornou o teste determinístico.
+  Achado colateral registrado: [[B-089]].
 dod:
   - PgBouncer sobe nos **três** modos (`session`, `transaction`, `statement`) contra a imagem do produto, e
     cada hipótese acima é confirmada ou refutada **por execução**
@@ -3771,3 +3787,46 @@ dod:
 > Registrado 2026-08-20 pelo corte da `0.161.0`. **É sobre o meu próprio erro**, e é por isso que vale: eu
 > segui o procedimento, o gate disse OK, e a entrada não existia. Nenhum humano teria notado antes do
 > release, e o release é tarde demais — o CHANGELOG é o contrato com quem consome.
+## B-089 — Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default   [ ]
+
+domain: vetorial
+repo: theo-db
+suggested_mode: bug
+source: discover-live-test
+evidence: medido em 2026-08-20 contra `ghcr.io/usetheoai/theo-db:latest` (PostgreSQL 18.6, `theodb_rs 1.5.0`),
+durante a montagem do arnês do [[B-055]]. Encontrado por acidente — o corpus sintético gerava
+`(g*7919%1000)`, e `g=1000/2000/3000` produzem vetor todo-zero.
+**O defeito:** `SELECT id FROM t ORDER BY e <=> $1 LIMIT 5` com `Index Scan using <cos_idx>` falha com
+`ERROR: user-provided comparison function does not correctly implement a total order`. Não é resultado
+errado — é a consulta inteira abortando.
+**Matriz medida, cada linha por execução:**
+| condição | `ef_search` | resultado |
+|---|---|---|
+| 3000 linhas, 3 vetores zero, cosseno `<=>`, índice | **64 (default)** | **ERRO** |
+| mesmos dados **sem** os 3 zeros, cosseno, índice | 64 | 5 linhas |
+| mesmos dados **com** zeros, **L2** `<->`, índice | 64 | 5 linhas |
+| mesmos dados com zeros, cosseno, índice | 1 / 4 / 16 | 5 linhas |
+| mesmos dados com zeros, cosseno, **seqscan** | — | 5 linhas |
+**Mecanismo:** `'[0,...,0]'::vector <=> q` devolve `NaN` (verificado). O caminho de seqscan ordena NaN
+corretamente — `float8` no PostgreSQL põe NaN por último, verificado com `VALUES ('NaN'::float8),(1),(2)`.
+O caminho do índice não. A dependência de `ef_search` mostra que o erro só ocorre quando a busca **visita**
+uma linha zero, o que explica por que a repro é sensível à distribuição: em outro corpus de 3000 linhas com
+uma linha zero e o mesmo `ef=64`, a consulta passa.
+why_now: vetor zero não é patológico em dado real — é o que sobra de um embedding que falhou, de um documento
+vazio ou de padding. E `ef_search=64` é o **default**: quem nunca ajustou o knob é exatamente quem encontra o
+erro. O `<->` funcionando na mesma tabela torna o sintoma confuso — parece defeito do dado, não do AM.
+status: triaged
+dod:
+  - a repro entra como teste: tabela com vetor zero, índice de cosseno, `ef` default, e o teste falha contra
+    o código atual
+  - decidido e escrito o que o produto FAZ com distância NaN no caminho do índice — ordena por último como o
+    `float8` faz, pula a linha, ou recusa o vetor zero na inserção; qualquer das três, nunca o erro atual
+  - o comportamento é comparado ao do `pgvector` no mesmo caso, porque o shim promete drop-in e esta é uma
+    diferença observável de comportamento
+  - se a decisão for "ordena por último", o recall é medido com e sem a linha zero — a correção não pode
+    mudar o resultado das consultas que hoje funcionam
+
+> Registrado 2026-08-20 por acidente, ao montar o arnês do [[B-055]]. **A repro custou seis tentativas
+> falhadas** — uma linha zero em 3000 não basta, dois índices na mesma coluna não bastam, zero presente na
+> construção não basta. O que discrimina é o `ef_search`, e eu só cheguei nele depois de parar de adivinhar e
+> varrer o parâmetro. Fica registrado porque a próxima pessoa vai tentar as mesmas seis.
