@@ -13,6 +13,32 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.167.0] - 2026-08-21
+
+### Added
+- Primeira medição do pilar de grafo contra um baseline: travessia de 1, 2 e 3 saltos pelo CSR e por
+  `WITH RECURSIVE` indexado no mesmo servidor. **O CSR perde até 2 saltos** (2,17× e 1,90×) e ganha
+  do 3º em diante (2,26×); ganha em espaço sempre (14,4 MB contra 30 MB de índices). Veredito
+  desfavorável publicado conforme a DoD do item (B-007)
+
+
+### Fixed
+- **RETRATADO: o "teto de vazão é o cliente do arnês" lançado em `v0.166.0` estava errado, e o erro
+  era do desenho da medição.** O laço concorrente emitia um total **fixo** de 300 operações
+  independente do número de clientes — a 80 clientes isso são **3,75 consultas por cliente**, e a
+  abertura de conexão domina a janela inteira. Medido lado a lado no mesmo processo: com total fixo,
+  80 clientes dão **277,7 QPS**; com a contagem escalando, **827,0**.
+  .
+  Re-medido pelo benchmark corrigido, a curva **sobe e satura** (354 · 1.020 · 1.262 · 1.225 · 1.302 ·
+  1.281) em vez de colapsar, e a razão contra o `pgbench` é **~1,27×** e não 6,5×. **A resposta à
+  pergunta do #B-043 inverte: o platô é real e é do servidor.**
+  .
+  Caíram junto duas coisas que eu havia afirmado: o **GIL está refutado** como causa (processos não
+  são mais rápidos que threads — 0,98× a 20 clientes, 1,00× a 40), e os **dois relógios** que
+  acrescentei **não discriminam em laço fechado** (`response` ≡ `service`, porque sem agendamento não
+  há atraso a medir). O #B-094, aberto sobre a premissa errada, foi morto pela mesma medição.
+  (#B-043)
+
 ## [0.166.0] - 2026-08-21
 
 ### Changed
