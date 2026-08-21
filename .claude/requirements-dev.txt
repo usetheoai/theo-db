@@ -15,3 +15,10 @@ pyyaml>=6.0
 jsonschema>=4.0
 hypothesis>=6.0
 requests>=2.31
+
+# O detector D2 (fabricacao de simbolo) usa tree-sitter. O modulo declara a dep como OPCIONAL e
+# degrada para `auditor_unavailable_{tool}` sem ela — mas o CI deve exercitar o parser, entao ela
+# entra aqui. Versoes fixadas nas que foram verificadas: `tree-sitter-languages 1.10.2` exige
+# `tree-sitter < 0.22`, e soltar o piso quebraria a instalacao em vez de atualiza-la.
+tree-sitter>=0.21,<0.22
+tree-sitter-languages>=1.10

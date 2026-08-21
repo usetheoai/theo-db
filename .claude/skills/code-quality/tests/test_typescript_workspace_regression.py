@@ -10,7 +10,20 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from scripts.check_symbol_fab import tree_sitter_available
 from scripts.detectors.typescript import TypescriptDetector
+
+# B-090 — o detector D2 usa tree-sitter, e o modulo declara essa dep como OPCIONAL. Sem o guard, a
+# ausencia dela produzia `assert [] == ['@modelcontextprotocol/sdk']`, que reporta "o detector
+# consultou o subpath errado" quando o estado real e "o parser nao foi carregado". Um teste que
+# falha pela razao errada e pior que um que pula dizendo por que. A dep esta declarada em
+# `.claude/requirements-dev.txt`, entao no CI ele roda de verdade.
+pytestmark = pytest.mark.skipif(
+    not tree_sitter_available(),
+    reason="tree-sitter-languages ausente — o modulo declara a dep como opcional",
+)
 
 
 def _workspace(tmp_path: Path) -> Path:
