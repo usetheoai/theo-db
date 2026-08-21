@@ -13,16 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Fixed
-- **O gate de CHANGELOG vinha passando por acidente, e dois defeitos o causavam.** (1) Ele descobria
-  a seção `[Unreleased]` pelo **contexto do diff** — num hunk fundo na seção o cabeçalho não aparece,
-  então o cursor nunca entrava nela e a contagem dava **zero**. Só funcionava quando a entrada ia para
-  o topo da seção, que por acaso é como quase toda entrada foi escrita. Agora a seção é localizada por
-  **número de linha no arquivo**, que é dado que o diff sempre traz. (2) Ele exigia **bullet novo**, o
-  que reprovava emendar uma entrada ainda não lançada — e o `CLAUDE.md` proíbe editar apenas as de
-  versões **já released**. Exigir bullet novo empurrava para duas entradas para uma mudança que sai
-  uma vez. Passa a contar conteúdo; cabeçalho de categoria e linha em branco continuam não contando,
-  e editar seção já lançada continua contando zero. (#B-088)
+## [0.165.0] - 2026-08-21
 
 ### Added
 - **Um número publicado e o artefato que o sustenta deixaram de poder divergir.** Novo gate
@@ -58,6 +49,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   default de 2 do pgvector): **142,0 s** contra **78,0 s**. E um eixo nunca medido corta a nosso favor:
   nosso índice é **7,4% menor**, 724,1 MB contra 782,4 MB. (#B-042)
 
+### Fixed
+- **O gate de CHANGELOG vinha passando por acidente, e dois defeitos o causavam.** (1) Ele descobria
+  a seção `[Unreleased]` pelo **contexto do diff** — num hunk fundo na seção o cabeçalho não aparece,
+  então o cursor nunca entrava nela e a contagem dava **zero**. Só funcionava quando a entrada ia para
+  o topo da seção, que por acaso é como quase toda entrada foi escrita. Agora a seção é localizada por
+  **número de linha no arquivo**, que é dado que o diff sempre traz. (2) Ele exigia **bullet novo**, o
+  que reprovava emendar uma entrada ainda não lançada — e o `CLAUDE.md` proíbe editar apenas as de
+  versões **já released**. Exigir bullet novo empurrava para duas entradas para uma mudança que sai
+  uma vez. Passa a contar conteúdo; cabeçalho de categoria e linha em branco continuam não contando,
+  e editar seção já lançada continua contando zero. (#B-088)
 ## [0.164.0] - 2026-08-21
 
 ### Added
