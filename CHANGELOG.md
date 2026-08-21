@@ -13,6 +13,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.166.0] - 2026-08-21
+
 ### Changed
 - **O teto de vazão lexical é o CLIENTE do arnês, não o servidor — medido.** O #B-043 recusara-se a
   publicar a curva de saturação sem discriminar as três causas candidatas. Com o gerador externo que o
@@ -26,7 +28,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   neste corpus, é ~4.150 TPS com enfileiramento limpo. Aberto o #B-094 para o arnês.
   `wiki/benchmarks/b043-teto-lexical-e-o-cliente.md`. (#B-043)
 
-### Changed
 - **O crossover do colunar foi medido, e a resposta não é um número — são quatro, e duas são gaps.**
   De 10K a 2M linhas, mesmo dado nos três caminhos, no mesmo binário: `total_rows` ganha **abaixo de
   10K** (pico 4,02× em 500K); `sum_amount` vira **entre 10K e 50K**; **`filtered_sum` PERDE em toda a
@@ -38,7 +39,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   2,75× → 1,74×), que é o oposto do esperado e **não está diagnosticado**; e o **Parquet é 40× a 142×
   mais lento que o heap**, piorando com N — 8,3 s para contar 2M linhas.
   `wiki/benchmarks/b058-crossover-colunar.md`. (#B-058)
-
 ## [0.165.0] - 2026-08-21
 
 ### Added
