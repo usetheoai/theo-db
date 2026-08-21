@@ -22,3 +22,12 @@ requests>=2.31
 # `tree-sitter < 0.22`, e soltar o piso quebraria a instalacao em vez de atualiza-la.
 tree-sitter>=0.21,<0.22
 tree-sitter-languages>=1.10
+
+# O detector D1 (codigo morto) invoca o `vulture` como BINARIO no PATH, nao como biblioteca — por
+# isso ele nao aparece na varredura de `import`. Descoberto pela segunda corrida do portao:
+# `Vulture auditor unavailable: vulture not found in PATH`.
+#
+# Aqui a degradacao tambem e por projeto (`auditor_unavailable_{tool}` e soft cap no golden rule),
+# mas os testes afirmam o caminho REAL sobre uma fixture limpa — e um detector que so foi exercitado
+# degradado nao foi exercitado. `vulture` e o que o golden rule § 5 nomeia para Python.
+vulture>=2.11
