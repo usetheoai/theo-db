@@ -96,7 +96,7 @@ impl IvfAqahIndex {
             .enumerate()
             .map(|(ci, c)| (crate::vec::l2_distance(q, c), ci))
             .collect();
-        cdist.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        cdist.sort_by(|a, b| a.0.total_cmp(&b.0));
         let probe = nprobe.min(cdist.len());
 
         // Stage 1 — batched AH scan: (score_approx, list_idx, code_idx).
@@ -129,7 +129,7 @@ impl IvfAqahIndex {
                 (crate::vec::l2_distance(q, &store.vectors[idx]), store.ids[idx])
             })
             .collect();
-        reranked.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        reranked.sort_by(|a, b| a.0.total_cmp(&b.0));
         Ok(reranked.into_iter().take(k).map(|(_, id)| id).collect())
     }
 }

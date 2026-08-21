@@ -183,7 +183,7 @@ mod theodb_rs {
         // convention); `idx` still points at the ORIGINAL input position for the join back.
         let mut rows: Vec<(i32, f32)> =
             scores.iter().enumerate().map(|(i, s)| (i as i32, *s)).collect();
-        rows.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        rows.sort_by(|a, b| b.1.total_cmp(&a.1));
         if let Some(n) = top_n {
             if n >= 0 {
                 rows.truncate(n as usize);

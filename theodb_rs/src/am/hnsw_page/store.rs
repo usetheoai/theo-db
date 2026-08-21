@@ -347,7 +347,7 @@ pub(crate) unsafe fn insert_search_ground(
     let (nodes, _candidates) =
         crate::ann::scan_core::ground_search_nodes(&pg_src, ep, ef, m0, true)?;
     let mut cands: Vec<(f64, Addr)> = nodes.iter().map(|(c, _)| (c.d, (c.blk, c.off))).collect();
-    cands.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    cands.sort_by(|a, b| a.0.total_cmp(&b.0));
     Ok(cands.into_iter().take(m0).map(|(_, a)| a).collect())
 }
 
