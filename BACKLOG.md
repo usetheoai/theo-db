@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-94 items — **Open** 15 · **In flight** 14 · **Closed** 65
+94 items — **Open** 12 · **In flight** 14 · **Closed** 68
 
-### Open (15)
+### Open (12)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -82,9 +82,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-008`](#b-008--lakehouse-4-funções-expostas-escala-e-formatos-nunca-medidos----) | Lakehouse: 4 funções expostas, escala e formatos nunca medidos | `raw` | — |
 | [`B-010`](#b-010--maturidade-zero-uso-real-e-é-o-gargalo-de-todos-os-pilares----) | Maturidade: zero uso real, e é o gargalo de todos os pilares | `raw` | — |
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
-| [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off----) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `triaged` | — |
-| [`B-042`](#b-042--o-build-do-hnsw-é-36-mais-lento-que-o-do-pgvector-usando-8-mais-threads-e-o-grafo-sai-pior----) | O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior | `triaged` | — |
-| [`B-046`](#b-046--paridade-de-qps-com-o-pgvector-a-recall-casado-hoje-o-déficit-medido-é-163----) | Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3% | `triaged` | — |
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
@@ -109,7 +106,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `planned` | — |
 | [`B-093`](#b-093--o-ndcg-publicado-do-pilar-lexical-foi-medido-com-agregação-que-trunca-e-o-arnês-já-não-trunca----) | O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca | `planned` | — |
 
-### Closed (65)
+### Closed (68)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -121,6 +118,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-014`](#b-014--bm25_search-aceita-um-termo-por-chamada-consulta-de-usuário-tem-vários---x) | `bm25_search` aceita um termo por chamada; consulta de usuário tem vários | `killed` | — |
 | [`B-015`](#b-015--cinco-testes-falham-com-contador-em-zero-instrumentação-ou-o-chunk-skip-não-poda---x) | Cinco testes falham com contador em zero: instrumentação ou o chunk-skip não poda? | `shipped` | — |
 | [`B-016`](#b-016--os-testes-de-egress-esbarram-na-guarda-ssrf-do-próprio-produto---x) | Os testes de egress esbarram na guarda SSRF do próprio produto | `shipped` | — |
+| [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off---x) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `shipped` | — |
 | [`B-019`](#b-019--create-index-de-hnsw-não-é-idempotente-estoura-em-vez-de-ser-no-op----) | `CREATE INDEX` de HNSW não é idempotente: estoura em vez de ser no-op | `killed` | — |
 | [`B-020`](#b-020--create-index-de-hnsw-é-93-mais-lento-que-inserir-as-mesmas-linhas----) | `CREATE INDEX` de HNSW é 93× mais lento que inserir as mesmas linhas | `killed` | — |
 | [`B-021`](#b-021--o-diagnóstico-não-enxerga-índice-criado-pela-sintaxe-pgvector-e-o-opclass-default-não-serve----x) | O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>` | `shipped` | — |
@@ -142,8 +140,10 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-039`](#b-039--o-detector-de-cargo-udeps-roda-no-host-onde-o-ambiente-de-build-não-existe---x) | O detector de `cargo-udeps` roda no host, onde o ambiente de build não existe | `shipped` | — |
 | [`B-040`](#b-040--cliente-fts-no-vectordbbench-validar-o-pilar-lexical-no-mesmo-arnês-com-a-mesma-disciplina---x) | Cliente FTS no VectorDBBench: validar o pilar lexical no mesmo arnês, com a mesma disciplina | `shipped` | — |
 | [`B-041`](#b-041--bm25_search-sobre-índice-nunca-construído-devolve-zero-linhas-sem-erro---x) | `bm25_search` sobre índice nunca construído devolve zero linhas, sem erro | `shipped` | — |
+| [`B-042`](#b-042--o-build-do-hnsw-é-36-mais-lento-que-o-do-pgvector-usando-8-mais-threads-e-o-grafo-sai-pior---x) | O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior | `shipped` | — |
 | [`B-044`](#b-044--implementar-stemming-no-analisador-lexical-a-decisão-está-tomada---x) | Implementar stemming no analisador lexical (a decisão está tomada) | `shipped` | — |
 | [`B-045`](#b-045--nenhuma-comparação-que-publicamos-tem-teste-de-significância-e-tínhamos-o-instrumento---x) | Nenhuma comparação que publicamos tem teste de significância, e tínhamos o instrumento | `shipped` | — |
+| [`B-046`](#b-046--paridade-de-qps-com-o-pgvector-a-recall-casado-hoje-o-déficit-medido-é-163---x) | Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3% | `shipped` | — |
 | [`B-047`](#b-047--rodar-os-motores-concorrentes-nos-benchmarks-oficiais-na-mesma-máquina-como-prática-recorrente---x) | Rodar os motores concorrentes nos benchmarks oficiais, na mesma máquina, como prática recorrente | `shipped` | — |
 | [`B-048`](#b-048--a-superfície-responde-onde-deveria-recusar-três-instâncias-novas-e-a-classe-já-foi-consertada-três-vezes---x) | A superfície responde onde deveria recusar: três instâncias novas, e a classe já foi consertada três vezes | `shipped` | — |
 | [`B-050`](#b-050--o-conserto-do-cliente-opensearch-é-do-upstream-e-o-fork-tem-saída-declarada---x) | O conserto do cliente OpenSearch é do upstream, e o fork tem saída declarada | `killed` | — |
@@ -974,7 +974,7 @@ dod:
 > de sincronização ([#212](https://github.com/usetheoai/theo-rag/pull/212)), honrando a deleção deliberada de
 > `build-publish.yml` que o `develop` havia feito. A ordem inversa — release primeiro, bumps depois — teria
 > evitado o conflito inteiro.
-## B-018 — O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off`   [ ]
+## B-018 — O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off`   [x]
 
 domain: vetorial
 repo: theo-db
@@ -982,7 +982,15 @@ suggested_mode: bug
 source: discover-live-test
 evidence: suíte de integração do `theo-rag` contra `ghcr.io/usetheoai/theo-db:0.140.0` (2026-08-10): `o planner deveria alcançar o índice HNSW sob enable_seqscan = off`. Plano escolhido: `Limit → Sort → Nested Loop → Index Scan` — **há um `Sort` acima**, então o índice não está servindo a ordenação.
 why_now: a correção do planner de hoje ([m175](wiki/benchmarks/m175-planner-cost-inversion-verdict.md)) resolveu a busca simples e **não cobre o caminho de junção**, que é o que o `theo-rag` usa de verdade. Encontrado pela suíte do produto, não por benchmark — o quarto defeito do dia pelo mesmo mecanismo.
-status: triaged
+status: shipped
+fechado_2026_08_21: **lançado em `v0.164.0`** com a decisão em `ADR-0066`. A causa foi determinada
+  (o default de `ef_search`, não o modelo de custo — que é port fiel do pgvector 0.8), a troca foi
+  medida (1,377× de QPS contra 7,02 pontos de recall) e a decisão foi tomada com razão escrita: o
+  default fica em 64, e a saída para o caso de junção é `SET LOCAL` por consulta.
+  .
+  BULLET 1 DO DOD NÃO ENTREGUE, e não será por aquele caminho: o teste do `theo-rag` passaria baixando
+  o default, e a medição mostrou que isso custa 7 pontos de recall. A saída para o consumidor é
+  `SET LOCAL`, e isso é mudança no `theo-rag`, não aqui. Está escrito no bloco acima.
 status_dod: bullet 2 ENTREGUE (causa determinada: o default, não o modelo de custo). Bullet 3 entregue
   como benchmark registrado `vector/sift1m/ef-default`, que é regressão melhor que um teste — mede a troca
   em vez de fixar um plano. Bullet 1 NÃO entregue e não será pelo caminho proposto: o teste do `theo-rag`
@@ -1951,7 +1959,7 @@ dod:
 > Suíte: **480 passed; 0 failed**. Review:
 > `.claude/knowledge-base/reviews/b041-b048-silencio-review-2026-08-13.md` (`READY_TO_MERGE`).
 > `planned` e não `shipped` porque a última release é a **v0.158.0** e este conserto não está nela.
-## B-042 — O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior   [ ]
+## B-042 — O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1959,7 +1967,12 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-12 no droplet `g-16vcpu-64gb`, corpus `Performance1536D50K` (50.000 × 1536d, COSINE), decompondo `load_duration` do JSON do VectorDBBench. **A inserção está em paridade** — pgvector 18,80 s contra TheoDB 19,66 s (4%). **A construção do índice não:** pgvector **35,09 s**, TheoDB **125,09 s** e 122,85 s numa segunda corrida independente (1,8% entre elas). O caminho paralelo do TheoDB **foi usado** — o limiar é 4.096 nós (`ann/hnsw_parallel.rs:18`) e o corpus tem 50.000, com `available_parallelism()` = 16 threads no droplet. O pgvector usou **2** workers de manutenção (`max_parallel_maintenance_workers=2`, lido do log da corrida). Em segundos-de-thread para o mesmo grafo, a razão é **28,5×**.
 why_now: o que torna isto um achado e não uma escolha de projeto é a **ausência de troca**: o grafo mais barato do pgvector é também o **melhor**. No mesmo `ef_search=64` o pgvector entrega recall **0,9835** e o TheoDB **0,9600** — para casar recall o TheoDB precisa de `ef=128`, e é daí que sai o déficit de 16% de QPS já publicado. Ou seja, o custo aparece duas vezes: uma no tempo de build, outra na varredura. Enquanto for assim, "paridade de recall" é verdade apenas com o dobro de trabalho por consulta, e isso não está dito em lugar nenhum. O eixo para investigar está bloqueado pelo [[B-036]] — sem `m`/`ef_construction` ajustáveis, não é possível separar qualidade-de-grafo de eficiência-de-varredura por experimento.
-status: triaged
+status: shipped
+fechado_2026_08_21: **lançado em `v0.164.0`**. Medido sob paridade de workers (`8` declarado nos dois
+  lados, contra o default de 2 do pgvector que a evidência original usou): **142,0 s contra 78,0 s**,
+  ou seja **1,82× e não 3,6×** — a razão cai pela metade quando a assimetria que o item apontava é
+  removida. E um eixo que nunca fora medido corta a nosso favor: nosso índice é **7,4% menor**,
+  724,1 MB contra 782,4 MB. `wiki/benchmarks/b046-b042-fronteira-pgvector.md`.
 medido_2026_08_21: **1,82× e não 3,6× — e a diferença é paridade de workers.** SIFT1M, ambos com
   `max_parallel_maintenance_workers=8` DECLARADO (a evidência original mediu o pgvector com 2, o
   default): theodb **142,0 s**, pgvector **78,0 s**. Sob a mesma contagem de workers a razão cai pela
@@ -2105,7 +2118,7 @@ dod:
 > por consulta do lado sem stemming não foram preservados.
 >
 > **2026-08-13 — a promessa virou item.** O "significância para velocidade é item próprio" citado acima e no artefato do b047 agora é o [[B-049]]. Ficou três turnos como menção sem registro, que é a falha que o `cycle-maintenance` documenta: mencionar sem filar dá falsa sensação de cobertura.
-## B-046 — Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3%   [ ]
+## B-046 — Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3%   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -2113,7 +2126,15 @@ suggested_mode: evolve
 source: human
 evidence: medido em 2026-08-12 no droplet `g-16vcpu-64gb`, `Performance1536D50K` (50.000 × 1536d, COSINE), publicado em `wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md`. A recall casado — **0,9829 do TheoDB contra 0,9835 do pgvector** — o pgvector faz **3.590,6 QPS** e o TheoDB **3.086,1**: déficit de **16,3%**. A origem é a mesma do [[B-042]] vista pelo outro lado: no mesmo `ef_search=64` o TheoDB entrega recall 0,9600 contra 0,9835, e precisa de `ef=128` para empatar — ou seja, **o dobro de candidatos por consulta**. Reprodutibilidade das duas corridas independentes em `ef=64`: 1,3% de QPS, 0,06% de recall.
 why_now: alvo declarado pelo owner em 2026-08-13 — **paridade com o pgvector**. Este é o número que a comparação pública mostra, e é distinto do [[B-042]]: aquele é o custo de **construir**, este é o custo de **consultar**. Podem ter a mesma causa (grafo pior exige mais varredura) ou causas independentes (varredura menos eficiente por candidato), e **a medição atual não separa as duas** — é exatamente o que o [[B-036]] destrava ao tornar `m`/`ef_construction` ajustáveis. Enquanto não separar, qualquer otimização é palpite.
-status: triaged
+status: shipped
+fechado_2026_08_21: **lançado em `v0.164.0`**. Medido a recall casado em SIFT1M, pgvector 0.8.6 e
+  theodb 1.5.0 no MESMO PostgreSQL 18.6: o déficit **não é constante** — 19,6% em recall 0,9574 e
+  **3,4%** em 0,9890, com dois dos três pontos casando diretamente na quarta casa decimal. O "16,3%"
+  registrado descrevia um ponto num corpus de 1536d/cosseno; aqui, em 128d/L2, o déficit **fecha
+  conforme o recall sobe** — e o alto recall é o regime que um RAG de produção usa.
+  .
+  NENHUM PONTO É PARIDADE: o pgvector é mais rápido a recall casado em toda a faixa medida. O que
+  muda é a magnitude e a direção em que ela se move. `wiki/benchmarks/b046-b042-fronteira-pgvector.md`.
 medido_2026_08_21: **o déficit NÃO é constante, e é MENOR no alto recall.** Fronteira completa em
   SIFT1M (1M × 128d, L2), pgvector 0.8.6 e theodb 1.5.0 no MESMO PostgreSQL 18.6, mesma máquina,
   mesmos parâmetros, pelo benchmark registrado `vector/sift1m/frontier`:
@@ -2656,6 +2677,9 @@ separado; **(b)** a população automática do store **falha em silêncio** num 
 restart, porque o recomendador usa histórico de consultas que está vazio: o store fica vazio, todo plano cai
 para heap, e a corrida não mede nada sem erro nem aviso.
 status: triaged
+lancado_2026_08_21: bullets 2 e 4 **lançados em `v0.166.0`** (medição) e `theodb-bench v0.6.0`
+  (o portão). O item segue `triaged` porque os bullets 1 e 3 continuam abertos — e o motivo está
+  escrito abaixo, não é esquecimento.
 medido_2026_08_21: **bullets 2 e 4 ENTREGUES, e a resposta do bullet 2 não é um número.**
   `wiki/benchmarks/b058-crossover-colunar.md`, artefato em `benchmarks/artifacts/20260821T122336Z-*`.
   .
