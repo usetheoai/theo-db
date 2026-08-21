@@ -7,7 +7,7 @@ edição única para download que roda no seu laptop, on-premises, na borda, em 
 em Kubernetes ou bare metal. Num só pacote você tem busca vetorial + híbrida (BM25+vetor) para
 aplicações de IA, grafo para GraphRAG, analytics colunar sobre dados transacionais vivos e
 lakehouse Parquet own-code (sem DuckDB) — tudo em SQL, com código próprio, sem licença por vCPU
-e sem lock-in.
+e com saída declarada: os dados saem por `pg_dump` e por Parquet, e a extensão é Apache 2.0.
 
 > ⚠️ **Status:** em desenvolvimento ativo, ainda **pré-1.0** (releases 0.x — ver [`CHANGELOG.md`](./CHANGELOG.md)).
 > Sem afirmação de "production-ready" até haver evidência de uso sustentado (`public-copy.md`).
@@ -19,8 +19,8 @@ e sem lock-in.
 
 A missão do TheoDB é **igualar ou superar o AlloyDB** para quem roda OSS, on-premises e na borda —
 entregando as mesmas capacidades (busca vetorial/IA, analytics, operação) com **superioridade estrutural**
-em abertura, custo, portabilidade e **independência de modelo** (qualquer modelo local ou remoto, sem
-lock-in). Metas de performance são **metas comprovadas por benchmark reproduzível** em `wiki/benchmarks/` —
+em abertura, custo, portabilidade e **independência de modelo** (qualquer modelo local ou remoto,
+trocável sem migração de dados). Metas de performance são **metas comprovadas por benchmark reproduzível** em `wiki/benchmarks/` —
 nunca afirmações sem evidência. Estratégia completa: [`wiki/decisions/0002-north-star-equal-or-superior-to-alloydb.md`](./wiki/decisions/0002-north-star-equal-or-superior-to-alloydb.md).
 
 > **Estado medido FINAL do pilar vetorial (honesto — M73/M74, `wiki/decisions/0035`, `wiki/decisions/0036`).** Depois de

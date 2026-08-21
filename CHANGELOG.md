@@ -13,6 +13,21 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **O lint de copy pública deixou de avisar sobre o texto que cumpre a regra.** Ele apontava
+  `production-ready` nas quatro ocorrências do README, e as quatro eram **negações** — "Não é
+  production-ready", "Sem afirmação de production-ready até haver evidência". Um aviso sobre o texto
+  certo ensina que o aviso não vale a pena ler. E a forma portuguesa do absolutismo de lock-in
+  (`sem lock-in`) não era detectada, só a inglesa. (#B-091)
+- **`scripts/tests/` e `hooks/tests/` passaram a ser executados.** O runner só varria
+  `skills/*/tests`, então os testes escritos ali — incluindo os sete do portão de CHANGELOG — nunca
+  rodaram, e quem os escrevia via `ALL SUITES GREEN`. (#B-091)
+
+### Changed
+- **O README trocou uma alegação absoluta por uma saída concreta.** Dizia "sem lock-in", que é a forma
+  que o próprio `public-copy.md § 6` bane; agora nomeia a saída — `pg_dump`, Parquet, extensão Apache
+  2.0. O lint de copy pública **não** pegou isso, e a lacuna dele ficou registrada. (#B-091)
+
 ## [0.162.0] - 2026-08-20
 
 ### Added

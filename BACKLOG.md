@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-90 items — **Open** 26 · **In flight** 7 · **Closed** 57
+91 items — **Open** 26 · **In flight** 4 · **Closed** 61
 
 ### Open (26)
 
@@ -101,19 +101,16 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 
-### In flight (7)
+### In flight (4)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
-| [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança----) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
-| [`B-088`](#b-088--o-gate-de-changelog-checa-presença-de-arquivo-não-de-entrada----) | O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA | `planned` | — |
-| [`B-089`](#b-089--um-vetor-zero-na-tabela-derruba-a-busca-por-cosseno-no-índice-hnsw-no-ef_search-default----) | Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default | `planned` | — |
-| [`B-090`](#b-090--94-arquivos-de-teste-sob-claude-e-nenhum-workflow-os-roda----) | 94 arquivos de teste sob `.claude/` e nenhum workflow os roda | `planned` | — |
+| [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `planned` | — |
 
-### Closed (57)
+### Closed (61)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -153,6 +150,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-052`](#b-052--workspace-não-tem-portão-73-commits-e-13-arquivos-rust-sem-um-gate-olhar---x) | `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar | `shipped` | — |
 | [`B-053`](#b-053--o-núcleo-de-distância-vetorial-é-puro-por-uma-linha-e-é-ela-que-prende-o-micro-bench-na-suíte---x) | O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte | `shipped` | — |
 | [`B-054`](#b-054--toda-iteração-em-rust-custa-8-minutos-e-2m34s-deles-eram-um-cp--r---x) | Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r` | `shipped` | — |
+| [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança---x) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `shipped` | — |
 | [`B-060`](#b-060--o-arnês-verifica-que-o-índice-foi-usado-e-não-verifica-que-o-knob-de-busca-pegou---x) | O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou | `shipped` | — |
 | [`B-061`](#b-061--só-duas-suites-registradas-as-duas-vetoriais-o-colunar-não-tem-onde-ser-comparado---x) | Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado | `shipped` | — |
 | [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default---x) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `shipped` | — |
@@ -174,6 +172,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-085`](#b-085--a-imagem-era-construída-onze-vezes-por-corrida-e-nenhum-job-dependia-de-outro---x) | A imagem era construída onze vezes por corrida, e nenhum job dependia de outro | `shipped` | — |
 | [`B-086`](#b-086--o-teste-que-prova-o-alias-do-ef_search-passa-quando-o-guc-está-inerte---x) | O teste que prova o alias do `ef_search` passa quando o GUC está inerte | `shipped` | — |
 | [`B-087`](#b-087--o-pacote-do-arnês-diz-010dev0-enquanto-as-releases-dizem-v010-e-v020---x) | O pacote do arnês diz `0.1.0.dev0` enquanto as releases dizem `v0.1.0` e `v0.2.0` | `shipped` | — |
+| [`B-088`](#b-088--o-gate-de-changelog-checa-presença-de-arquivo-não-de-entrada---x) | O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA | `shipped` | — |
+| [`B-089`](#b-089--um-vetor-zero-na-tabela-derruba-a-busca-por-cosseno-no-índice-hnsw-no-ef_search-default---x) | Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default | `shipped` | — |
+| [`B-090`](#b-090--94-arquivos-de-teste-sob-claude-e-nenhum-workflow-os-roda---x) | 94 arquivos de teste sob `.claude/` e nenhum workflow os roda | `shipped` | — |
 
 <!-- BACKLOG-INDEX:END -->
 
@@ -2311,7 +2312,7 @@ dod:
 >
 > Publicar a recomendação sem este número teria sido conselho por intuição, que é a classe que este projeto
 > persegue em toda parte.
-## B-055 — Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança"   [ ]
+## B-055 — Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança"   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -2339,7 +2340,7 @@ README é justamente a que faz alguém não verificar antes. **Nada aqui foi exe
 a diferença importa: eu não medi se o `ef_search` de fato se perde entre transações nem se os contadores de
 fato se misturam. São predições fundamentadas, não resultados, e publicar a matriz sem medir seria o
 `cobertura-alegada-sem-execucao` que este projeto persegue.
-status: planned
+status: shipped
 status_nota: 2026-08-20 — os cinco bullets fecharam, tudo POR EXECUÇÃO contra
   `ghcr.io/usetheoai/theo-db:latest` com PgBouncer 1.25.2. Matriz em
   `wiki/benchmarks/b055-pgbouncer-compat.md`.
@@ -3751,7 +3752,7 @@ dod:
 
 > Registrado 2026-08-20 durante o corte da `v0.2.0`. **Não retrata nenhum número**: nenhum bundle
 > publicado foi verificado ainda quanto a esse campo, e é isso que o terceiro bullet pede.
-## B-088 — O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA   [ ]
+## B-088 — O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA   [x]
 
 domain: governanca
 repo: theo-db
@@ -3769,7 +3770,7 @@ why_now: a omissão só apareceu porque o corte de release me fez comparar a lis
 lista de itens citados — ou seja, **uma sessão depois**, e por acaso. Um gate que passa quando o arquivo foi
 tocado por outra razão é a mesma classe do `assert_index_used` ([[B-063]]) e do `recall_at_10` ([[B-086]]):
 existe, roda, e não afirma o que diz afirmar.
-status: planned
+status: shipped
 status_nota: 2026-08-20 — os três bullets fecharam. (1) `scripts/check_changelog_entry.py` conta bullets
   **acrescentados dentro do `[Unreleased]`**, ignorando edição em versão já lançada, e uma reescrita
   conta como uma entrada e não duas. (2) Provado contra o commit REAL: `check_changelog_entry.py
@@ -3788,7 +3789,7 @@ dod:
 > Registrado 2026-08-20 pelo corte da `0.161.0`. **É sobre o meu próprio erro**, e é por isso que vale: eu
 > segui o procedimento, o gate disse OK, e a entrada não existia. Nenhum humano teria notado antes do
 > release, e o release é tarde demais — o CHANGELOG é o contrato com quem consome.
-## B-089 — Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default   [ ]
+## B-089 — Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default   [x]
 
 domain: vetorial
 repo: theo-db
@@ -3816,7 +3817,7 @@ uma linha zero e o mesmo `ef=64`, a consulta passa.
 why_now: vetor zero não é patológico em dado real — é o que sobra de um embedding que falhou, de um documento
 vazio ou de padding. E `ef_search=64` é o **default**: quem nunca ajustou o knob é exatamente quem encontra o
 erro. O `<->` funcionando na mesma tabela torna o sintoma confuso — parece defeito do dado, não do AM.
-status: planned
+status: shipped
 status_nota: 2026-08-20 — os quatro bullets fecharam. **Causa-raiz**: a mensagem parece do PostgreSQL e é do
   **Rust** — `slice::sort_by` detecta comparador inconsistente desde a 1.81, e havia **19 sítios** em 9
   arquivos com `partial_cmp(..).unwrap_or(Ordering::Equal)`, que sobre NaN devolve `Equal` para todo par e
@@ -3840,7 +3841,7 @@ dod:
 > falhadas** — uma linha zero em 3000 não basta, dois índices na mesma coluna não bastam, zero presente na
 > construção não basta. O que discrimina é o `ef_search`, e eu só cheguei nele depois de parar de adivinhar e
 > varrer o parâmetro. Fica registrado porque a próxima pessoa vai tentar as mesmas seis.
-## B-090 — 94 arquivos de teste sob `.claude/` e nenhum workflow os roda   [ ]
+## B-090 — 94 arquivos de teste sob `.claude/` e nenhum workflow os roda   [x]
 
 domain: governanca
 repo: theo-db
@@ -3857,7 +3858,7 @@ why_now: esta sessão mexeu em oito desses scripts e rodou as suítes **à mão*
 Nada no sistema exigiu isso e nada teria notado a ausência — que é literalmente o texto do [[B-052]] aplicado
 a outro diretório, e o B-052 já foi entregue para o Rust. E o [[B-088]], que acabou de entrar, é o gate de
 CHANGELOG: se ele quebrar, quem descobre é a próxima sessão, pelo silêncio.
-status: planned
+status: shipped
 status_nota: 2026-08-20 — os três bullets fecharam. (1) `.github/workflows/tooling-tests.yml` roda
   `run_slice_tests.sh` (31 slices, um processo pytest por slice — o script explica no cabeçalho por que
   um `pytest` largo colide), mais `check_xrefs.py` e o checador do registro. Na forma que o
@@ -3886,3 +3887,42 @@ dod:
 > Registrado 2026-08-20 ao mergear o #258. **É o B-052 outra vez, um diretório adiante**: um portão que não
 > olha um código é indistinguível de um portão que aprova aquele código, e a diferença só aparece quando
 > alguém quebra alguma coisa.
+## B-091 — O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo   [ ]
+
+domain: governanca
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: medido em 2026-08-20 rodando `hooks/public-copy-lint.sh` contra o `README.md` real (o hook lê o
+caminho do stdin como JSON; invocá-lo sem isso não verifica **nada** e sai 0, que foi o meu primeiro erro).
+**Falso positivo:** ele avisa de `production-ready` nas quatro ocorrências do arquivo, e as quatro são
+NEGAÇÕES — *"Sem afirmação de 'production-ready' até haver evidência"*, *"**Não é production-ready**"*, *"o
+gate para sequer começar a alegar production-ready"*. O lint não distingue afirmação de negação, então avisa
+exatamente sobre o texto que existe para cumprir a regra.
+**Falso negativo:** `public-copy.md § 6` bane `lock-in free`/`lock-in proof` como claim absoluta, e o
+`README.md:10` dizia *"sem lock-in"* — não avisado. O lint verifica **3 das 4** famílias banidas do § 6:
+falta `lock-in`, `<competidor> killer`, `drop-in replacement` e `zero downtime`.
+why_now: um lint com as duas falhas ao mesmo tempo é pior que nenhum: ele treina o leitor a ignorar o aviso
+(porque o aviso que ele dá é sobre o texto certo) enquanto deixa passar o que deveria pegar. A frase da linha
+10 foi corrigida na mesma sessão, mas por leitura humana — o portão não a teria pego.
+status: planned
+status_nota: 2026-08-20 — os três bullets fecharam, e **duas correções de rota ficam registradas**.
+  (1) A evidência original dizia "3 das 4 famílias"; era falsa — o lint cobre as quatro, e o defeito real era
+  só a forma portuguesa. (2) O filtro de negação que escrevi derruba a LINHA inteira, então uma linha que
+  negue um termo e afirme outro perde os dois — encontrei isso no próprio README, onde `sem lock-in` passava
+  por causa de um `nunca afirmações` na mesma linha. A frase foi reescrita para não depender dessa sorte, e a
+  limitação está **fixada em teste** em vez de descoberta depois: se alguém tornar o filtro mais preciso, o
+  teste falha e diz para removê-lo.
+  Achado colateral consertado no caminho: `run_slice_tests.sh` só varria `skills/*/tests`, então
+  `scripts/tests/` — onde vivem os 7 testes do [[B-088]], escritos nesta mesma sessão — **nunca rodava**.
+  Agora varre `scripts/tests` e `hooks/tests`.
+dod:
+  - o lint não avisa quando o termo aparece negado (`não é X`, `sem afirmação de X`) — provado por teste
+    contra o `README.md` atual, que hoje dispara quatro avisos e deveria disparar zero
+  - as quatro famílias do `public-copy.md § 6` são verificadas, não três
+  - existe teste que roda o hook com a entrada JSON que ele realmente espera — invocá-lo sem stdin não
+    verifica nada e sai 0, e um portão que "passa" sem olhar é o defeito que esta sessão perseguiu o dia todo
+
+> Registrado 2026-08-20 ao verificar a própria edição que fiz no README para o [[B-055]]. **Encontrado
+> porque eu duvidei do meu próprio "passou"**: o lint saiu 0 sem output, e 0-sem-output é ausência de
+> resposta, não resposta.
