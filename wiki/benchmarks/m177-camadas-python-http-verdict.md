@@ -2,13 +2,13 @@
 type: Measurement
 title: m177 — o servidor em Python e o HTTP custam 5,1% juntos, e eliminar o TCP rende 0,2%
 description: Decompõe o pedido por camada e mostra que o teto de qualquer otimização de transporte é 0,85 ms sobre 16,6 ms; o Unix socket ganha do TCP com significância e sem relevância prática.
-resource: benchmarks/artifacts/m177/layers.json
+resource: git:7cd157d^:benchmarks/artifacts/m177/layers.json
 tags: [benchmark, m177, embedding, python, http, unix-socket, transporte, teto-de-otimizacao, significancia]
 milestone: M177
 generated: { by: claude-code/opus-5, at: 2026-08-07T23:30:00Z }
 sources:
   - id: layers
-    resource: benchmarks/artifacts/m177/layers.json
+    resource: git:7cd157d^:benchmarks/artifacts/m177/layers.json
     title: Decomposição por camada — inferência pura, HTTP/TCP, HTTP/UDS
   - id: udssig
     resource: benchmarks/m177_uds_significance.py

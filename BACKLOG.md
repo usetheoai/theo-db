@@ -3151,6 +3151,25 @@ status_nota: 2026-08-20 — **PARCIAL, e o que falta está bloqueado por infraes
   Bullet 3 depende de existir um store de bundles: medido em 2026-08-20, `wiki/benchmarks/` tem
   **171 documentos e apenas 3 citam bundle** — um gate exigindo bundle reprovaria 168 de 171, e gate
   que nunca passa é gate que alguém desliga. Construir o gate antes do que ele fiscaliza seria teatro.
+status_nota_2026_08_21: **Bullet 3 ENTREGUE, e a nota acima partia de uma dicotomia falsa.** O gate não
+  precisa exigir que todo documento cite bundle — basta exigir que **quem cita, cite algo que resolve**.
+  Não ter prova é uma coisa; alegar uma prova inexistente é outra, e pior, porque convida o leitor a
+  confiar num arquivo que ninguém pode abrir. `.claude/scripts/check_bundle_citations.py`, ligado ao
+  `stop-validation.sh`, com 6 testes.
+  .
+  MEDIDO ao construí-lo: 170 documentos, 13 citam bundle, e **26 citações estavam quebradas em 9
+  arquivos** — todas resíduo de UMA remoção deliberada (`7cd157d`, "remove benchmarks/ e registra a
+  especificação de reconstrução"). Não eram fabricações: eram ponteiros que a limpeza deixou para trás,
+  e nada os viu porque nada olhava. As 27 foram convertidas para `git:7cd157d^:<caminho>` — a forma que
+  o acervo já usa para a árvore `docs/` removida, recuperável por `git show`. Mais uma corrigida: um
+  `resource:` do ADR-0038 omitia `-regime-` no nome real.
+  .
+  Bullets 1 e 2 continuam bloqueados — o crossover do colunar precisa de benchmark colunar registrado
+  ([[B-006]]/[[B-058]]) e a varredura do ScaNN precisa do AlloyDB Omni ([[B-057]]).
+  .
+  E o dia moveu o item pelo outro lado também: as **quatro** medições publicadas em 2026-08-21
+  (`ef-default`, `frontier` ×2, `scifact/lexical`) saíram do `theodb-bench run` com bundle, contra as
+  três de 2026-08-17 que saíram de script.
 status_nota_evidencia: 2026-08-20 — campo misto: abre com uma DECISÃO do owner (que não é medição) e
   fecha com a medição que a sustenta — três medições do dia saíram de scripts fora do arnês, nomeados.
   É a segunda parte que o torna `triaged`.

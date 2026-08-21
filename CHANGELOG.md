@@ -13,6 +13,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Um número publicado e o artefato que o sustenta deixaram de poder divergir.** Novo gate
+  (`check_bundle_citations.py`, ligado ao `stop-validation.sh`): um documento que cita um bundle tem de
+  citar um que **existe** — em disco, ou sob `git:<sha>:<caminho>`, a forma que o acervo já usa para o
+  que foi removido de propósito. Ele **não** exige que todo documento cite bundle; exige que quem cita,
+  cite algo que resolve. Não ter prova é uma coisa; alegar uma prova inexistente é outra, e pior.
+  Ao entrar, encontrou **26 citações quebradas em 9 arquivos**, todas resíduo de uma remoção deliberada
+  (`7cd157d`) que ninguém tinha visto porque nada olhava. Convertidas para a forma `git:`. (#B-069)
+
 ### Changed
 - **O nDCG@10 do pilar lexical no SciFact é 0,6864, e não os 0,6269 que publicávamos.** Re-medido
   DENTRO do arnês, com corpus verificado por sha256 e benchmark registrado: **+9,5% relativo**,

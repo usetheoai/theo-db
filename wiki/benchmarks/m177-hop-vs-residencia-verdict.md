@@ -2,19 +2,19 @@
 type: Measurement
 title: m177 fase 1 — o hop local custa 15 ms; a residência do modelo custa 1,7 GB por processo
 description: Mede os dois lados da troca que decide a extensão de embeddings local, e o resultado refuta a rota por backend em multilíngue — não por licença nem por peso de pacote, mas por memória.
-resource: benchmarks/artifacts/m177/
+resource: git:7cd157d^:benchmarks/artifacts/m177/
 tags: [benchmark, m177, embedding, multilingual, memoria, hop, rerank, licenca, veredito-parcial]
 milestone: M177
 generated: { by: claude-code/opus-5, at: 2026-08-07T21:00:00Z }
 sources:
   - id: hopfair
-    resource: benchmarks/artifacts/m177/hop-cost-fair.json
+    resource: git:7cd157d^:benchmarks/artifacts/m177/hop-cost-fair.json
     title: Custo do hop, coleta com orçamento de thread equalizado (n=40)
   - id: hopbias
-    resource: benchmarks/artifacts/m177/hop-cost-biased-run1.json
+    resource: git:7cd157d^:benchmarks/artifacts/m177/hop-cost-biased-run1.json
     title: Coleta anterior, enviesada — preservada como registro do erro de método
   - id: survey
-    resource: benchmarks/artifacts/m177/model-survey.json
+    resource: git:7cd157d^:benchmarks/artifacts/m177/model-survey.json
     title: Custo por modelo multilíngue (RSS, load, latência), subprocesso isolado por modelo
 ---
 

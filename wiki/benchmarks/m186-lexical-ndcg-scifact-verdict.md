@@ -2,13 +2,13 @@
 type: Measurement
 title: m186 — a busca lexical own-code entrega 2,08× o nDCG@10 do ts_rank_cd nativo em corpus público
 description: Primeira medição de qualidade de recuperação do pilar lexical, contra o BEIR SciFact e contra o baseline que o usuário já tem no Postgres — com significância pareada e o limite de método que provavelmente subestima o nosso número.
-resource: benchmarks/artifacts/m186/lexical-ndcg-scifact.json
+resource: git:7cd157d^:benchmarks/artifacts/m186/lexical-ndcg-scifact.json
 tags: [benchmark, m186, lexical, bm25, ndcg, beir, significancia, qualidade-de-recuperacao]
 milestone: M186
 generated: { by: claude-code/opus-5, at: 2026-08-09T20:00:00Z }
 sources:
   - id: ndcg
-    resource: benchmarks/artifacts/m186/lexical-ndcg-scifact.json
+    resource: git:7cd157d^:benchmarks/artifacts/m186/lexical-ndcg-scifact.json
     title: nDCG@10 sobre 300 consultas do SciFact com julgamento humano
 ---
 

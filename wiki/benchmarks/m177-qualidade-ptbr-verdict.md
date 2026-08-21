@@ -2,14 +2,14 @@
 type: Measurement
 title: m177 fase 1 — a qualidade em pt-BR fecha o gate, e ela anda junto com a latência
 description: O modelo mais rápido perde 37% de MRR para o melhor; a fronteira de Pareto tem três pontos e cinco dos oito candidatos são dominados, o que torna a escolha uma troca explícita e não um almoço grátis.
-resource: benchmarks/artifacts/m177/quality-ptbr-knownitem.json
+resource: git:7cd157d^:benchmarks/artifacts/m177/quality-ptbr-knownitem.json
 tags: [benchmark, m177, embedding, qualidade, multilingual, pt-br, known-item, pareto, licenca]
 milestone: M177
 dataset: wiki pt-BR (250 conceitos, known-item)
 generated: { by: claude-code/opus-5, at: 2026-08-08T02:00:00Z }
 sources:
   - id: quality
-    resource: benchmarks/artifacts/m177/quality-ptbr-knownitem.json
+    resource: git:7cd157d^:benchmarks/artifacts/m177/quality-ptbr-knownitem.json
     title: Qualidade e latência por modelo multilíngue, corpus pt-BR, CPU dedicada
 ---
 

@@ -2,13 +2,13 @@
 type: Measurement
 title: m184 — superfície, performance, cobertura e crash-safety por pilar: duas divergências reais e uma retratada
 description: O SymQG está no binário default e tem build 3,5× mais lento, e o lakehouse tem zero testes próprios contra uma nota que exigia testado — mas a terceira divergência alegada era erro meu, retratado no mesmo dia.
-resource: benchmarks/artifacts/m184/pillar-surface-measured.json
+resource: git:7cd157d^:benchmarks/artifacts/m184/pillar-surface-measured.json
 tags: [benchmark, m184, pilares, maturidade, divergencia, catalogo, superficie-sql, parcial]
 milestone: M184
 generated: { by: claude-code/opus-5, at: 2026-08-08T05:00:00Z }
 sources:
   - id: surface
-    resource: benchmarks/artifacts/m184/pillar-surface-measured.json
+    resource: git:7cd157d^:benchmarks/artifacts/m184/pillar-surface-measured.json
     title: Catálogo do PostgreSQL consultado no binário default, CPU dedicada
 ---
 

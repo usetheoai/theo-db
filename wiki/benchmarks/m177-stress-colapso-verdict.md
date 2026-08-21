@@ -2,16 +2,16 @@
 type: Measurement
 title: m177 stress — o colapso e o vazamento eram da máquina; em CPU dedicada o servidor satura limpo
 description: Re-executado em droplet dedicado, o throughput fica plano em ~195 rps e o RSS cresce 16 MB em vez de 6,8 GB — a explosão de memória era efeito de segunda ordem da contenção de CPU.
-resource: benchmarks/artifacts/m177/stress-dedicated-droplet.json
+resource: git:7cd157d^:benchmarks/artifacts/m177/stress-dedicated-droplet.json
 tags: [benchmark, m177, embedding, stress, retratacao, cpu-dedicada, memoria, contencao, honest-negative]
 milestone: M177
 generated: { by: claude-code/opus-5, at: 2026-08-08T00:15:00Z }
 sources:
   - id: dedicado
-    resource: benchmarks/artifacts/m177/stress-dedicated-droplet.json
+    resource: git:7cd157d^:benchmarks/artifacts/m177/stress-dedicated-droplet.json
     title: Stress em droplet c-8 dedicado (8 vCPU CPU-Optimized, 16 GB, ocioso) — a medição válida
   - id: local
-    resource: benchmarks/artifacts/m177/stress.json
+    resource: git:7cd157d^:benchmarks/artifacts/m177/stress.json
     title: Stress local em máquina compartilhada — preservado, retratado
 ---
 

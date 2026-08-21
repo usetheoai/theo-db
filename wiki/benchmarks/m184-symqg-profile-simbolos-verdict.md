@@ -4,11 +4,11 @@ title: m184 — o perfil do SymQG com símbolos: 39% do build está no próprio 
 description: Resolver os símbolos mostrou que o SymQG gasta 39% do build numa função que o HNSW não tem análoga, enquanto ambos compartilham o mesmo kernel SIMD — e revelou que o artefato anterior falhou por resolução de caminho, não por falta de debuginfo.
 tags: [benchmark, m184, symqg, perf, simbolos, flamegraph, mecanismo, correcao-de-metodo]
 milestone: M184
-resource: benchmarks/artifacts/m184/symqg-profile-symbols.json
+resource: git:7cd157d^:benchmarks/artifacts/m184/symqg-profile-symbols.json
 generated: { by: claude-code/opus-5, at: 2026-08-08T08:00:00Z }
 sources:
   - id: sym
-    resource: benchmarks/artifacts/m184/symqg-profile-symbols.json
+    resource: git:7cd157d^:benchmarks/artifacts/m184/symqg-profile-symbols.json
     title: perf com símbolos resolvidos, build de cada access method, CPU dedicada
 ---
 
