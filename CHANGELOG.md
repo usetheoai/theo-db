@@ -13,6 +13,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.162.0] - 2026-08-20
+
 ### Added
 - **As dependências das suítes do ferramental passaram a ser declaradas.** O portão novo reprovou na
   **primeira corrida** com `ModuleNotFoundError: No module named 'yaml'` em 20 testes de 6 slices: elas
@@ -28,15 +30,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   trabalho deste repositório passa. Custo medido antes de decidir: **45 s** para as 31 slices, contra
   28–58 min dos workflows pesados. (#B-090)
 
-### Fixed
-- **Um vetor zero na tabela derrubava a busca por cosseno no índice, no `ef_search` default.**
-  `'[0,…,0]' <=> q` é NaN, e o caminho de varredura ordenava com um comparador que devolvia "igual"
-  para todo par envolvendo NaN — o que quebra a transitividade, e o `sort_by` do Rust reprova desde a
-  1.81 com uma mensagem que parece do PostgreSQL sem ser. A consulta abortava inteira. O mesmo dado
-  com `<->` funcionava, e com seqscan funcionava, o que tornava o sintoma confuso. Vetor zero não é
-  patológico: é o que sobra de um embedding que falhou. O `pgvector` no mesmo corpus funciona e põe
-  as linhas NaN por último — que é agora onde elas ficam aqui. (#B-089)
-
 ### Changed
 - **A compatibilidade com PgBouncer deixou de ser análise de código e passou a ser medição.** Nos três
   modos, contra a imagem lançada: sob `session` nada muda; sob `transaction` e `statement` o
@@ -47,6 +40,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   `theodb.explain_scan` foram medidos e **não** contaminam — hipótese refutada com o mesmo peso. (#B-055)
 
 ### Fixed
+- **Um vetor zero na tabela derrubava a busca por cosseno no índice, no `ef_search` default.**
+  `'[0,…,0]' <=> q` é NaN, e o caminho de varredura ordenava com um comparador que devolvia "igual"
+  para todo par envolvendo NaN — o que quebra a transitividade, e o `sort_by` do Rust reprova desde a
+  1.81 com uma mensagem que parece do PostgreSQL sem ser. A consulta abortava inteira. O mesmo dado
+  com `<->` funcionava, e com seqscan funcionava, o que tornava o sintoma confuso. Vetor zero não é
+  patológico: é o que sobra de um embedding que falhou. O `pgvector` no mesmo corpus funciona e põe
+  as linhas NaN por último — que é agora onde elas ficam aqui. (#B-089)
+
 - **O portão de CHANGELOG passou a perguntar se há ENTRADA, não se o arquivo foi tocado.** Medido
   sobre o próprio trabalho de 2026-08-20: um commit entregou um item, tocou o `CHANGELOG.md` por
   outras razões, e não acrescentou nenhuma entrada — o portão passou, e a falta só apareceu no corte

@@ -3867,6 +3867,14 @@ status_nota: 2026-08-20 — os três bullets fecharam. (1) `.github/workflows/to
   e porque os consertos não vão ao kit por decisão do owner, o que torna este o único lugar onde eles
   podem ser verificados. (3) Custo MEDIDO: **45 s** para as 31 slices, contra 28–58 min dos workflows
   pesados. Desprezível — e se custasse como os outros, mereceria o mesmo ADR que o B-052.
+  **O portão achou QUATRO defeitos reais antes de passar**, e cada um existia e era invisível:
+  (1) cinco dependências externas nunca declaradas — as suítes passavam por acidente do ambiente;
+  (2) `check-workflow-paths.sh` acusava `AUSENTE` para arquivo que EXISTE, porque o regex de prefixos
+  descartava o `.claude/` à esquerda; (3) oito testes falhavam com `assert False` quando o tree-sitter
+  faltava, reportando "o parser está quebrado" quando o estado era "o parser não foi carregado" — o
+  próprio módulo declara a dep como opcional e os testes é que não respeitavam o contrato; (4) o
+  `vulture` era invisível à varredura de `import` por ser invocado como BINÁRIO no PATH.
+  13 checks verdes na quarta rodada.
 dod:
   - existe workflow que roda as suítes Python de `.claude/` quando elas ou o código que elas cobrem mudam,
     e ele reprova quando um teste falha
