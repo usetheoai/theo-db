@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "run_id": "20260821T130817Z-retrieval-scifact-concurrency-theodb-51325815",
+  "status": "EXPLORATORY",
+  "profile": "research",
+  "publishable": false,
+  "benchmark": {
+    "id": "retrieval/scifact/concurrency",
+    "version": 1,
+    "commit": null
+  },
+  "system": {
+    "id": "theodb",
+    "version": null
+  },
+  "environment_digest": "sha256:ebdfcc47ae46ef0760985f28e07abee8",
+  "headline": {
+    "configuration": "pipeline=lexical @ 10 clientes",
+    "throughput_per_second": 1617.7138981629378,
+    "latency_p50_ms": 4.157282000051055,
+    "latency_p95_ms": 10.897551749974356,
+    "latency_p99_ms": 42.15136768002366
+  },
+  "limitations": [
+    "profile 'research' is not publishable",
+    "run status is EXPLORATORY",
+    "pipeline=lexical @ 1 clientes: unstable (latency_p99_ms cv=0.081)",
+    "pipeline=lexical @ 5 clientes: unstable (latency_p50_ms cv=0.084; latency_p95_ms cv=0.066; latency_p99_ms cv=0.202; stage_response_p50_ms_seconds cv=0.084; stage_service_p50_ms_seconds cv=0.084; throughput_per_second cv=0.077)",
+    "pipeline=lexical @ 10 clientes: unstable (latency_p50_ms cv=0.105; latency_p95_ms cv=0.289; latency_p99_ms cv=0.116; stage_response_p50_ms_seconds cv=0.105; stage_service_p50_ms_seconds cv=0.105; throughput_per_second cv=0.139)",
+    "pipeline=lexical @ 20 clientes: unstable (latency_p95_ms cv=0.055)",
+    "pipeline=lexical @ 40 clientes: unstable (latency_p95_ms cv=0.052; latency_p99_ms cv=0.122)",
+    "pipeline=lexical @ 80 clientes: unstable (latency_p50_ms cv=0.060; latency_p95_ms cv=0.134; latency_p99_ms cv=0.090; stage_response_p50_ms_seconds cv=0.060; stage_service_p50_ms_seconds cv=0.060)"
+  ],
+  "dataset": {
+    "id": "beir-scifact",
+    "version": "beir-2021-03-19",
+    "sha256": "536e14446a0ba56ed1398ab1055f39fe852686ecad24a6306c80c490fa8e0165"
+  }
+}

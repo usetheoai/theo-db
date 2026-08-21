@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "id": "retrieval/scifact/concurrency",
+  "version": 1,
+  "workload": {
+    "type": "retrieval",
+    "loop": "closed",
+    "clients": 80,
+    "arrival_rate_per_second": null,
+    "k": [
+      10
+    ],
+    "operation_count": 300
+  },
+  "quality": {
+    "metric": "ndcg",
+    "ground_truth": "dataset"
+  },
+  "parameters": {
+    "pipelines": [
+      "lexical"
+    ],
+    "n": [
+      50
+    ],
+    "rrf_k": [
+      60
+    ],
+    "clients": [
+      1,
+      5,
+      10,
+      20,
+      40,
+      80
+    ]
+  },
+  "warmup": {
+    "policy": "fixed_operations",
+    "operations": 20
+  },
+  "repetitions": 3
+}

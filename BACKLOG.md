@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-93 items — **Open** 15 · **In flight** 13 · **Closed** 65
+94 items — **Open** 15 · **In flight** 14 · **Closed** 65
 
 ### Open (15)
 
@@ -84,19 +84,20 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
 | [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off----) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `triaged` | — |
 | [`B-042`](#b-042--o-build-do-hnsw-é-36-mais-lento-que-o-do-pgvector-usando-8-mais-threads-e-o-grafo-sai-pior----) | O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior | `triaged` | — |
-| [`B-043`](#b-043--o-qps-lexical-satura-em-20-clientes-numa-máquina-de-16-vcpu-e-não-sobe-mais----) | O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais | `triaged` | — |
 | [`B-046`](#b-046--paridade-de-qps-com-o-pgvector-a-recall-casado-hoje-o-déficit-medido-é-163----) | Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3% | `triaged` | — |
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
+| [`B-094`](#b-094--o-arnês-é-65-mais-lento-que-o-pgbench-sob-carga-e-é-ele-que-publicamos----) | O arnês é 6,5× mais lento que o `pgbench` sob carga, e é ele que publicamos | `triaged` | — |
 
-### In flight (13)
+### In flight (14)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada----) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `planned` | — |
 | [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `planned` | — |
 | [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta----) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `planned` | — |
+| [`B-043`](#b-043--o-qps-lexical-satura-em-20-clientes-numa-máquina-de-16-vcpu-e-não-sobe-mais----) | O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais | `planned` | — |
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `planned` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
@@ -1990,7 +1991,33 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-13 no droplet `g-16vcpu-64gb`, MS MARCO 100K, caso `FTSBm25Performance`. Curva de concorrência (clientes → QPS): 1 → 251,2 · 5 → 1.025,9 · 10 → 1.460,4 · **20 → 1.613,2** · 30 → 1.507,3 · 40 → 1.592,6 · 60 → 1.616,4 · 80 → 1.600,0. A latência p99 cresce de 0,005 s a 0,112 s no mesmo intervalo. Ou seja: **de 20 a 80 clientes o throughput não sobe 1%, e a p99 cresce 4×** — a fila cresce contra capacidade fixa. A p99 serial é 4,8 ms, o que a 16 núcleos daria um teto teórico bem acima de 1.616.
 why_now: o pilar lexical acabou de ganhar seu primeiro número público (`wiki/benchmarks/b040-theodb-fts-msmarco.md`), e o teto de vazão é a métrica que uma instalação real encontra primeiro. **A causa não está medida** e há pelo menos três candidatas que exigem instrumentos diferentes: saturação de CPU real (o trabalho por consulta é simplesmente caro), contenção no índice lexical compartilhado (trava), ou teto do cliente Python do arnês — que a esta escala é hipótese séria, porque o B-035 já declarou que a 50 mil vetores boa parte do custo é round-trip. Publicar a curva sem investigar deixa o leitor concluir o que quiser.
-status: triaged
+status: planned
+resultado_2026_08_21: **a hipótese do cliente Python está CONFIRMADA — o teto era do instrumento.**
+  `wiki/benchmarks/b043-teto-lexical-e-o-cliente.md`.
+  .
+  | clientes | pgbench TPS | arnês QPS | o arnês é |
+  |---|---|---|---|
+  | 1 | 555,8 | 338,5 | 1,64× mais lento |
+  | 10 | 3.559,1 | **1.617,7** (pico) | 2,20× |
+  | 20 | **4.159,5** | 965,7 | **4,31×** |
+  | 80 | 4.071,7 | 623,4 | **6,53×** |
+  .
+  O `pgbench` estabiliza em ~4.150 TPS a partir de 20 clientes e FICA lá (queda de 2% até 80), com a
+  latência crescendo linearmente — fila contra capacidade fixa, o que um servidor saudável faz. **O
+  arnês colapsa 61%.** Bullet 2 do DoD ENTREGUE: o gerador externo discriminou.
+  .
+  Isso REENQUADRA o número original: a "saturação em ~20 clientes" de 2026-08-13 é muito provavelmente
+  a curva do cliente, não uma propriedade do pilar. O teto real do servidor, neste corpus, é ~4.150 TPS.
+  .
+  DOIS DEFEITOS DO ARNÊS encontrados para chegar até aqui, ambos invisíveis porque nada nunca abriu uma
+  segunda conexão: (a) a guarda do índice lexical perguntava à INSTÂNCIA e não ao banco — 300 erros e
+  zero sucessos a partir de dois clientes; (b) o `index_id` vinha de `hash()`, aleatorizado por
+  processo — o catálogo tinha **quatro** índices órfãos da mesma tabela, um por processo.
+  .
+  BULLETS 1 e 3 PENDENTES: o perfil de CPU do backend a 20 e 80 clientes ainda não foi tirado, e o
+  ponto de trava não foi identificado. Mas a pergunta que os motivava mudou — com o teto sendo do
+  cliente, perfilar o backend a 80 clientes do ARNÊS perfila um servidor ocioso. O caminho é [[B-094]]
+  primeiro.
 dod:
   - a causa é **nomeada e medida**, não inferida: perfil de CPU do backend durante a corrida a 20 e a 80 clientes, com a fração de tempo em espera de trava versus trabalho
   - a hipótese do cliente Python é **descartada ou confirmada** por um gerador de carga que não seja o arnês (por exemplo `pgbench` com a consulta do BM25), no mesmo corpus e máquina
@@ -4255,3 +4282,20 @@ dod:
 
 > Registrado 2026-08-21 pelo ciclo que matou o [[B-014]]. O bullet 2 daquele item sobreviveu à refutação
 > da premissa; os outros dois já estavam satisfeitos.
+## B-094 — O arnês é 6,5× mais lento que o `pgbench` sob carga, e é ele que publicamos   [ ]
+
+domain: arnes
+repo: theodb-bench
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-21 (`wiki/benchmarks/b043-teto-lexical-e-o-cliente.md`), droplet `g-16vcpu-64gb`, mesma máquina, mesmo corpus, mesma função `bm25_search`. O `pgbench` estabiliza em **~4.150 TPS** a partir de 20 clientes e fica lá até 80 (queda de 2%), com latência linear. O arnês **pica em 1.617,7 a 10 clientes e colapsa para 623,4 a 80** — queda de 61%. A 80 clientes a razão é **6,53×**; com **um** cliente já é 1,64×.
+why_now: o `docs/methodology/PUBLICATION.md` estabelece que medição fora do arnês não é publicável, e o [[B-069]] existe para fazer valer isso. **Um arnês 6,5× mais lento que o `pgbench` sob carga não mede o teto de vazão de nada — ele mede a si mesmo.** Todo número de concorrência que publicarmos por ele é um limite do instrumento apresentado como propriedade do produto, e o [[B-043]] é a prova de que isso já aconteceu uma vez.
+status: triaged
+dod:
+  - a causa do colapso é **nomeada e medida**, não inferida — GIL, round-trip por consulta, ou o pool de conexões; um perfil do processo cliente a 10 e a 80 clientes distingue as três
+  - depois da mudança, a curva do arnês **não colapsa**: ela satura e fica plana, como a do `pgbench`
+  - a razão contra o `pgbench` a 80 clientes cai a menos de 2× — ou, se não cair, o limite residual é declarado e o arnês passa a **avisar** quando a corrida está no regime em que ele próprio é o gargalo
+  - a ressalva da consulta fixa do `pgbench` é fechada: o gerador externo passa a variar consulta como o arnês varia, para que a razão medida não carregue vantagem de cache
+
+> Registrado 2026-08-21 pelo ciclo do [[B-043]]. É o item mais desconfortável do backlog: o produto
+> que este projeto publica como instrumento de medição não sustenta a carga que se propõe a medir.
