@@ -41,72 +41,77 @@ pub(crate) unsafe fn tuplesort_roundtrip(
     work_mem_kb: i32,
 ) -> Vec<(i32, i64, Vec<f32>)> {
     // 3-column TupleDesc: (list# int4, tid int8, vector bytea).
-    let tupdesc = pg_sys::CreateTemplateTupleDesc(3);
-    pg_sys::TupleDescInitEntry(tupdesc, 1, c"list".as_ptr(), pg_sys::INT4OID, -1, 0);
-    pg_sys::TupleDescInitEntry(tupdesc, 2, c"tid".as_ptr(), pg_sys::INT8OID, -1, 0);
-    pg_sys::TupleDescInitEntry(tupdesc, 3, c"vec".as_ptr(), pg_sys::BYTEAOID, -1, 0);
+    let tupdesc = unsafe { pg_sys::CreateTemplateTupleDesc(3) };
+    unsafe { pg_sys::TupleDescInitEntry(tupdesc, 1, c"list".as_ptr(), pg_sys::INT4OID, -1, 0) };
+    unsafe { pg_sys::TupleDescInitEntry(tupdesc, 2, c"tid".as_ptr(), pg_sys::INT8OID, -1, 0) };
+    unsafe { pg_sys::TupleDescInitEntry(tupdesc, 3, c"vec".as_ptr(), pg_sys::BYTEAOID, -1, 0) };
 
     // Sort by column 1 (list#) ascending, using the built-in int4 "<" operator.
     let mut att_nums: [pg_sys::AttrNumber; 1] = [1];
     let mut sort_ops: [pg_sys::Oid; 1] = [pg_sys::Oid::from(pg_sys::Int4LessOperator)];
     let mut sort_colls: [pg_sys::Oid; 1] = [pg_sys::Oid::INVALID];
     let mut nulls_first: [bool; 1] = [false];
-    let state = pg_sys::tuplesort_begin_heap(
-        tupdesc,
-        1,
-        att_nums.as_mut_ptr(),
-        sort_ops.as_mut_ptr(),
-        sort_colls.as_mut_ptr(),
-        nulls_first.as_mut_ptr(),
-        work_mem_kb,
-        std::ptr::null_mut(), // coordinate = NULL → serial, leader-only (no parallel workers this milestone)
-        0,
-    );
+    let state = unsafe {
+        pg_sys::tuplesort_begin_heap(
+            tupdesc,
+            1,
+            att_nums.as_mut_ptr(),
+            sort_ops.as_mut_ptr(),
+            sort_colls.as_mut_ptr(),
+            nulls_first.as_mut_ptr(),
+            work_mem_kb,
+            std::ptr::null_mut(), // coordinate = NULL → serial, leader-only (no parallel workers this milestone)
+            0,
+        )
+    };
 
     // pgvector `ivfbuild.c`: a VIRTUAL slot for PUT (we fill it, :389) and a MINIMAL-TUPLE slot for GET (:278) —
     // `tuplesort_gettupleslot` stores a minimal tuple, which a virtual slot cannot hold (the crash if reused).
-    let put_slot = pg_sys::MakeSingleTupleTableSlot(tupdesc, &raw const pg_sys::TTSOpsVirtual);
+    let put_slot =
+        unsafe { pg_sys::MakeSingleTupleTableSlot(tupdesc, &raw const pg_sys::TTSOpsVirtual) };
     for (list, tid, v) in rows {
         // `ExecClearTuple` is `static inline` (unbound in pgrx) — mimic it: SET the EMPTY flag + nvalid=0 so the
         // slot is EMPTY when `ExecStoreVirtualTuple` runs (it asserts `TTS_EMPTY(slot)`, then CLEARS empty and sets
         // nvalid=natts itself). Virtual slots own no heap/minimal tuple, so no pfree is needed in the clear.
-        (*put_slot).tts_flags |= pg_sys::TTS_FLAG_EMPTY as u16;
-        (*put_slot).tts_nvalid = 0;
-        let values = std::slice::from_raw_parts_mut((*put_slot).tts_values, 3);
-        let isnull = std::slice::from_raw_parts_mut((*put_slot).tts_isnull, 3);
+        unsafe { (*put_slot).tts_flags |= pg_sys::TTS_FLAG_EMPTY as u16 };
+        unsafe { (*put_slot).tts_nvalid = 0 };
+        let values = unsafe { std::slice::from_raw_parts_mut((*put_slot).tts_values, 3) };
+        let isnull = unsafe { std::slice::from_raw_parts_mut((*put_slot).tts_isnull, 3) };
         values[0] = list.into_datum().unwrap();
         values[1] = tid.into_datum().unwrap();
         values[2] = vec_to_bytes(v).into_datum().unwrap(); // Vec<u8> → bytea varlena (pgrx owns the palloc)
         isnull[0] = false;
         isnull[1] = false;
         isnull[2] = false;
-        pg_sys::ExecStoreVirtualTuple(put_slot); // asserts EMPTY, clears it, sets tts_nvalid = natts
-        pg_sys::tuplesort_puttupleslot(state, put_slot);
+        unsafe { pg_sys::ExecStoreVirtualTuple(put_slot) }; // asserts EMPTY, clears it, sets tts_nvalid = natts
+        unsafe { pg_sys::tuplesort_puttupleslot(state, put_slot) };
     }
-    pg_sys::tuplesort_performsort(state);
+    unsafe { pg_sys::tuplesort_performsort(state) };
 
-    let get_slot = pg_sys::MakeSingleTupleTableSlot(tupdesc, &raw const pg_sys::TTSOpsMinimalTuple);
+    let get_slot =
+        unsafe { pg_sys::MakeSingleTupleTableSlot(tupdesc, &raw const pg_sys::TTSOpsMinimalTuple) };
     let mut out = Vec::with_capacity(rows.len());
     loop {
         // copy=false: the minimal tuple points into the sorter's memory; we decode into owned Vecs before the next
         // `gettupleslot` (pgvector pattern, :252).
-        let got =
-            pg_sys::tuplesort_gettupleslot(state, true, false, get_slot, std::ptr::null_mut());
+        let got = unsafe {
+            pg_sys::tuplesort_gettupleslot(state, true, false, get_slot, std::ptr::null_mut())
+        };
         if !got {
             break;
         }
-        pg_sys::slot_getallattrs(get_slot); // deform → populate tts_values/tts_isnull
-        let values = std::slice::from_raw_parts((*get_slot).tts_values, 3);
-        let isnull = std::slice::from_raw_parts((*get_slot).tts_isnull, 3);
-        let list = i32::from_datum(values[0], isnull[0]).unwrap();
-        let tid = i64::from_datum(values[1], isnull[1]).unwrap();
-        let bytes = Vec::<u8>::from_datum(values[2], isnull[2]).unwrap();
+        unsafe { pg_sys::slot_getallattrs(get_slot) }; // deform → populate tts_values/tts_isnull
+        let values = unsafe { std::slice::from_raw_parts((*get_slot).tts_values, 3) };
+        let isnull = unsafe { std::slice::from_raw_parts((*get_slot).tts_isnull, 3) };
+        let list = unsafe { i32::from_datum(values[0], isnull[0]).unwrap() };
+        let tid = unsafe { i64::from_datum(values[1], isnull[1]).unwrap() };
+        let bytes = unsafe { Vec::<u8>::from_datum(values[2], isnull[2]).unwrap() };
         out.push((list, tid, bytes_to_vec(&bytes)));
     }
 
-    pg_sys::tuplesort_end(state);
-    pg_sys::ExecDropSingleTupleTableSlot(put_slot);
-    pg_sys::ExecDropSingleTupleTableSlot(get_slot);
+    unsafe { pg_sys::tuplesort_end(state) };
+    unsafe { pg_sys::ExecDropSingleTupleTableSlot(put_slot) };
+    unsafe { pg_sys::ExecDropSingleTupleTableSlot(get_slot) };
     out
 }
 
@@ -148,15 +153,15 @@ unsafe extern "C-unwind" fn sample_callback(
     _tuple_is_alive: bool,
     state: *mut std::os::raw::c_void,
 ) {
-    if *isnull {
+    if unsafe { *isnull } {
         return;
     }
-    let st = &mut *(state as *mut SampleState);
+    let st = unsafe { &mut *(state as *mut SampleState) };
     st.seen += 1;
     if st.sample.len() >= STREAM_TRAIN_SAMPLE {
         return;
     }
-    let v = crate::am::build::datum_to_vec_f32(*values);
+    let v = unsafe { crate::am::build::datum_to_vec_f32(*values) };
     if st.dim.is_none() {
         st.dim = Some(v.len());
     }
@@ -182,11 +187,11 @@ unsafe extern "C-unwind" fn assign_callback(
     _tuple_is_alive: bool,
     state: *mut std::os::raw::c_void,
 ) {
-    if *isnull {
+    if unsafe { *isnull } {
         return;
     }
-    let st = &mut *(state as *mut AssignState);
-    let v = crate::am::build::datum_to_vec_f32(*values);
+    let st = unsafe { &mut *(state as *mut AssignState) };
+    let v = unsafe { crate::am::build::datum_to_vec_f32(*values) };
     // Dimension guard (review LOW): mirror the in-RAM `build_callback` — a row whose vector dim differs from the
     // trained centroids' would silently produce a wrong (zip-truncated) distance. Skip it rather than mis-assign.
     if !st.centroids.is_empty() && v.len() != st.centroids[0].len() {
@@ -203,12 +208,12 @@ unsafe extern "C-unwind" fn assign_callback(
         }
     }
     st.counts[best] += 1;
-    let tid = crate::am::tid::encode(htid);
+    let tid = unsafe { crate::am::tid::encode(htid) };
     let slot = st.put_slot;
-    (*slot).tts_flags |= pg_sys::TTS_FLAG_EMPTY as u16;
-    (*slot).tts_nvalid = 0;
-    let vals = std::slice::from_raw_parts_mut((*slot).tts_values, 3);
-    let nulls = std::slice::from_raw_parts_mut((*slot).tts_isnull, 3);
+    unsafe { (*slot).tts_flags |= pg_sys::TTS_FLAG_EMPTY as u16 };
+    unsafe { (*slot).tts_nvalid = 0 };
+    let vals = unsafe { std::slice::from_raw_parts_mut((*slot).tts_values, 3) };
+    let nulls = unsafe { std::slice::from_raw_parts_mut((*slot).tts_isnull, 3) };
     vals[0] = (best as i32).into_datum().unwrap();
     vals[1] = tid.into_datum().unwrap();
     let bytea_datum = vec_to_bytes(&v).into_datum().unwrap();
@@ -216,13 +221,13 @@ unsafe extern "C-unwind" fn assign_callback(
     nulls[0] = false;
     nulls[1] = false;
     nulls[2] = false;
-    pg_sys::ExecStoreVirtualTuple(slot);
-    pg_sys::tuplesort_puttupleslot(st.sorter, slot);
+    unsafe { pg_sys::ExecStoreVirtualTuple(slot) };
+    unsafe { pg_sys::tuplesort_puttupleslot(st.sorter, slot) };
     // `puttupleslot` COPIES the tuple into the sorter's own context — the per-row bytea we palloc'd above is NOT
     // freed by that, so without this pfree it accumulates in the scan's memory context (measured: ~512 MB leaked at
     // 1M → the peak would GROW with N and break the O(mwm) bound). pgvector uses a per-tuple temp context reset;
     // freeing the one varlena we allocate is the minimal equivalent. (list#/tid are by-value ints — nothing to free.)
-    pg_sys::pfree(bytea_datum.cast_mut_ptr());
+    unsafe { pg_sys::pfree(bytea_datum.cast_mut_ptr()) };
 }
 
 /// M96 — the streaming v5 build: two heap scans (sample-train, then stream-assign into a `tuplesort`), sort by
@@ -242,16 +247,18 @@ pub(crate) unsafe fn ambuild_streaming(
 ) -> usize {
     // Pass 1 — bounded sample → train centroids (kmeans++ on the sample) + the AQ codebook.
     let mut sst = SampleState { sample: Vec::new(), seen: 0, dim: None };
-    pg_sys::table_index_build_scan(
-        heaprel,
-        indexrel,
-        index_info,
-        true,
-        true,
-        Some(sample_callback),
-        (&mut sst as *mut SampleState).cast(),
-        std::ptr::null_mut(),
-    );
+    unsafe {
+        pg_sys::table_index_build_scan(
+            heaprel,
+            indexrel,
+            index_info,
+            true,
+            true,
+            Some(sample_callback),
+            (&mut sst as *mut SampleState).cast(),
+            std::ptr::null_mut(),
+        )
+    };
     let dim = sst.dim.unwrap_or(0) as u32;
     if sst.sample.is_empty() || dim == 0 {
         return 0;
@@ -261,7 +268,7 @@ pub(crate) unsafe fn ambuild_streaming(
         sst.sample.iter().enumerate().map(|(i, v)| (i as i64, v.clone())).collect();
     let trainer = IvfflatIndex::build_owned(sample_corpus, lists, metric, seed);
     let centroids: Vec<Vec<f32>> = trainer.centroids().to_vec();
-    let thr = crate::am::options::aq_threshold_from_relation(indexrel);
+    let thr = unsafe { crate::am::options::aq_threshold_from_relation(indexrel) };
     let quant = match AqQuantizer::train(&sst.sample, m, 4, thr, seed) {
         Ok(q) => q,
         Err(e) => pg_sys::error!("theodb streaming build: AQ train: {e}"),
@@ -269,26 +276,29 @@ pub(crate) unsafe fn ambuild_streaming(
     drop(sst); // free the sample
 
     // Pass 2 — assign each vector to its nearest centroid + spool it, sorted by list#.
-    let tupdesc = pg_sys::CreateTemplateTupleDesc(3);
-    pg_sys::TupleDescInitEntry(tupdesc, 1, c"list".as_ptr(), pg_sys::INT4OID, -1, 0);
-    pg_sys::TupleDescInitEntry(tupdesc, 2, c"tid".as_ptr(), pg_sys::INT8OID, -1, 0);
-    pg_sys::TupleDescInitEntry(tupdesc, 3, c"vec".as_ptr(), pg_sys::BYTEAOID, -1, 0);
+    let tupdesc = unsafe { pg_sys::CreateTemplateTupleDesc(3) };
+    unsafe { pg_sys::TupleDescInitEntry(tupdesc, 1, c"list".as_ptr(), pg_sys::INT4OID, -1, 0) };
+    unsafe { pg_sys::TupleDescInitEntry(tupdesc, 2, c"tid".as_ptr(), pg_sys::INT8OID, -1, 0) };
+    unsafe { pg_sys::TupleDescInitEntry(tupdesc, 3, c"vec".as_ptr(), pg_sys::BYTEAOID, -1, 0) };
     let mut att_nums: [pg_sys::AttrNumber; 1] = [1];
     let mut sort_ops: [pg_sys::Oid; 1] = [pg_sys::Oid::from(pg_sys::Int4LessOperator)];
     let mut sort_colls: [pg_sys::Oid; 1] = [pg_sys::Oid::INVALID];
     let mut nulls_first: [bool; 1] = [false];
-    let sorter = pg_sys::tuplesort_begin_heap(
-        tupdesc,
-        1,
-        att_nums.as_mut_ptr(),
-        sort_ops.as_mut_ptr(),
-        sort_colls.as_mut_ptr(),
-        nulls_first.as_mut_ptr(),
-        pg_sys::maintenance_work_mem,
-        std::ptr::null_mut(),
-        0,
-    );
-    let put_slot = pg_sys::MakeSingleTupleTableSlot(tupdesc, &raw const pg_sys::TTSOpsVirtual);
+    let sorter = unsafe {
+        pg_sys::tuplesort_begin_heap(
+            tupdesc,
+            1,
+            att_nums.as_mut_ptr(),
+            sort_ops.as_mut_ptr(),
+            sort_colls.as_mut_ptr(),
+            nulls_first.as_mut_ptr(),
+            pg_sys::maintenance_work_mem,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    let put_slot =
+        unsafe { pg_sys::MakeSingleTupleTableSlot(tupdesc, &raw const pg_sys::TTSOpsVirtual) };
     let mut ast = AssignState {
         centroids: &centroids,
         metric,
@@ -296,49 +306,55 @@ pub(crate) unsafe fn ambuild_streaming(
         sorter,
         put_slot,
     };
-    let ntuples = pg_sys::table_index_build_scan(
-        heaprel,
-        indexrel,
-        index_info,
-        true,
-        true,
-        Some(assign_callback),
-        (&mut ast as *mut AssignState).cast(),
-        std::ptr::null_mut(),
-    ) as usize;
-    pg_sys::tuplesort_performsort(sorter);
+    let ntuples = unsafe {
+        pg_sys::table_index_build_scan(
+            heaprel,
+            indexrel,
+            index_info,
+            true,
+            true,
+            Some(assign_callback),
+            (&mut ast as *mut AssignState).cast(),
+            std::ptr::null_mut(),
+        )
+    } as usize;
+    unsafe { pg_sys::tuplesort_performsort(sorter) };
     let counts = ast.counts.clone();
 
     // Read back sorted-by-list#; the streaming writer pulls each list's members and writes its pages, one in flight.
-    let get_slot = pg_sys::MakeSingleTupleTableSlot(tupdesc, &raw const pg_sys::TTSOpsMinimalTuple);
+    let get_slot =
+        unsafe { pg_sys::MakeSingleTupleTableSlot(tupdesc, &raw const pg_sys::TTSOpsMinimalTuple) };
     let mut next_member = || -> Option<(i64, Vec<f32>)> {
-        let got =
-            pg_sys::tuplesort_gettupleslot(sorter, true, false, get_slot, std::ptr::null_mut());
+        let got = unsafe {
+            pg_sys::tuplesort_gettupleslot(sorter, true, false, get_slot, std::ptr::null_mut())
+        };
         if !got {
             return None;
         }
-        pg_sys::slot_getallattrs(get_slot);
-        let vals = std::slice::from_raw_parts((*get_slot).tts_values, 3);
-        let nulls = std::slice::from_raw_parts((*get_slot).tts_isnull, 3);
-        let tid = i64::from_datum(vals[1], nulls[1]).unwrap();
-        let bytes = Vec::<u8>::from_datum(vals[2], nulls[2]).unwrap();
+        unsafe { pg_sys::slot_getallattrs(get_slot) };
+        let vals = unsafe { std::slice::from_raw_parts((*get_slot).tts_values, 3) };
+        let nulls = unsafe { std::slice::from_raw_parts((*get_slot).tts_isnull, 3) };
+        let tid = unsafe { i64::from_datum(vals[1], nulls[1]).unwrap() };
+        let bytes = unsafe { Vec::<u8>::from_datum(vals[2], nulls[2]).unwrap() };
         Some((tid, bytes_to_vec(&bytes)))
     };
-    crate::am::page::write_ivf_aq_split_streaming(
-        indexrel,
-        dim,
-        metric.tag(),
-        m as u32,
-        &quant.to_meta_bytes(),
-        &centroids,
-        &counts,
-        &quant,
-        &mut next_member,
-    );
+    unsafe {
+        crate::am::page::write_ivf_aq_split_streaming(
+            indexrel,
+            dim,
+            metric.tag(),
+            m as u32,
+            &quant.to_meta_bytes(),
+            &centroids,
+            &counts,
+            &quant,
+            &mut next_member,
+        )
+    };
 
-    pg_sys::tuplesort_end(sorter);
-    pg_sys::ExecDropSingleTupleTableSlot(put_slot);
-    pg_sys::ExecDropSingleTupleTableSlot(get_slot);
+    unsafe { pg_sys::tuplesort_end(sorter) };
+    unsafe { pg_sys::ExecDropSingleTupleTableSlot(put_slot) };
+    unsafe { pg_sys::ExecDropSingleTupleTableSlot(get_slot) };
     ntuples
 }
 

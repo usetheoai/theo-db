@@ -5,9 +5,9 @@ use pgrx::pg_sys;
 
 /// Encode a heap `ItemPointer` into an i64: `(block << 16) | offset`.
 pub(crate) unsafe fn encode(tid: pg_sys::ItemPointer) -> i64 {
-    let blkid = (*tid).ip_blkid;
+    let blkid = unsafe { (*tid).ip_blkid };
     let block = ((blkid.bi_hi as u32) << 16) | (blkid.bi_lo as u32);
-    let offset = (*tid).ip_posid;
+    let offset = unsafe { (*tid).ip_posid };
     ((block as i64) << 16) | (offset as i64)
 }
 
@@ -15,7 +15,7 @@ pub(crate) unsafe fn encode(tid: pg_sys::ItemPointer) -> i64 {
 pub(crate) unsafe fn set_on(v: i64, out: *mut pg_sys::ItemPointerData) {
     let block = (v >> 16) as u32;
     let offset = (v & 0xFFFF) as u16;
-    (*out).ip_blkid.bi_hi = (block >> 16) as u16;
-    (*out).ip_blkid.bi_lo = (block & 0xFFFF) as u16;
-    (*out).ip_posid = offset;
+    unsafe { (*out).ip_blkid.bi_hi = (block >> 16) as u16 };
+    unsafe { (*out).ip_blkid.bi_lo = (block & 0xFFFF) as u16 };
+    unsafe { (*out).ip_posid = offset };
 }

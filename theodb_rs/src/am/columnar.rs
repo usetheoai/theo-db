@@ -166,13 +166,13 @@ struct StripeMeta {
 /// without an outer snapshot or portal". During a scan an active snapshot already exists (the query's), so this is a
 /// no-op there and the SPI SELECT correctly reads under that snapshot (respecting the xact's isolation level).
 unsafe fn with_active_snapshot<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
-    let pushed = !pg_sys::ActiveSnapshotSet();
+    let pushed = !unsafe { pg_sys::ActiveSnapshotSet() };
     if pushed {
-        pg_sys::PushActiveSnapshot(pg_sys::GetTransactionSnapshot());
+        unsafe { pg_sys::PushActiveSnapshot(pg_sys::GetTransactionSnapshot()) };
     }
     let r = f();
     if pushed {
-        pg_sys::PopActiveSnapshot();
+        unsafe { pg_sys::PopActiveSnapshot() };
     }
     r
 }
@@ -181,26 +181,28 @@ unsafe fn with_active_snapshot<T>(f: impl FnOnce() -> Result<T, String>) -> Resu
 /// snapshot, so an uncommitted/aborted/committed-after stripe is filtered out by MVCC for free — no visibility code
 /// here. Ordered by `first_row_number` for a deterministic, heap-matching scan order.
 unsafe fn read_visible_stripes(rel_oid: pg_sys::Oid) -> Result<Vec<StripeMeta>, String> {
-    with_active_snapshot(|| {
-        Spi::connect(|c| {
-            let t = c
+    unsafe {
+        with_active_snapshot(|| {
+            Spi::connect(|c| {
+                let t = c
             .select(
                 "SELECT header_block FROM columnar.stripe WHERE relid = $1 ORDER BY first_row_number, stripe_id",
                 None,
                 &[rel_oid.into()],
             )
             .map_err(|e| format!("theodb_columnar: stripe catalog read failed: {e:?}"))?;
-            let mut out = Vec::new();
-            for row in t {
-                let hb = row
-                    .get::<i32>(1)
-                    .map_err(|e| format!("theodb_columnar: header_block read: {e:?}"))?
-                    .ok_or("theodb_columnar: null header_block in catalog")?;
-                out.push(StripeMeta { header_block: hb as u32 });
-            }
-            Ok(out)
+                let mut out = Vec::new();
+                for row in t {
+                    let hb = row
+                        .get::<i32>(1)
+                        .map_err(|e| format!("theodb_columnar: header_block read: {e:?}"))?
+                        .ok_or("theodb_columnar: null header_block in catalog")?;
+                    out.push(StripeMeta { header_block: hb as u32 });
+                }
+                Ok(out)
+            })
         })
-    })
+    }
 }
 
 /// Insert the visibility-granting catalog row for a just-written stripe. Runs inside the current xact via SPI, so the
@@ -216,8 +218,9 @@ unsafe fn insert_stripe_row(
     first_row_number: i64,
     ncols: i16,
 ) -> Result<(), String> {
-    with_active_snapshot(|| {
-        Spi::run_with_args(
+    unsafe {
+        with_active_snapshot(|| {
+            Spi::run_with_args(
             "INSERT INTO columnar.stripe (relid, stripe_id, header_block, row_count, first_row_number, ncols) \
              VALUES ($1, $2, $3, $4, $5, $6)",
             &[
@@ -230,7 +233,8 @@ unsafe fn insert_stripe_row(
             ],
         )
         .map_err(|e| format!("theodb_columnar: stripe catalog insert failed: {e:?}"))
-    })
+        })
+    }
 }
 
 /// Pre-commit flush: a plain `INSERT ... VALUES` never triggers `finish_bulk_insert`, so its accumulated rows would
@@ -252,22 +256,23 @@ unsafe extern "C-unwind" fn columnar_xact_flush(
             w.borrow().iter().filter(|(_, v)| !v.rows.is_empty()).map(|(k, _)| *k).collect()
         });
         for oid in oids {
-            let relid = pg_sys::Oid::from_u32_unchecked(oid);
+            let relid = unsafe { pg_sys::Oid::from_u32_unchecked(oid) };
             // M144 T2.1: the table may have been DROPped in THIS same txn (INSERT + DROP TABLE before
             // COMMIT). `relation_open` would ERROR on the now-invisible OID and abort the user's whole
             // COMMIT. `try_relation_open` returns NULL instead — skip the flush for a dropped relation
             // (its columnar data is being removed anyway) and drop its pending WRITE_STATES entry so a
             // future txn that reuses the OID does not inherit a stale buffer.
-            let rel =
-                pg_sys::try_relation_open(relid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let rel = unsafe {
+                pg_sys::try_relation_open(relid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE)
+            };
             if rel.is_null() {
                 WRITE_STATES.with(|w| {
                     w.borrow_mut().remove(&oid);
                 });
                 continue;
             }
-            let res = flush_pending(rel);
-            pg_sys::relation_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let res = unsafe { flush_pending(rel) };
+            unsafe { pg_sys::relation_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE) };
             if let Err(e) = res {
                 pg_sys::error!("{e}");
             }
@@ -467,28 +472,31 @@ enum Counter {
 /// Read-modify-write of block 0 under a buffer EXCLUSIVE lock + GenericXLog full-image — the range is durable and
 /// non-overlapping across concurrent backends.
 unsafe fn reserve(rel: pg_sys::Relation, counter: Counter, n: u64) -> Result<u64, String> {
-    let buf = pg_sys::ReadBufferExtended(
-        rel,
-        pg_sys::ForkNumber::MAIN_FORKNUM,
-        0,
-        pg_sys::ReadBufferMode::RBM_NORMAL,
-        std::ptr::null_mut(),
-    );
-    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
-    let state = pg_sys::GenericXLogStart(rel);
-    let page =
-        pg_sys::GenericXLogRegisterBuffer(state, buf, pg_sys::GENERIC_XLOG_FULL_IMAGE as i32);
+    let buf = unsafe {
+        pg_sys::ReadBufferExtended(
+            rel,
+            pg_sys::ForkNumber::MAIN_FORKNUM,
+            0,
+            pg_sys::ReadBufferMode::RBM_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe { pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32) };
+    let state = unsafe { pg_sys::GenericXLogStart(rel) };
+    let page = unsafe {
+        pg_sys::GenericXLogRegisterBuffer(state, buf, pg_sys::GENERIC_XLOG_FULL_IMAGE as i32)
+    };
 
     // The metapage is the single item at FirstOffsetNumber.
-    let itemid = pg_sys::PageGetItemId(page, pg_sys::FirstOffsetNumber);
-    let item = pg_sys::PageGetItem(page, itemid) as *mut u8;
-    let cur = std::slice::from_raw_parts(item, META_LEN);
+    let itemid = unsafe { pg_sys::PageGetItemId(page, pg_sys::FirstOffsetNumber) };
+    let item = unsafe { pg_sys::PageGetItem(page, itemid) } as *mut u8;
+    let cur = unsafe { std::slice::from_raw_parts(item, META_LEN) };
     let mut meta = match ColumnarMeta::from_bytes(cur) {
         Ok(m) => m,
         Err(e) => {
             // Abort the xlog + release before failing loud (no half-written WAL record).
-            pg_sys::GenericXLogAbort(state);
-            pg_sys::UnlockReleaseBuffer(buf);
+            unsafe { pg_sys::GenericXLogAbort(state) };
+            unsafe { pg_sys::UnlockReleaseBuffer(buf) };
             return Err(e);
         }
     };
@@ -502,11 +510,11 @@ unsafe fn reserve(rel: pg_sys::Relation, counter: Counter, n: u64) -> Result<u64
 
     // Overwrite the item in place (same length) — no PageAddItem churn.
     let bytes = meta.to_bytes();
-    std::ptr::copy_nonoverlapping(bytes.as_ptr(), item, META_LEN);
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), item, META_LEN) };
 
-    pg_sys::MarkBufferDirty(buf);
-    pg_sys::GenericXLogFinish(state);
-    pg_sys::UnlockReleaseBuffer(buf);
+    unsafe { pg_sys::MarkBufferDirty(buf) };
+    unsafe { pg_sys::GenericXLogFinish(state) };
+    unsafe { pg_sys::UnlockReleaseBuffer(buf) };
     Ok(base)
 }
 
@@ -554,10 +562,10 @@ struct ColDesc {
 /// directly: PG18 moved the array and the naive access compiles while reading out of bounds). Builtin type OIDs (pg_type.dat, ABI-stable) map to a min/max domain; everything else
 /// gets `None` (the pruner then cannot skip that column — fail-safe).
 unsafe fn coldesc(tupdesc: pg_sys::TupleDesc, i: usize) -> Result<ColDesc, String> {
-    let attr = super::tupdesc_attr(tupdesc, i);
-    let attlen = (*attr).attlen;
-    let byval = (*attr).attbyval;
-    let typid = (*attr).atttypid.to_u32();
+    let attr = unsafe { super::tupdesc_attr(tupdesc, i) };
+    let attlen = unsafe { (*attr).attlen };
+    let byval = unsafe { (*attr).attbyval };
+    let typid = unsafe { (*attr).atttypid.to_u32() };
     let attlen_fixed = if attlen > 0 {
         Some(attlen as usize)
     } else if attlen == -1 {
@@ -602,15 +610,16 @@ unsafe fn extract_value_bytes(col: &ColDesc, datum: pg_sys::Datum) -> Result<Vec
                 Ok(raw.to_le_bytes()[..len].to_vec())
             } else {
                 let p = datum.cast_mut_ptr::<u8>();
-                Ok(std::slice::from_raw_parts(p, len).to_vec())
+                Ok(unsafe { std::slice::from_raw_parts(p, len).to_vec() })
             }
         }
         None => {
             // `pg_detoast_datum_copy` ALWAYS returns a fresh palloc → we always own it → always pfree (no double-free
             // ambiguity — dtype.rs idiom). Store the logical payload (header-format-independent).
-            let dt = pg_sys::pg_detoast_datum_copy(datum.cast_mut_ptr::<pg_sys::varlena>());
-            let payload = varlena_payload(dt as *const u8);
-            pg_sys::pfree(dt as *mut std::os::raw::c_void);
+            let dt =
+                unsafe { pg_sys::pg_detoast_datum_copy(datum.cast_mut_ptr::<pg_sys::varlena>()) };
+            let payload = unsafe { varlena_payload(dt as *const u8) };
+            unsafe { pg_sys::pfree(dt as *mut std::os::raw::c_void) };
             payload
         }
     }
@@ -656,20 +665,20 @@ unsafe fn deform_rows_into_columns(
 /// The logical bytes (no varlena header) of a detoasted varlena, handling both the 1-byte (short) and 4-byte header
 /// formats — `pg_detoast_datum_copy` leaves short values short. Length comes from the self-describing header only.
 unsafe fn varlena_payload(p: *const u8) -> Result<Vec<u8>, String> {
-    let b0 = *p;
+    let b0 = unsafe { *p };
     if b0 & 0x01 == 0x01 {
         let total = ((b0 >> 1) & 0x7F) as usize; // VARSIZE_1B: total incl. the 1-byte header
         if total < 1 {
             return Err("theodb_columnar: corrupt 1B varlena".into());
         }
-        Ok(std::slice::from_raw_parts(p.add(1), total - 1).to_vec())
+        Ok(unsafe { std::slice::from_raw_parts(p.add(1), total - 1).to_vec() })
     } else {
-        let hdr = (p as *const u32).read_unaligned();
+        let hdr = unsafe { (p as *const u32).read_unaligned() };
         let total = ((hdr >> 2) & 0x3FFF_FFFF) as usize; // VARSIZE_4B: total incl. the 4-byte header
         if total < 4 {
             return Err("theodb_columnar: corrupt 4B varlena".into());
         }
-        Ok(std::slice::from_raw_parts(p.add(4), total - 4).to_vec())
+        Ok(unsafe { std::slice::from_raw_parts(p.add(4), total - 4).to_vec() })
     }
 }
 
@@ -693,16 +702,16 @@ unsafe fn rebuild_datum(
                 buf[..len].copy_from_slice(&bytes[..len]);
                 Ok((pg_sys::Datum::from(u64::from_le_bytes(buf) as usize), None))
             } else {
-                let p = pg_sys::palloc(len) as *mut u8;
-                std::ptr::copy_nonoverlapping(bytes.as_ptr(), p, len);
+                let p = unsafe { pg_sys::palloc(len) } as *mut u8;
+                unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), p, len) };
                 Ok((pg_sys::Datum::from(p), Some(p as *mut std::os::raw::c_void)))
             }
         }
         None => {
             let total = 4 + bytes.len();
-            let p = pg_sys::palloc(total) as *mut u8;
-            (p as *mut u32).write((total as u32) << 2); // SET_VARSIZE_4B (LE on x86-64, low 2 bits = 0)
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), p.add(4), bytes.len());
+            let p = unsafe { pg_sys::palloc(total) } as *mut u8;
+            unsafe { (p as *mut u32).write((total as u32) << 2) }; // SET_VARSIZE_4B (LE on x86-64, low 2 bits = 0)
+            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), p.add(4), bytes.len()) };
             Ok((pg_sys::Datum::from(p), Some(p as *mut std::os::raw::c_void)))
         }
     }
@@ -733,7 +742,7 @@ unsafe fn form_row(
         match &cgcols[col][r] {
             None => isnull[col] = true,
             Some(bytes) => {
-                let (datum, freeable) = rebuild_datum(&cols[col], bytes)?;
+                let (datum, freeable) = unsafe { rebuild_datum(&cols[col], bytes)? };
                 values[col] = datum;
                 if let Some(p) = freeable {
                     to_free.push(p);
@@ -741,12 +750,13 @@ unsafe fn form_row(
             }
         }
     }
-    let htup = pg_sys::heap_form_tuple(tupdesc, values.as_mut_ptr(), isnull.as_mut_ptr());
-    let len = (*htup).t_len as usize;
-    let bytes = std::slice::from_raw_parts((*htup).t_data as *const u8, len).to_vec();
-    pg_sys::heap_freetuple(htup);
+    let htup =
+        unsafe { pg_sys::heap_form_tuple(tupdesc, values.as_mut_ptr(), isnull.as_mut_ptr()) };
+    let len = unsafe { (*htup).t_len } as usize;
+    let bytes = unsafe { std::slice::from_raw_parts((*htup).t_data as *const u8, len).to_vec() };
+    unsafe { pg_sys::heap_freetuple(htup) };
     for p in to_free {
-        pg_sys::pfree(p);
+        unsafe { pg_sys::pfree(p) };
     }
     Ok(bytes)
 }
@@ -769,7 +779,7 @@ unsafe fn decode_stripe(
     predicates: &[super::zonemap::ZonePredicate],
     skip: bool,
 ) -> Result<(), String> {
-    let hdr_items = super::page::read_all_page_items(rel, header_block)?;
+    let hdr_items = unsafe { super::page::read_all_page_items(rel, header_block)? };
     let hdr_bytes =
         hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
     let header = StripeHeader::from_bytes(&hdr_bytes)?;
@@ -779,7 +789,8 @@ unsafe fn decode_stripe(
             header.ncols
         ));
     }
-    let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
+    let dir_bytes =
+        unsafe { super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)? };
     if dir_bytes.len() < header.dir_len as usize {
         return Err("theodb_columnar: stripe directory truncated on disk".into());
     }
@@ -824,7 +835,7 @@ unsafe fn decode_stripe(
                 continue;
             }
             let e = &entries[cg * natts + col];
-            let comp = super::page::read_chunked(rel, e.first_block, e.n_pages)?;
+            let comp = unsafe { super::page::read_chunked(rel, e.first_block, e.n_pages)? };
             if comp.len() < e.comp_len as usize {
                 return Err("theodb_columnar: column chunk truncated on disk".into());
             }
@@ -833,7 +844,7 @@ unsafe fn decode_stripe(
             cgcols.push(codec::decode_column(&raw, cols[col].attlen_fixed, cg_rows, e.has_nulls)?);
         }
         for r in 0..cg_rows {
-            out.push(form_row(tupdesc, cols, &cgcols, r, want_mask)?);
+            out.push(unsafe { form_row(tupdesc, cols, &cgcols, r, want_mask)? });
         }
     }
     Ok(())
@@ -846,11 +857,13 @@ unsafe fn decode_stripe(
 
 /// M100 — resolve a column name to its 0-based attribute index (for projection pushdown). Returns None if absent.
 pub(crate) unsafe fn column_index(rel: pg_sys::Relation, name: &str) -> Option<usize> {
-    let tupdesc = (*rel).rd_att;
-    let natts = (*tupdesc).natts as usize;
+    let tupdesc = unsafe { (*rel).rd_att };
+    let natts = unsafe { (*tupdesc).natts } as usize;
     (0..natts).find(|&i| {
-        std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
-            .to_string_lossy()
+        unsafe {
+            std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
+        }
+        .to_string_lossy()
             == name
     })
 }
@@ -952,7 +965,7 @@ unsafe fn decode_one_chunk_group(
     }
     for (wi, &col) in ctx.wanted.iter().enumerate() {
         let e = &pl.entries[cg * natts + col];
-        let comp = super::page::read_chunked(ctx.rel, e.first_block, e.n_pages)?;
+        let comp = unsafe { super::page::read_chunked(ctx.rel, e.first_block, e.n_pages)? };
         if comp.len() < e.comp_len as usize {
             return Err("theodb_columnar: column chunk truncated on disk".into());
         }
@@ -1064,7 +1077,7 @@ impl ScanPlan {
 /// behind at the top, which made a streamed `BEGIN; INSERT; SELECT … ORDER BY … LIMIT` silently miss its own
 /// transaction's writes. Exposed here so the guard is callable instead of copyable.
 pub(crate) unsafe fn has_unflushed_pending(rel: pg_sys::Relation) -> bool {
-    let oid = (*rel).rd_id.to_u32();
+    let oid = unsafe { (*rel).rd_id.to_u32() };
     WRITE_STATES.with(|w| w.borrow().get(&oid).is_some_and(|p| !p.rows.is_empty()))
 }
 
@@ -1091,14 +1104,14 @@ pub(crate) unsafe fn plan_columnar_scan(
     // mesmo assim: o abort da transação devolve a referência pelo resource owner. Vale dizer porque a
     // justificativa anterior era sobre custo, e alguém poderia trocar por `Err` supondo vazamento de relcache.
     assert!(
-        !has_unflushed_pending(rel),
+        !unsafe { has_unflushed_pending(rel) },
         "plan_columnar_scan chamado com linhas pendentes não descarregadas: o plano seria construído sobre \
          stripes que não contêm as escritas da própria transação. O chamador tem de declinar para o caminho \
          eager (ver open_streaming_source)."
     );
-    let tupdesc = (*rel).rd_att;
-    let natts = (*tupdesc).natts as usize;
-    let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
+    let tupdesc = unsafe { (*rel).rd_att };
+    let natts = unsafe { (*tupdesc).natts } as usize;
+    let cols = (0..natts).map(|i| unsafe { coldesc(tupdesc, i) }).collect::<Result<Vec<_>, _>>()?;
     let wanted: Vec<usize> = match projection {
         Some(p) => {
             for &i in p {
@@ -1113,20 +1126,23 @@ pub(crate) unsafe fn plan_columnar_scan(
         None => (0..natts).collect(),
     };
     let name_of = |i: usize| -> String {
-        std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
-            .to_string_lossy()
-            .into_owned()
+        unsafe {
+            std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
+        }
+        .to_string_lossy()
+        .into_owned()
     };
     let mut plans: Vec<StripePlan> = Vec::new();
-    for sm in read_visible_stripes((*rel).rd_id)? {
-        let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
+    for sm in unsafe { read_visible_stripes((*rel).rd_id)? } {
+        let hdr_items = unsafe { super::page::read_all_page_items(rel, sm.header_block)? };
         let header_bytes =
             hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
         let header = StripeHeader::from_bytes(&header_bytes)?;
         if header.ncols as usize != natts {
             return Err(format!("theodb_columnar: stripe ncols {} != natts {natts}", header.ncols));
         }
-        let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
+        let dir_bytes =
+            unsafe { super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)? };
         let entries =
             codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
         plans.push(StripePlan { entries, n_chunk_groups: header.n_chunk_groups as usize });
@@ -1282,14 +1298,16 @@ impl ColumnarChunkStream {
             let mut fixed_bytes: Vec<Vec<u8>> = vec![Vec::new(); n];
             let mut fixed_rows: Vec<usize> = vec![0; n];
             let mut cell_cols: Vec<Vec<Option<Vec<u8>>>> = vec![Vec::new(); n];
-            if !decode_one_chunk_group(
-                &ctx,
-                pl,
-                cg,
-                &mut fixed_bytes,
-                &mut fixed_rows,
-                &mut cell_cols,
-            )? {
+            if !unsafe {
+                decode_one_chunk_group(
+                    &ctx,
+                    pl,
+                    cg,
+                    &mut fixed_bytes,
+                    &mut fixed_rows,
+                    &mut cell_cols,
+                )?
+            } {
                 continue;
             }
             let out = self
@@ -1321,9 +1339,9 @@ pub(crate) unsafe fn decode_columns_v2(
     predicates: &[super::zonemap::ZonePredicate],
     skip: bool,
 ) -> Result<Vec<(String, u32, DecodedColumn)>, String> {
-    let tupdesc = (*rel).rd_att;
-    let natts = (*tupdesc).natts as usize;
-    let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
+    let tupdesc = unsafe { (*rel).rd_att };
+    let natts = unsafe { (*tupdesc).natts } as usize;
+    let cols = (0..natts).map(|i| unsafe { coldesc(tupdesc, i) }).collect::<Result<Vec<_>, _>>()?;
     let wanted: Vec<usize> = match projection {
         Some(p) => {
             for &i in p {
@@ -1338,15 +1356,17 @@ pub(crate) unsafe fn decode_columns_v2(
         None => (0..natts).collect(),
     };
     let name_of = |i: usize| -> String {
-        std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
-            .to_string_lossy()
-            .into_owned()
+        unsafe {
+            std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
+        }
+        .to_string_lossy()
+        .into_owned()
     };
 
     // Same-xact pending rows force the whole result onto the legacy cell path (fail-safe: merging FixedRaw bytes with
     // pending cell rows is out of M160 scope — pending is empty for a read-only benchmark query, the measured regime).
-    if has_unflushed_pending(rel) {
-        return Ok(decode_columns(rel, projection, predicates, skip)?
+    if unsafe { has_unflushed_pending(rel) } {
+        return Ok(unsafe { decode_columns(rel, projection, predicates, skip)? }
             .into_iter()
             .map(|(n, t, v)| (n, t, DecodedColumn::Cells(v)))
             .collect());
@@ -1356,15 +1376,16 @@ pub(crate) unsafe fn decode_columns_v2(
     // column whether it can take the FixedRaw fast path (fixed-width type AND no nulls anywhere) and (b) reuse the
     // directories in pass 2 without re-reading. Also carries the zone-map skip decision per chunk-group.
     let mut plans: Vec<StripePlan> = Vec::new();
-    for sm in read_visible_stripes((*rel).rd_id)? {
-        let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
+    for sm in unsafe { read_visible_stripes((*rel).rd_id)? } {
+        let hdr_items = unsafe { super::page::read_all_page_items(rel, sm.header_block)? };
         let hdr_bytes =
             hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
         let header = StripeHeader::from_bytes(&hdr_bytes)?;
         if header.ncols as usize != natts {
             return Err(format!("theodb_columnar: stripe ncols {} != natts {natts}", header.ncols));
         }
-        let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
+        let dir_bytes =
+            unsafe { super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)? };
         let entries =
             codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
         plans.push(StripePlan { entries, n_chunk_groups: header.n_chunk_groups as usize });
@@ -1408,14 +1429,16 @@ pub(crate) unsafe fn decode_columns_v2(
             total_cg += 1;
             // Accumulators live across every chunk-group here — that is exactly what makes this path O(N) in the
             // decoded batch. The streaming caller passes per-chunk-group buffers to the same helper instead.
-            if !decode_one_chunk_group(
-                &ctx,
-                pl,
-                cg,
-                &mut fixed_bytes,
-                &mut fixed_rows,
-                &mut cell_cols,
-            )? {
+            if !unsafe {
+                decode_one_chunk_group(
+                    &ctx,
+                    pl,
+                    cg,
+                    &mut fixed_bytes,
+                    &mut fixed_rows,
+                    &mut cell_cols,
+                )?
+            } {
                 skipped_cg += 1;
             }
         }
@@ -1450,9 +1473,9 @@ pub(crate) unsafe fn decode_columns(
     predicates: &[super::zonemap::ZonePredicate],
     skip: bool,
 ) -> Result<Vec<(String, u32, Vec<Option<Vec<u8>>>)>, String> {
-    let tupdesc = (*rel).rd_att;
-    let natts = (*tupdesc).natts as usize;
-    let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
+    let tupdesc = unsafe { (*rel).rd_att };
+    let natts = unsafe { (*tupdesc).natts } as usize;
+    let cols = (0..natts).map(|i| unsafe { coldesc(tupdesc, i) }).collect::<Result<Vec<_>, _>>()?;
     let wanted: Vec<usize> = match projection {
         Some(p) => {
             for &i in p {
@@ -1467,23 +1490,26 @@ pub(crate) unsafe fn decode_columns(
         None => (0..natts).collect(),
     };
     let name_of = |i: usize| -> String {
-        std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
-            .to_string_lossy()
-            .into_owned()
+        unsafe {
+            std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
+        }
+        .to_string_lossy()
+        .into_owned()
     };
 
     // Per WANTED column, its accumulated values (indexed positionally with `wanted`).
     let mut columns: Vec<Vec<Option<Vec<u8>>>> = vec![Vec::new(); wanted.len()];
     let (mut skipped_cg, mut total_cg) = (0usize, 0usize); // zone-map skip-ratio metric (wiring pillar c)
-    for sm in read_visible_stripes((*rel).rd_id)? {
-        let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
+    for sm in unsafe { read_visible_stripes((*rel).rd_id)? } {
+        let hdr_items = unsafe { super::page::read_all_page_items(rel, sm.header_block)? };
         let hdr_bytes =
             hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
         let header = StripeHeader::from_bytes(&hdr_bytes)?;
         if header.ncols as usize != natts {
             return Err(format!("theodb_columnar: stripe ncols {} != natts {natts}", header.ncols));
         }
-        let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
+        let dir_bytes =
+            unsafe { super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)? };
         let entries =
             codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
         for cg in 0..header.n_chunk_groups as usize {
@@ -1513,7 +1539,7 @@ pub(crate) unsafe fn decode_columns(
             }
             for (wi, &col) in wanted.iter().enumerate() {
                 let e = &entries[cg * natts + col];
-                let comp = super::page::read_chunked(rel, e.first_block, e.n_pages)?;
+                let comp = unsafe { super::page::read_chunked(rel, e.first_block, e.n_pages)? };
                 if comp.len() < e.comp_len as usize {
                     return Err("theodb_columnar: column chunk truncated on disk".into());
                 }
@@ -1535,11 +1561,11 @@ pub(crate) unsafe fn decode_columns(
     }
 
     // Same-xact pending rows (heap-tuple bytes) → deform ALL atts (heap_deform is all-or-nothing), keep the wanted.
-    let oid = (*rel).rd_id.to_u32();
+    let oid = unsafe { (*rel).rd_id.to_u32() };
     let pending: Option<Vec<Vec<u8>>> =
         WRITE_STATES.with(|w| w.borrow().get(&oid).map(|p| p.rows.clone()));
     if let Some(rows) = pending {
-        let pend = deform_rows_into_columns(&rows, tupdesc, natts, &cols, &wanted)?;
+        let pend = unsafe { deform_rows_into_columns(&rows, tupdesc, natts, &cols, &wanted)? };
         for (wi, col_rows) in pend.into_iter().enumerate() {
             columns[wi].extend(col_rows);
         }
@@ -1610,11 +1636,13 @@ pub(crate) unsafe fn directory_minmax(
     if want_max && matches!(mm, codec::MinMaxKind::F4 | codec::MinMaxKind::F8) {
         return Ok(None); // NaN gate: directory max_bits skipped NaN; native max(float) returns NaN
     }
-    let tupdesc = (*rel).rd_att;
-    let natts = (*tupdesc).natts as usize;
+    let tupdesc = unsafe { (*rel).rd_att };
+    let natts = unsafe { (*tupdesc).natts } as usize;
     let col_idx = match (0..natts).find(|&i| {
-        std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
-            .to_string_lossy()
+        unsafe {
+            std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
+        }
+        .to_string_lossy()
             == col_name
     }) {
         Some(x) => x,
@@ -1623,15 +1651,16 @@ pub(crate) unsafe fn directory_minmax(
 
     // Fold the directory min/max over VISIBLE stripes only (snapshot-correct — never all physical stripes).
     let mut acc: Option<u64> = None;
-    for sm in read_visible_stripes((*rel).rd_id)? {
-        let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
+    for sm in unsafe { read_visible_stripes((*rel).rd_id)? } {
+        let hdr_items = unsafe { super::page::read_all_page_items(rel, sm.header_block)? };
         let hdr_bytes =
             hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
         let header = StripeHeader::from_bytes(&hdr_bytes)?;
         if header.ncols as usize != natts {
             return Err(format!("theodb_columnar: stripe ncols {} != natts {natts}", header.ncols));
         }
-        let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
+        let dir_bytes =
+            unsafe { super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)? };
         let entries =
             codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
         for cg in 0..header.n_chunk_groups as usize {
@@ -1651,14 +1680,16 @@ pub(crate) unsafe fn directory_minmax(
     }
 
     // Fold the same-xact pending rows (no directory entry) via compute_minmax — the identical bit domain.
-    let oid = (*rel).rd_id.to_u32();
+    let oid = unsafe { (*rel).rd_id.to_u32() };
     let pending: Option<Vec<Vec<u8>>> =
         WRITE_STATES.with(|w| w.borrow().get(&oid).map(|p| p.rows.clone()));
     if let Some(rows) = pending {
         if !rows.is_empty() {
-            let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
+            let cols = (0..natts)
+                .map(|i| unsafe { coldesc(tupdesc, i) })
+                .collect::<Result<Vec<_>, _>>()?;
             let colvals: Vec<Option<Vec<u8>>> =
-                deform_rows_into_columns(&rows, tupdesc, natts, &cols, &[col_idx])?
+                unsafe { deform_rows_into_columns(&rows, tupdesc, natts, &cols, &[col_idx])? }
                     .into_iter()
                     .next()
                     .unwrap_or_default();
@@ -1678,7 +1709,7 @@ pub(crate) unsafe fn directory_minmax(
 
     match acc {
         None => Ok(Some((pg_sys::Datum::from(0usize), true))), // no visible/pending rows → SQL NULL
-        Some(bits) => Ok(Some((decode_minmax_datum(bits, mm)?, false))),
+        Some(bits) => Ok(Some((unsafe { decode_minmax_datum(bits, mm)? }, false))),
     }
 }
 
@@ -2014,13 +2045,17 @@ pub unsafe extern "C-unwind" fn columnar_finish_bulk_insert(
 /// takes one page (so an all-null column's directory entry has a real block to point at).
 unsafe fn write_chunk(rel: pg_sys::Relation, bytes: &[u8]) -> (u32, u32) {
     if bytes.is_empty() {
-        let b = super::page::extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &[]);
+        let b = unsafe {
+            super::page::extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &[])
+        };
         return (b, 1);
     }
     let mut first: Option<u32> = None;
     let mut n = 0u32;
     for chunk in bytes.chunks(super::page::CHUNK) {
-        let b = super::page::extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, chunk);
+        let b = unsafe {
+            super::page::extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, chunk)
+        };
         first.get_or_insert(b);
         n += 1;
     }
@@ -2255,9 +2290,9 @@ macro_rules! columnar_unsupported {
             // the attribute expands to anyway (pgrx lib.rs:126 re-exports it), so calling it directly is the same
             // boundary with none of the hygiene coupling. Nothing with a destructor is live in this frame, so the
             // ereport longjmp that leaves the guard cannot skip a Drop.
-            pgrx::pgrx_extern_c_guard(|| {
+            unsafe { pgrx::pgrx_extern_c_guard(|| {
                 pg_sys::error!(concat!("theodb_columnar: ", $msg, " is not supported (M99 is append-only analytical)"))
-            })
+            }) }
         }
     };
 }

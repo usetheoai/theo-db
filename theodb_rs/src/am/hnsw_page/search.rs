@@ -72,65 +72,67 @@ pub(crate) unsafe fn load(
     reads: &mut usize,
 ) -> Result<Cand, String> {
     *reads += 1;
-    page::with_page_item(rel, blk, off, nblocks, |b| {
-        // M59 v4 (AQ, code/vec split): a per-query AH LUT ⇒ this is a v4 HOT element tuple — decode it via
-        // `decode_element_v4` (code + nbr_addr + raw_addr, NO f32) and score by the near-free `Σ LUT[i][code_i]`
-        // over the 4-bit codes. The f32 is NEVER paged here (it lives in the cold raw tuple at `raw_addr`, read
-        // only at rerank). This is the ADR-0019 fix: the walk's hot working set is the 30 B hot tuple, not ~3 KB.
-        // Rule 8: the on-disk code MUST be exactly ⌈m/2⌉ bytes — a truncated code is a typed Err, never a
-        // silently-wrong (or panicking) AH score.
-        if let Some(l) = lut {
-            let ev = decode_element_v4(b)?;
-            let want = l.m().div_ceil(2);
-            if ev.code_bytes.len() != want {
-                return Err(format!(
-                    "theodb hnsw: v4 element AQ code is {} bytes, expected {} — REINDEX (v4 corruption)",
-                    ev.code_bytes.len(),
-                    want
-                ));
+    unsafe {
+        page::with_page_item(rel, blk, off, nblocks, |b| {
+            // M59 v4 (AQ, code/vec split): a per-query AH LUT ⇒ this is a v4 HOT element tuple — decode it via
+            // `decode_element_v4` (code + nbr_addr + raw_addr, NO f32) and score by the near-free `Σ LUT[i][code_i]`
+            // over the 4-bit codes. The f32 is NEVER paged here (it lives in the cold raw tuple at `raw_addr`, read
+            // only at rerank). This is the ADR-0019 fix: the walk's hot working set is the 30 B hot tuple, not ~3 KB.
+            // Rule 8: the on-disk code MUST be exactly ⌈m/2⌉ bytes — a truncated code is a typed Err, never a
+            // silently-wrong (or panicking) AH score.
+            if let Some(l) = lut {
+                let ev = decode_element_v4(b)?;
+                let want = l.m().div_ceil(2);
+                if ev.code_bytes.len() != want {
+                    return Err(format!(
+                        "theodb hnsw: v4 element AQ code is {} bytes, expected {} — REINDEX (v4 corruption)",
+                        ev.code_bytes.len(),
+                        want
+                    ));
+                }
+                return Ok(Cand {
+                    d: crate::vec::ah::ah_score(l, ev.code_bytes) as f64,
+                    blk,
+                    off,
+                    nbr_blk: ev.nbr_addr.0,
+                    nbr_off: ev.nbr_addr.1,
+                    raw_blk: ev.raw_addr.0,
+                    raw_off: ev.raw_addr.1,
+                    level: ev.level,
+                    tid: ev.tid,
+                    deleted: ev.deleted,
+                });
             }
-            return Ok(Cand {
-                d: crate::vec::ah::ah_score(l, ev.code_bytes) as f64,
+            // v1/v2: the f32 is inline in the element tuple. `Some(qc)` (SBQ v2) ⇒ cheap Hamming; `None` (v1) ⇒ exact
+            // f32 — both byte-identical to before v4. `raw_addr = (0,0)` (no cold region; rerank re-reads this tuple).
+            let ev = decode_element(b)?;
+            let d = match qcode {
+                Some(qc) => {
+                    if ev.code_bytes.len() != qc.len() {
+                        return Err(format!(
+                            "theodb hnsw: element SBQ code is {} bytes, expected {} — REINDEX (v2 corruption)",
+                            ev.code_bytes.len(),
+                            qc.len()
+                        ));
+                    }
+                    crate::sbq::hamming_bytes(qc, ev.code_bytes) as f64
+                }
+                None => score(metric, q, ev.vec_bytes, is_l2),
+            };
+            Ok(Cand {
+                d,
                 blk,
                 off,
                 nbr_blk: ev.nbr_addr.0,
                 nbr_off: ev.nbr_addr.1,
-                raw_blk: ev.raw_addr.0,
-                raw_off: ev.raw_addr.1,
+                raw_blk: 0,
+                raw_off: 0,
                 level: ev.level,
                 tid: ev.tid,
                 deleted: ev.deleted,
-            });
-        }
-        // v1/v2: the f32 is inline in the element tuple. `Some(qc)` (SBQ v2) ⇒ cheap Hamming; `None` (v1) ⇒ exact
-        // f32 — both byte-identical to before v4. `raw_addr = (0,0)` (no cold region; rerank re-reads this tuple).
-        let ev = decode_element(b)?;
-        let d = match qcode {
-            Some(qc) => {
-                if ev.code_bytes.len() != qc.len() {
-                    return Err(format!(
-                        "theodb hnsw: element SBQ code is {} bytes, expected {} — REINDEX (v2 corruption)",
-                        ev.code_bytes.len(),
-                        qc.len()
-                    ));
-                }
-                crate::sbq::hamming_bytes(qc, ev.code_bytes) as f64
-            }
-            None => score(metric, q, ev.vec_bytes, is_l2),
-        };
-        Ok(Cand {
-            d,
-            blk,
-            off,
-            nbr_blk: ev.nbr_addr.0,
-            nbr_off: ev.nbr_addr.1,
-            raw_blk: 0,
-            raw_off: 0,
-            level: ev.level,
-            tid: ev.tid,
-            deleted: ev.deleted,
+            })
         })
-    })
+    }
 }
 
 /// Read a candidate's neighbor addresses on `layer` (increments pages-read for the neighbor tuple).
@@ -145,9 +147,11 @@ pub(crate) unsafe fn neighbors_of(
     reads: &mut usize,
 ) -> Result<Vec<Addr>, String> {
     *reads += 1;
-    page::with_page_item(rel, c.nbr_blk, c.nbr_off, nblocks, |b| {
-        decode_neighbors(b, c.level as usize, layer, m, m0)
-    })
+    unsafe {
+        page::with_page_item(rel, c.nbr_blk, c.nbr_off, nblocks, |b| {
+            decode_neighbors(b, c.level as usize, layer, m, m0)
+        })
+    }
 }
 
 /// M46 L1-B: like `neighbors_of` but decodes into a caller-owned scratch `Vec` (cleared first) instead of
@@ -164,9 +168,11 @@ pub(crate) unsafe fn neighbors_into(
     out: &mut Vec<Addr>,
 ) -> Result<(), String> {
     *reads += 1;
-    page::with_page_item(rel, c.nbr_blk, c.nbr_off, nblocks, |b| {
-        decode_neighbors_into(b, c.level as usize, layer, m, m0, out)
-    })
+    unsafe {
+        page::with_page_item(rel, c.nbr_blk, c.nbr_off, nblocks, |b| {
+            decode_neighbors_into(b, c.level as usize, layer, m, m0, out)
+        })
+    }
 }
 
 /// On-demand top-`ef` traversal (mirrors pgvector `HnswSearchLayer`): greedy-descend the upper layers with ef=1,
@@ -187,7 +193,7 @@ pub(crate) unsafe fn traverse(
     let ef = ef_search.max(1);
     let mut reads = 0usize;
     // M41: cache the block count once (was read per-item inside read_page_item_at — a syscall-ish call ×2/node).
-    let nblocks = page::main_fork_nblocks(rel);
+    let nblocks = unsafe { page::main_fork_nblocks(rel) };
 
     // M51: for an SBQ index (v2), reconstruct the quantizer from the persisted codebook and quantize the query
     // once. The walk then scores by cheap Hamming on the inline codes; the exact f32 rerank of the survivors runs
@@ -233,25 +239,29 @@ pub(crate) unsafe fn traverse(
     let lut: Option<&crate::vec::ah::Lut16> = lut_owned.as_ref();
 
     // Entry point (from meta), then greedy-descend the upper layers keeping a single best candidate.
-    let mut ep = load(
-        rel,
-        meta.entry_blkno,
-        meta.entry_offno,
-        q,
-        metric,
-        is_l2,
-        qcode,
-        lut,
-        nblocks,
-        &mut reads,
-    )?;
+    let mut ep = unsafe {
+        load(
+            rel,
+            meta.entry_blkno,
+            meta.entry_offno,
+            q,
+            metric,
+            is_l2,
+            qcode,
+            lut,
+            nblocks,
+            &mut reads,
+        )?
+    };
     let mut lc = meta.entry_level as usize;
     while lc >= 1 {
         loop {
-            let nbrs = neighbors_of(rel, &ep, lc, m, m0, nblocks, &mut reads)?;
+            let nbrs = unsafe { neighbors_of(rel, &ep, lc, m, m0, nblocks, &mut reads)? };
             let mut improved = false;
             for (nb, no) in nbrs {
-                let cand = load(rel, nb, no, q, metric, is_l2, qcode, lut, nblocks, &mut reads)?;
+                let cand = unsafe {
+                    load(rel, nb, no, q, metric, is_l2, qcode, lut, nblocks, &mut reads)?
+                };
                 if cand.d < ep.d {
                     ep = cand;
                     improved = true;
@@ -305,13 +315,17 @@ pub(crate) unsafe fn traverse(
             // it as before. This one cold read per survivor (~ef·over_fetch of them) is the ONLY f32 I/O of a v4
             // scan — the whole point of the code/vector split (ADR-0019).
             let d = if cand.raw_blk != 0 {
-                page::with_page_item(rel, cand.raw_blk, cand.raw_off, nblocks, |b| {
-                    Ok(score(metric, q, decode_raw_vec(b)?, is_l2))
-                })?
+                unsafe {
+                    page::with_page_item(rel, cand.raw_blk, cand.raw_off, nblocks, |b| {
+                        Ok(score(metric, q, decode_raw_vec(b)?, is_l2))
+                    })?
+                }
             } else {
-                page::with_page_item(rel, cand.blk, cand.off, nblocks, |b| {
-                    Ok(score(metric, q, decode_element(b)?.vec_bytes, is_l2))
-                })?
+                unsafe {
+                    page::with_page_item(rel, cand.blk, cand.off, nblocks, |b| {
+                        Ok(score(metric, q, decode_element(b)?.vec_bytes, is_l2))
+                    })?
+                }
             };
             reads += 1;
             reranked.push((cand.tid, d));

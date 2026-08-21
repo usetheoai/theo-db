@@ -250,16 +250,18 @@ unsafe fn knn_columnar_impl(
     k: usize,
     label: i32,
 ) -> Result<Vec<(i64, f64)>, String> {
-    let rel = pg_sys::relation_open(idx, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+    let rel = unsafe { pg_sys::relation_open(idx, pg_sys::AccessShareLock as pg_sys::LOCKMODE) };
     let out = (|| {
         let want = ["tid", "part_id", "label", "vec"];
         let mut proj = Vec::with_capacity(4);
         for name in want {
-            proj.push(crate::am::columnar::column_index(rel, name).ok_or_else(|| {
-                format!("vindex: column '{name}' not found in the columnar index")
-            })?);
+            proj.push(unsafe {
+                crate::am::columnar::column_index(rel, name).ok_or_else(|| {
+                    format!("vindex: column '{name}' not found in the columnar index")
+                })?
+            });
         }
-        let cols = crate::am::columnar::decode_columns(rel, Some(&proj), &[], false)?;
+        let cols = unsafe { crate::am::columnar::decode_columns(rel, Some(&proj), &[], false)? };
         // cols is in projection order: tid, part_id, label, vec
         let by = |i: usize| &cols[i].2;
         let n = by(0).len();
@@ -283,23 +285,23 @@ unsafe fn knn_columnar_impl(
         cv.check_query_dim(query)?;
         Ok(cv.knn_filtered(query, k, usize::MAX, label))
     })();
-    pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+    unsafe { pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE) };
     out
 }
 
 /// Decode only the named columns and return the total decoded byte count (isolates the column-decode cost from the
 /// vector rerank — the benchmark control that quantifies the pruning win, decode-of-index-cols vs decode-of-all).
 unsafe fn decode_bytes_impl(idx: pg_sys::Oid, names: &[String]) -> Result<i64, String> {
-    let rel = pg_sys::relation_open(idx, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+    let rel = unsafe { pg_sys::relation_open(idx, pg_sys::AccessShareLock as pg_sys::LOCKMODE) };
     let out = (|| {
         let mut proj = Vec::with_capacity(names.len());
         for name in names {
             proj.push(
-                crate::am::columnar::column_index(rel, name)
+                unsafe { crate::am::columnar::column_index(rel, name) }
                     .ok_or_else(|| format!("vindex: column '{name}' not found"))?,
             );
         }
-        let cols = crate::am::columnar::decode_columns(rel, Some(&proj), &[], false)?;
+        let cols = unsafe { crate::am::columnar::decode_columns(rel, Some(&proj), &[], false)? };
         let total: i64 = cols
             .iter()
             .flat_map(|(_, _, vals)| vals.iter())
@@ -307,7 +309,7 @@ unsafe fn decode_bytes_impl(idx: pg_sys::Oid, names: &[String]) -> Result<i64, S
             .sum();
         Ok(total)
     })();
-    pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+    unsafe { pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE) };
     out
 }
 

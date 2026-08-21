@@ -113,7 +113,20 @@ fn embed_resolved(
     let n = inputs.len();
     let payload = serde_json::json!({ "input": inputs, "model": mdl }).to_string();
     let body = post_json("theodb.embed_batch", endpoint, payload, api_key);
+    parse_embedding_data(&body, n)
+}
 
+/// B-009 — o mapeamento resposta→saída, extraído como função PURA para poder ser testado sem rede.
+///
+/// Os seis caminhos de erro tipado abaixo viviam depois do `post_json`, o que os tornava inalcançáveis
+/// por teste unitário: exercitá-los exigiria um provedor HTTP que devolvesse cada forma malformada. Medido
+/// em 2026-08-21: `embed.rs` tinha **1** teste em 236 linhas — o extremo inferior do crate — e é a
+/// superfície que fala com provedor externo, ou seja, a que mais tem modo de falha que só aparece em
+/// produção.
+///
+/// O molde é o `parse_rerank_results` do irmão `rerank.rs`, que já resolveu o mesmo problema no mesmo
+/// crate e por isso tem 6 testes de erro tipado. Extração pura: nenhuma mudança de comportamento.
+fn parse_embedding_data(body: &Value, n: usize) -> Vec<String> {
     let data = match body.get("data").and_then(|d| d.as_array()) {
         Some(a) => a,
         None => err_external(&format!(
@@ -232,5 +245,84 @@ mod tests {
     fn format_embedding_renders_numeric_array() {
         let emb = vec![json!(1.0), json!(-2.5), json!(0.0)];
         assert_eq!(format_embedding(&emb, "test"), "[1,-2.5,0]");
+    }
+
+    // ---- B-009: os seis caminhos de erro TIPADO do mapeamento resposta→saída ----
+    //
+    // Cada um assere a MENSAGEM inteira, não apenas que lança. `#[pg_test(error = ...)]` compara o texto
+    // completo, então um erro que mude de forma quebra o teste — que é o ponto: o contrato com quem
+    // depura em produção é a mensagem, não o fato de haver erro (`rules/error-handling.md` § 2).
+    //
+    // Estes caminhos eram inalcançáveis até o `parse_embedding_data` ser extraído: exercitá-los exigiria
+    // um provedor HTTP devolvendo cada forma malformada.
+    //
+    // O prefixo `b009_embed_` não é decoração: `#[pg_test]` gera um símbolo ACHATADO por nome de teste, então
+    // nomes colidem entre MÓDULOS. Três destes já existiam no irmão `rerank.rs` e o link falhava com
+    // `symbol ... is already defined` — descoberto compilando, não lendo.
+
+    #[pg_test]
+    fn b009_embed_parse_maps_embeddings_by_index_not_by_position() {
+        // Resposta FORA DE ORDEM. O código mapeia por `index`, e este teste é o que prova — com
+        // mapeamento por posição, a saída sairia trocada em silêncio, que é o pior modo de falha aqui.
+        let body = json!({"data": [
+            {"index": 1, "embedding": [3.0, 4.0]},
+            {"index": 0, "embedding": [1.0, 2.0]},
+        ]});
+        assert_eq!(parse_embedding_data(&body, 2), vec!["[1,2]", "[3,4]"]);
+    }
+
+    #[pg_test(error = "theodb.embed_batch: unexpected embedding response shape: {}")]
+    fn b009_embed_parse_missing_data_key_fails_typed() {
+        let _ = parse_embedding_data(&json!({}), 1);
+    }
+
+    #[pg_test(
+        error = "theodb.embed_batch: batch size mismatch: requested 3 embeddings, endpoint returned 1"
+    )]
+    fn b009_embed_parse_size_mismatch_fails_typed() {
+        // A invariante N-entra/N-sai. Sem ela, um provedor que descarta uma entrada devolveria menos
+        // vetores do que linhas, e o desalinhamento seguiria silencioso para dentro da tabela.
+        let body = json!({"data": [{"index": 0, "embedding": [1.0]}]});
+        let _ = parse_embedding_data(&body, 3);
+    }
+
+    #[pg_test(
+        error = "theodb.embed_batch: unexpected embedding response shape: index out of range"
+    )]
+    fn b009_embed_parse_index_out_of_range_fails_typed() {
+        let body = json!({"data": [{"index": 5, "embedding": [1.0]}]});
+        let _ = parse_embedding_data(&body, 1);
+    }
+
+    #[pg_test(error = "theodb.embed_batch: unexpected embedding response shape: duplicate index")]
+    fn b009_embed_parse_duplicate_index_fails_typed() {
+        let body = json!({"data": [
+            {"index": 0, "embedding": [1.0]},
+            {"index": 0, "embedding": [2.0]},
+        ]});
+        let _ = parse_embedding_data(&body, 2);
+    }
+
+    #[pg_test(
+        error = "theodb.embed_batch: unexpected embedding response shape: missing embedding array"
+    )]
+    fn b009_embed_parse_missing_embedding_array_fails_typed() {
+        let body = json!({"data": [{"index": 0}]});
+        let _ = parse_embedding_data(&body, 1);
+    }
+
+    #[pg_test(
+        error = "theodb.embed_batch: unexpected embedding response shape: non-numeric vector element"
+    )]
+    fn b009_embed_parse_non_numeric_element_fails_typed() {
+        let body = json!({"data": [{"index": 0, "embedding": ["nao e numero"]}]});
+        let _ = parse_embedding_data(&body, 1);
+    }
+
+    #[pg_test(error = "theodb.embed_batch: array elements must not be NULL")]
+    fn b009_embed_validate_inputs_rejects_null_element_typed() {
+        // O caminho de entrada, não o de resposta. Um NULL no array recusa ANTES do egress — o que
+        // também significa que não gastamos uma chamada ao provedor para descobrir isso.
+        let _ = validate_inputs(&[Some("a"), None]);
     }
 }

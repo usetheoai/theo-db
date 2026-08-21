@@ -55,7 +55,7 @@ pub(crate) fn map_ivf_version(m: &[u8]) -> Result<IvfVersion, String> {
 /// Read block 0 once and resolve the IVF scan-path version. Replaces the 5 `ivf_is_v*` predicates (each of
 /// which re-read block 0) — the OCP dispatch of the M147 refactor.
 pub(crate) unsafe fn ivf_version(rel: pg_sys::Relation) -> Result<IvfVersion, String> {
-    map_ivf_version(&read_page_item(rel, 0)?)
+    map_ivf_version(&unsafe { read_page_item(rel, 0)? })
 }
 
 /// One list's entries encoded as `[tid i64, vector f32×dim]×count`.
@@ -150,7 +150,7 @@ pub(crate) unsafe fn write_ivf_structured(
 ) {
     // Initial build: contiguous generation right after the meta page (base = block 1).
     for item in structured_page_items(1, dim, metric_tag, centroids, lists) {
-        extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &item);
+        unsafe { extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &item) };
     }
 }
 /// Build the IVFFlat structured page items for a generation based at `base` (M48 crash-safe fold). The caller
@@ -173,7 +173,7 @@ pub(crate) struct IvfMeta {
 }
 /// Read the meta page + centroid region (small — ∝ nlists, NOT ∝ N). Typed `Err` on corruption.
 pub(crate) unsafe fn read_ivf_meta(rel: pg_sys::Relation) -> Result<IvfMeta, String> {
-    let m = read_page_item(rel, 0)?;
+    let m = unsafe { read_page_item(rel, 0)? };
     if m.len() < 25 {
         return Err("theodb ivf: truncated structured meta".into());
     }
@@ -202,7 +202,7 @@ pub(crate) unsafe fn read_ivf_meta(rel: pg_sys::Relation) -> Result<IvfMeta, Str
         1 // v2: directory implicitly at block 1
     };
     // Directory region: blocks gen_base..=+dir_npages, chunked (no longer inline on the meta page).
-    let dbytes = read_chunked(rel, gen_base, dir_npages)?;
+    let dbytes = unsafe { read_chunked(rel, gen_base, dir_npages)? };
     if dbytes.len() < nlists * 12 {
         return Err("theodb ivf: truncated list directory".into());
     }
@@ -216,7 +216,7 @@ pub(crate) unsafe fn read_ivf_meta(rel: pg_sys::Relation) -> Result<IvfMeta, Str
         ));
     }
     // Centroid region: blocks gen_base+dir_npages ..= +centroid_npages.
-    let cbytes = read_chunked(rel, gen_base + dir_npages, centroid_npages)?;
+    let cbytes = unsafe { read_chunked(rel, gen_base + dir_npages, centroid_npages)? };
     let d = dim as usize;
     if d == 0 || cbytes.len() < nlists * d * 4 {
         if nlists == 0 {
@@ -238,7 +238,7 @@ pub(crate) unsafe fn read_ivf_meta(rel: pg_sys::Relation) -> Result<IvfMeta, Str
 /// The first block of the current IVF structured generation (v3 `gen_base`; v2 legacy = 1). The single-source
 /// pointer the crash-safe fold's `free_region` reclaims BEFORE — same value the scan resolves the directory from.
 pub(crate) unsafe fn ivf_gen_base(rel: pg_sys::Relation) -> Result<u32, String> {
-    let m = read_page_item(rel, 0)?;
+    let m = unsafe { read_page_item(rel, 0)? };
     if m.len() < 8 || u32::from_le_bytes(m[0..4].try_into().unwrap()) != IVF_STRUCT_MAGIC {
         return Err("theodb ivf: bad structured meta magic".into());
     }
@@ -345,12 +345,12 @@ pub(crate) unsafe fn write_ivf_aq(
         push_chunks(&mut items, enc);
     }
     for item in items {
-        extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &item);
+        unsafe { extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &item) };
     }
 }
 /// Read the v4 meta + codebook + centroid + dir regions (∝ nlists/codebook, NOT ∝ N). Typed `Err` on corruption.
 pub(crate) unsafe fn read_ivf_aq_meta(rel: pg_sys::Relation) -> Result<IvfAqMeta, String> {
-    let m = read_page_item(rel, 0)?;
+    let m = unsafe { read_page_item(rel, 0)? };
     if m.len() < 37 {
         return Err("theodb ivf-aq: truncated v4 meta".into());
     }
@@ -368,7 +368,7 @@ pub(crate) unsafe fn read_ivf_aq_meta(rel: pg_sys::Relation) -> Result<IvfAqMeta
     let centroid_npages = u32::from_le_bytes(m[29..33].try_into().unwrap());
     let gen_base = u32::from_le_bytes(m[33..37].try_into().unwrap());
 
-    let dbytes = read_chunked(rel, gen_base, dir_npages)?;
+    let dbytes = unsafe { read_chunked(rel, gen_base, dir_npages)? };
     if dbytes.len() < nlists * 12 {
         return Err("theodb ivf-aq: truncated directory".into());
     }
@@ -381,8 +381,9 @@ pub(crate) unsafe fn read_ivf_aq_meta(rel: pg_sys::Relation) -> Result<IvfAqMeta
             u32::from_le_bytes(dbytes[o + 8..o + 12].try_into().unwrap()),
         ));
     }
-    let codebook = read_chunked(rel, gen_base + dir_npages, codebook_npages)?;
-    let cbytes = read_chunked(rel, gen_base + dir_npages + codebook_npages, centroid_npages)?;
+    let codebook = unsafe { read_chunked(rel, gen_base + dir_npages, codebook_npages)? };
+    let cbytes =
+        unsafe { read_chunked(rel, gen_base + dir_npages + codebook_npages, centroid_npages)? };
     let d = dim as usize;
     let mut centroids = Vec::with_capacity(nlists);
     if d > 0 && cbytes.len() >= nlists * d * 4 {
@@ -477,10 +478,10 @@ pub(crate) unsafe fn write_ivf_aq_split(
     meta.extend_from_slice(&base.to_le_bytes());
 
     // Stream each region straight to pages — no `items` accumulation.
-    write_item(rel, &meta);
-    write_chunks(rel, &dirbytes);
-    write_chunks(rel, codebook);
-    write_chunks(rel, &cbytes);
+    unsafe { write_item(rel, &meta) };
+    unsafe { write_chunks(rel, &dirbytes) };
+    unsafe { write_chunks(rel, codebook) };
+    unsafe { write_chunks(rel, &cbytes) };
     for i in 0..positions.len() {
         // CODE blob [ids][codes] for list i.
         let mut ecode = Vec::with_capacity(positions[i].len() * 8 + codes[i].len());
@@ -488,7 +489,7 @@ pub(crate) unsafe fn write_ivf_aq_split(
             ecode.extend_from_slice(&ids[pos].to_le_bytes());
         }
         ecode.extend_from_slice(&codes[i]);
-        write_chunks(rel, &ecode);
+        unsafe { write_chunks(rel, &ecode) };
         drop(ecode);
         // VECTOR blob [f32] for list i — read from `vectors` by position, then freed.
         let mut evec = Vec::with_capacity(positions[i].len() * dim_bytes);
@@ -497,7 +498,7 @@ pub(crate) unsafe fn write_ivf_aq_split(
                 evec.extend_from_slice(&x.to_le_bytes());
             }
         }
-        write_chunks(rel, &evec);
+        unsafe { write_chunks(rel, &evec) };
         drop(evec);
     }
 }
@@ -575,10 +576,10 @@ pub(crate) unsafe fn write_ivf_aq_split_v7(
     meta.extend_from_slice(&centroid_npages.to_le_bytes());
     meta.extend_from_slice(&base.to_le_bytes());
 
-    write_item(rel, &meta);
-    write_chunks(rel, &dirbytes);
-    write_chunks(rel, codebook);
-    write_chunks(rel, &cbytes);
+    unsafe { write_item(rel, &meta) };
+    unsafe { write_chunks(rel, &dirbytes) };
+    unsafe { write_chunks(rel, codebook) };
+    unsafe { write_chunks(rel, &cbytes) };
     for i in 0..positions.len() {
         // CODE blob [ids][labels_fixed][codes] for list i.
         let mut ecode = Vec::with_capacity(positions[i].len() * (8 + label_bytes) + codes[i].len());
@@ -589,7 +590,7 @@ pub(crate) unsafe fn write_ivf_aq_split_v7(
             encode_labels_fixed(&labels[pos], &mut ecode);
         }
         ecode.extend_from_slice(&codes[i]);
-        write_chunks(rel, &ecode);
+        unsafe { write_chunks(rel, &ecode) };
         drop(ecode);
         // VECTOR blob [f32] for list i.
         let mut evec = Vec::with_capacity(positions[i].len() * dim_bytes);
@@ -598,7 +599,7 @@ pub(crate) unsafe fn write_ivf_aq_split_v7(
                 evec.extend_from_slice(&x.to_le_bytes());
             }
         }
-        write_chunks(rel, &evec);
+        unsafe { write_chunks(rel, &evec) };
         drop(evec);
     }
 }
@@ -606,7 +607,7 @@ pub(crate) unsafe fn write_ivf_aq_split_v7(
 /// M90: also accepts the v7 (label-aware) meta — identical shape (magic 7); the label region lives inside the per-
 /// list CODE blob, so the meta/dir are byte-identical to v5. The scan branches on `IvfVersion::V7` for the code offsets (M147).
 pub(crate) unsafe fn read_ivf_aq_meta_split(rel: pg_sys::Relation) -> Result<IvfAqMetaV5, String> {
-    let m = read_page_item(rel, 0)?;
+    let m = unsafe { read_page_item(rel, 0)? };
     if m.len() < 37 {
         return Err("theodb ivf-aq: truncated v5 meta".into());
     }
@@ -624,7 +625,7 @@ pub(crate) unsafe fn read_ivf_aq_meta_split(rel: pg_sys::Relation) -> Result<Ivf
     let centroid_npages = u32::from_le_bytes(m[29..33].try_into().unwrap());
     let gen_base = u32::from_le_bytes(m[33..37].try_into().unwrap());
 
-    let dbytes = read_chunked(rel, gen_base, dir_npages)?;
+    let dbytes = unsafe { read_chunked(rel, gen_base, dir_npages)? };
     if dbytes.len() < nlists * 20 {
         return Err("theodb ivf-aq: truncated v5 directory".into());
     }
@@ -639,8 +640,9 @@ pub(crate) unsafe fn read_ivf_aq_meta_split(rel: pg_sys::Relation) -> Result<Ivf
             u32::from_le_bytes(dbytes[o + 16..o + 20].try_into().unwrap()),
         ));
     }
-    let codebook = read_chunked(rel, gen_base + dir_npages, codebook_npages)?;
-    let cbytes = read_chunked(rel, gen_base + dir_npages + codebook_npages, centroid_npages)?;
+    let codebook = unsafe { read_chunked(rel, gen_base + dir_npages, codebook_npages)? };
+    let cbytes =
+        unsafe { read_chunked(rel, gen_base + dir_npages + codebook_npages, centroid_npages)? };
     let d = dim as usize;
     let mut centroids = Vec::with_capacity(nlists);
     if d > 0 && cbytes.len() >= nlists * d * 4 {
@@ -674,7 +676,7 @@ unsafe fn read_record_at(
     let span = record_span(ordinal, reclen, CHUNK, npages)?;
     let (p0, lo) = (span.chunk, span.lo);
     let mut buf = Vec::new();
-    read_page_item_into(rel, first_block + p0 as u32, &mut buf)?;
+    unsafe { read_page_item_into(rel, first_block + p0 as u32, &mut buf)? };
     if lo + reclen <= buf.len() {
         return Ok(buf[lo..lo + reclen].to_vec());
     }
@@ -696,7 +698,7 @@ unsafe fn read_record_at(
     let mut out = buf[lo..].to_vec();
     let need = reclen - out.len();
     let mut buf2 = Vec::new();
-    read_page_item_into(rel, first_block + (p0 + 1) as u32, &mut buf2)?;
+    unsafe { read_page_item_into(rel, first_block + (p0 + 1) as u32, &mut buf2)? };
     if buf2.len() < need {
         return Err("theodb ivf-aq: truncated straddled record".into());
     }
@@ -711,7 +713,7 @@ pub(crate) unsafe fn read_vec_at(
     ordinal: usize,
     dim: usize,
 ) -> Result<Vec<u8>, String> {
-    read_record_at(rel, vec_first_block, vec_npages, ordinal, dim * 4)
+    unsafe { read_record_at(rel, vec_first_block, vec_npages, ordinal, dim * 4) }
 }
 /// M85 — random-read ONE SQ8 code (reclen = `dim`) from a v6 SQ8 range — ¼ the bytes of the f32 read.
 pub(crate) unsafe fn read_sq8_at(
@@ -721,7 +723,7 @@ pub(crate) unsafe fn read_sq8_at(
     ordinal: usize,
     dim: usize,
 ) -> Result<Vec<u8>, String> {
-    read_record_at(rel, sq8_first_block, sq8_npages, ordinal, dim)
+    unsafe { read_record_at(rel, sq8_first_block, sq8_npages, ordinal, dim) }
 }
 pub(crate) struct IvfAqMetaV6 {
     pub dim: u32,
@@ -751,18 +753,18 @@ pub(crate) unsafe fn read_rabitq_at(
     ordinal: usize,
     dim: usize,
 ) -> Result<Vec<u8>, String> {
-    read_record_at(rel, rq_first_block, rq_npages, ordinal, dim + 8)
+    unsafe { read_record_at(rel, rq_first_block, rq_npages, ordinal, dim + 8) }
 }
 /// M87 — the IVF list count (v3/v4/v5/v6), via the same fallback chain as the cost model. 0 on any unreadable
 /// meta (fail-safe — the iterative scan then bounds growth by `max_scan_tuples` alone). Used by `amrescan` to bound
 /// the iterative re-search (grow `probes` until all lists are probed, then stop).
 pub(crate) unsafe fn ivf_list_count(rel: pg_sys::Relation) -> usize {
-    read_ivf_meta(rel)
+    unsafe { read_ivf_meta(rel) }
         .map(|m| m.dir.len())
-        .or_else(|_| read_ivf_aq_meta(rel).map(|m| m.dir.len()))
-        .or_else(|_| read_ivf_aq_meta_split(rel).map(|m| m.dir.len()))
-        .or_else(|_| read_ivf_aq_meta_split_sq8(rel).map(|m| m.dir.len()))
-        .or_else(|_| read_ivf_aq_meta_split_rabitq(rel).map(|m| m.dir.len()))
+        .or_else(|_| unsafe { read_ivf_aq_meta(rel).map(|m| m.dir.len()) })
+        .or_else(|_| unsafe { read_ivf_aq_meta_split(rel).map(|m| m.dir.len()) })
+        .or_else(|_| unsafe { read_ivf_aq_meta_split_sq8(rel).map(|m| m.dir.len()) })
+        .or_else(|_| unsafe { read_ivf_aq_meta_split_rabitq(rel).map(|m| m.dir.len()) })
         .unwrap_or(0)
 }
 /// True iff the index's structured meta is v8 (AQ + RaBitQ residual refine, storage-separated).
@@ -840,10 +842,10 @@ pub(crate) unsafe fn write_ivf_aq_split_streaming(
     meta.extend_from_slice(&centroid_npages.to_le_bytes());
     meta.extend_from_slice(&base.to_le_bytes());
 
-    write_item(rel, &meta);
-    write_chunks(rel, &dirbytes);
-    write_chunks(rel, codebook);
-    write_chunks(rel, &cbytes);
+    unsafe { write_item(rel, &meta) };
+    unsafe { write_chunks(rel, &dirbytes) };
+    unsafe { write_chunks(rel, codebook) };
+    unsafe { write_chunks(rel, &cbytes) };
     // Per list: pull its `count` members from the sorted stream into a small buffer, pack codes (block32), write.
     for &cnt in counts {
         let cnt = cnt as usize;
@@ -878,7 +880,7 @@ pub(crate) unsafe fn write_ivf_aq_split_streaming(
             }
         }
         ecode.extend_from_slice(&blocks);
-        write_chunks(rel, &ecode);
+        unsafe { write_chunks(rel, &ecode) };
         drop(ecode);
         drop(blocks);
         // VECTOR blob [f32] in the same buffer order.
@@ -888,7 +890,7 @@ pub(crate) unsafe fn write_ivf_aq_split_streaming(
                 evec.extend_from_slice(&x.to_le_bytes());
             }
         }
-        write_chunks(rel, &evec);
+        unsafe { write_chunks(rel, &evec) };
         // list_ids / list_vecs freed here — only one list's worth held at a time (O(N/lists)).
     }
 }
@@ -958,27 +960,27 @@ pub(crate) unsafe fn write_ivf_aq_split_sq8(
     meta.extend_from_slice(&base.to_le_bytes());
     meta.extend_from_slice(&sq8_codebook_npages.to_le_bytes());
 
-    write_item(rel, &meta);
-    write_chunks(rel, &dirbytes);
-    write_chunks(rel, aq_codebook);
-    write_chunks(rel, sq8_codebook);
-    write_chunks(rel, &cbytes);
+    unsafe { write_item(rel, &meta) };
+    unsafe { write_chunks(rel, &dirbytes) };
+    unsafe { write_chunks(rel, aq_codebook) };
+    unsafe { write_chunks(rel, sq8_codebook) };
+    unsafe { write_chunks(rel, &cbytes) };
     for i in 0..positions.len() {
         let mut ecode = Vec::with_capacity(positions[i].len() * 8 + codes[i].len());
         for &pos in &positions[i] {
             ecode.extend_from_slice(&ids[pos].to_le_bytes());
         }
         ecode.extend_from_slice(&codes[i]);
-        write_chunks(rel, &ecode);
+        unsafe { write_chunks(rel, &ecode) };
         drop(ecode);
-        write_chunks(rel, &sq8_codes[i]);
+        unsafe { write_chunks(rel, &sq8_codes[i]) };
     }
 }
 /// Read the v6 meta + both codebooks + centroid + dir regions. Typed `Err` on corruption.
 pub(crate) unsafe fn read_ivf_aq_meta_split_sq8(
     rel: pg_sys::Relation,
 ) -> Result<IvfAqMetaV6, String> {
-    let m = read_page_item(rel, 0)?;
+    let m = unsafe { read_page_item(rel, 0)? };
     if m.len() < 41 {
         return Err("theodb ivf-aq: truncated v6 meta".into());
     }
@@ -997,7 +999,7 @@ pub(crate) unsafe fn read_ivf_aq_meta_split_sq8(
     let gen_base = u32::from_le_bytes(m[33..37].try_into().unwrap());
     let sq8_codebook_npages = u32::from_le_bytes(m[37..41].try_into().unwrap());
 
-    let dbytes = read_chunked(rel, gen_base, dir_npages)?;
+    let dbytes = unsafe { read_chunked(rel, gen_base, dir_npages)? };
     if dbytes.len() < nlists * 20 {
         return Err("theodb ivf-aq: truncated v6 directory".into());
     }
@@ -1012,14 +1014,17 @@ pub(crate) unsafe fn read_ivf_aq_meta_split_sq8(
             u32::from_le_bytes(dbytes[o + 16..o + 20].try_into().unwrap()),
         ));
     }
-    let aq_codebook = read_chunked(rel, gen_base + dir_npages, aq_codebook_npages)?;
-    let sq8_codebook =
-        read_chunked(rel, gen_base + dir_npages + aq_codebook_npages, sq8_codebook_npages)?;
-    let cbytes = read_chunked(
-        rel,
-        gen_base + dir_npages + aq_codebook_npages + sq8_codebook_npages,
-        centroid_npages,
-    )?;
+    let aq_codebook = unsafe { read_chunked(rel, gen_base + dir_npages, aq_codebook_npages)? };
+    let sq8_codebook = unsafe {
+        read_chunked(rel, gen_base + dir_npages + aq_codebook_npages, sq8_codebook_npages)?
+    };
+    let cbytes = unsafe {
+        read_chunked(
+            rel,
+            gen_base + dir_npages + aq_codebook_npages + sq8_codebook_npages,
+            centroid_npages,
+        )?
+    };
     let d = dim as usize;
     let mut centroids = Vec::with_capacity(nlists);
     if d > 0 && cbytes.len() >= nlists * d * 4 {
@@ -1099,27 +1104,27 @@ pub(crate) unsafe fn write_ivf_aq_split_rabitq(
     meta.extend_from_slice(&base.to_le_bytes());
     meta.extend_from_slice(&rabitq_codebook_npages.to_le_bytes());
 
-    write_item(rel, &meta);
-    write_chunks(rel, &dirbytes);
-    write_chunks(rel, aq_codebook);
-    write_chunks(rel, rabitq_codebook);
-    write_chunks(rel, &cbytes);
+    unsafe { write_item(rel, &meta) };
+    unsafe { write_chunks(rel, &dirbytes) };
+    unsafe { write_chunks(rel, aq_codebook) };
+    unsafe { write_chunks(rel, rabitq_codebook) };
+    unsafe { write_chunks(rel, &cbytes) };
     for i in 0..positions.len() {
         let mut ecode = Vec::with_capacity(positions[i].len() * 8 + codes[i].len());
         for &pos in &positions[i] {
             ecode.extend_from_slice(&ids[pos].to_le_bytes());
         }
         ecode.extend_from_slice(&codes[i]);
-        write_chunks(rel, &ecode);
+        unsafe { write_chunks(rel, &ecode) };
         drop(ecode);
-        write_chunks(rel, &rabitq_codes[i]);
+        unsafe { write_chunks(rel, &rabitq_codes[i]) };
     }
 }
 /// E1 — read the v8 meta + AQ codebook + RaBitQ codebook + centroid + dir regions. Typed `Err` on corruption.
 pub(crate) unsafe fn read_ivf_aq_meta_split_rabitq(
     rel: pg_sys::Relation,
 ) -> Result<IvfAqMetaV8, String> {
-    let m = read_page_item(rel, 0)?;
+    let m = unsafe { read_page_item(rel, 0)? };
     if m.len() < 41 {
         return Err("theodb ivf-aq: truncated v8 meta".into());
     }
@@ -1138,7 +1143,7 @@ pub(crate) unsafe fn read_ivf_aq_meta_split_rabitq(
     let gen_base = u32::from_le_bytes(m[33..37].try_into().unwrap());
     let rabitq_codebook_npages = u32::from_le_bytes(m[37..41].try_into().unwrap());
 
-    let dbytes = read_chunked(rel, gen_base, dir_npages)?;
+    let dbytes = unsafe { read_chunked(rel, gen_base, dir_npages)? };
     if dbytes.len() < nlists * 20 {
         return Err("theodb ivf-aq: truncated v8 directory".into());
     }
@@ -1153,14 +1158,17 @@ pub(crate) unsafe fn read_ivf_aq_meta_split_rabitq(
             u32::from_le_bytes(dbytes[o + 16..o + 20].try_into().unwrap()),
         ));
     }
-    let aq_codebook = read_chunked(rel, gen_base + dir_npages, aq_codebook_npages)?;
-    let rabitq_codebook =
-        read_chunked(rel, gen_base + dir_npages + aq_codebook_npages, rabitq_codebook_npages)?;
-    let cbytes = read_chunked(
-        rel,
-        gen_base + dir_npages + aq_codebook_npages + rabitq_codebook_npages,
-        centroid_npages,
-    )?;
+    let aq_codebook = unsafe { read_chunked(rel, gen_base + dir_npages, aq_codebook_npages)? };
+    let rabitq_codebook = unsafe {
+        read_chunked(rel, gen_base + dir_npages + aq_codebook_npages, rabitq_codebook_npages)?
+    };
+    let cbytes = unsafe {
+        read_chunked(
+            rel,
+            gen_base + dir_npages + aq_codebook_npages + rabitq_codebook_npages,
+            centroid_npages,
+        )?
+    };
     let d = dim as usize;
     let mut centroids = Vec::with_capacity(nlists);
     if d > 0 && cbytes.len() >= nlists * d * 4 {
@@ -1184,7 +1192,7 @@ pub(crate) unsafe fn read_ivf_list_bytes(
     first_block: u32,
     npages: u32,
 ) -> Result<Vec<u8>, String> {
-    read_chunked(rel, first_block, npages)
+    unsafe { read_chunked(rel, first_block, npages) }
 }
 /// Read ONE list's `(tid, vector)` entries — reads only that list's pages (the partial-read win, M31). `dim` and
 /// `count`/`npages` come from the directory. Typed `Err` on corruption. (VACUUM path — allocates; the scan hot
@@ -1196,7 +1204,7 @@ pub(crate) unsafe fn read_ivf_list(
     count: u32,
     dim: u32,
 ) -> Result<Vec<(i64, Vec<f32>)>, String> {
-    let bytes = read_chunked(rel, first_block, npages)?;
+    let bytes = unsafe { read_chunked(rel, first_block, npages)? };
     let d = dim as usize;
     let entry = 8 + d * 4;
     let count = count as usize;

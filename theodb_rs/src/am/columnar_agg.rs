@@ -380,12 +380,12 @@ pub(crate) fn flip_op(op: ZoneOp) -> ZoneOp {
 /// (ints as `i64 as u64`, floats as `f64::to_bits`). `None` on a domain mismatch (fail-safe → clause not pushed).
 pub(crate) unsafe fn encode_const_bits(datum: pg_sys::Datum, kind: MinMaxKind) -> Option<u64> {
     Some(match kind {
-        MinMaxKind::I2 => (i16::from_datum(datum, false)? as i64) as u64,
-        MinMaxKind::I4 => (i32::from_datum(datum, false)? as i64) as u64,
-        MinMaxKind::I8 => (i64::from_datum(datum, false)?) as u64,
-        MinMaxKind::Bool => (bool::from_datum(datum, false)? as i64) as u64,
-        MinMaxKind::F4 => (f32::from_datum(datum, false)? as f64).to_bits(),
-        MinMaxKind::F8 => f64::from_datum(datum, false)?.to_bits(),
+        MinMaxKind::I2 => (unsafe { i16::from_datum(datum, false)? } as i64) as u64,
+        MinMaxKind::I4 => (unsafe { i32::from_datum(datum, false)? } as i64) as u64,
+        MinMaxKind::I8 => (unsafe { i64::from_datum(datum, false)? }) as u64,
+        MinMaxKind::Bool => (unsafe { bool::from_datum(datum, false)? } as i64) as u64,
+        MinMaxKind::F4 => (unsafe { f32::from_datum(datum, false)? } as f64).to_bits(),
+        MinMaxKind::F8 => unsafe { f64::from_datum(datum, false)?.to_bits() },
         MinMaxKind::None => return None,
     })
 }
@@ -400,27 +400,30 @@ pub(crate) unsafe fn extract_zone_predicate(
     clause: *mut pg_sys::Node,
     relid: i32,
 ) -> Option<ZonePredicate> {
-    if clause.is_null() || (*clause).type_ != pg_sys::NodeTag::T_OpExpr {
+    if clause.is_null() || unsafe { (*clause).type_ } != pg_sys::NodeTag::T_OpExpr {
         return None;
     }
     let op = clause as *mut pg_sys::OpExpr;
-    let args = PgList::<pg_sys::Node>::from_pg((*op).args);
+    let args = unsafe { PgList::<pg_sys::Node>::from_pg((*op).args) };
     if args.len() != 2 {
         return None;
     }
     let (a0, a1) = (args.get_ptr(0)?, args.get_ptr(1)?);
-    let (var, konst, flipped) =
-        if (*a0).type_ == pg_sys::NodeTag::T_Var && (*a1).type_ == pg_sys::NodeTag::T_Const {
-            (a0 as *mut pg_sys::Var, a1 as *mut pg_sys::Const, false)
-        } else if (*a0).type_ == pg_sys::NodeTag::T_Const && (*a1).type_ == pg_sys::NodeTag::T_Var {
-            (a1 as *mut pg_sys::Var, a0 as *mut pg_sys::Const, true)
-        } else {
-            return None; // two-Var / function / etc.
-        };
-    if (*var).varno as i32 != relid || (*konst).constisnull {
+    let (var, konst, flipped) = if unsafe { (*a0).type_ } == pg_sys::NodeTag::T_Var
+        && unsafe { (*a1).type_ } == pg_sys::NodeTag::T_Const
+    {
+        (a0 as *mut pg_sys::Var, a1 as *mut pg_sys::Const, false)
+    } else if unsafe { (*a0).type_ } == pg_sys::NodeTag::T_Const
+        && unsafe { (*a1).type_ } == pg_sys::NodeTag::T_Var
+    {
+        (a1 as *mut pg_sys::Var, a0 as *mut pg_sys::Const, true)
+    } else {
+        return None; // two-Var / function / etc.
+    };
+    if unsafe { (*var).varno } as i32 != relid || unsafe { (*konst).constisnull } {
         return None;
     }
-    let vartype = (*var).vartype;
+    let vartype = unsafe { (*var).vartype };
     let kind = super::columnar::minmax_kind_of(vartype.to_u32());
     if kind == MinMaxKind::None {
         return None;
@@ -429,7 +432,7 @@ pub(crate) unsafe fn extract_zone_predicate(
     // (`AdvEngineID int2 <> 0 int4`): the literal is int4, the column int2. `encode_const_coerced` (below) reads
     // the const in ITS type and casts to the column's min/max domain with a RANGE CHECK (out-of-range → None →
     // clause not pushed).
-    let consttype = (*konst).consttype.to_u32();
+    let consttype = unsafe { (*konst).consttype.to_u32() };
     // M151 review HIGH — cross-type coercion is order-isomorphic in the RAW min/max domain ONLY within the integer
     // class {int2,int4,int8}. Two other cross-type classes live in a SINGLE btree opfamily and would be admitted by
     // `var_side == vartype`, but coercing their const by raw bits is WRONG (the zone prune AND `build_filter_expr`
@@ -444,27 +447,36 @@ pub(crate) unsafe fn extract_zone_predicate(
         return None;
     }
     // The operator's btree strategy in the column type's default opfamily (D5 — no hardcoded OIDs).
-    let opclass = pg_sys::GetDefaultOpClass(vartype, pg_sys::BTREE_AM_OID);
+    let opclass = unsafe { pg_sys::GetDefaultOpClass(vartype, pg_sys::BTREE_AM_OID) };
     if opclass == pg_sys::InvalidOid {
         return None;
     }
-    let opfamily = pg_sys::get_opclass_family(opclass);
+    let opfamily = unsafe { pg_sys::get_opclass_family(opclass) };
     // M151 — `<>` is NOT a btree strategy (btree defines only 1-5: `<,<=,=,>=,>`). It is detected as the NEGATOR
     // of the btree `=` (strategy 3): if the op is not itself in the family but its negator is the family's `=`,
     // this is `col <> const`. `<>` never prunes (`chunk_can_match(Ne)=true`) — it rides the predicate list only to
     // reach the DataFusion `Filter` (`build_filter_expr → not_eq`, the final authority). A/B gate proves it.
-    let (probe_op, forced_ne) = if pg_sys::op_in_opfamily((*op).opno, opfamily) {
-        ((*op).opno, false)
+    let (probe_op, forced_ne) = if unsafe { pg_sys::op_in_opfamily((*op).opno, opfamily) } {
+        (unsafe { (*op).opno }, false)
     } else {
-        let neg = pg_sys::get_negator((*op).opno);
-        if neg == pg_sys::InvalidOid || !pg_sys::op_in_opfamily(neg, opfamily) {
+        let neg = unsafe { pg_sys::get_negator((*op).opno) };
+        if neg == pg_sys::InvalidOid || !unsafe { pg_sys::op_in_opfamily(neg, opfamily) } {
             return None; // neither a native btree op nor the negator of one
         }
         (neg, true) // probe the `=` negator for its strategy/types; force op to Ne below
     };
     let (mut strategy, mut lt, mut rt): (c_int, pg_sys::Oid, pg_sys::Oid) =
         (0, pg_sys::InvalidOid, pg_sys::InvalidOid);
-    pg_sys::get_op_opfamily_properties(probe_op, opfamily, false, &mut strategy, &mut lt, &mut rt);
+    unsafe {
+        pg_sys::get_op_opfamily_properties(
+            probe_op,
+            opfamily,
+            false,
+            &mut strategy,
+            &mut lt,
+            &mut rt,
+        )
+    };
     // M151 — only the VAR's side of the operator must equal the column type; the CONST side may differ (cross-type,
     // coerced below). `flipped` means the Var is the RIGHT operand (`const <op> col`), so its type is `rt`.
     let var_side = if flipped { rt } else { lt };
@@ -486,11 +498,11 @@ pub(crate) unsafe fn extract_zone_predicate(
             _ => return None,
         }
     };
-    let col = ((*var).varattno as i32).checked_sub(1)?; // 1-based AttrNumber → 0-based col; system cols (≤0) rejected
+    let col = (unsafe { (*var).varattno } as i32).checked_sub(1)?; // 1-based AttrNumber → 0-based col; system cols (≤0) rejected
     Some(ZonePredicate {
         col: col as usize,
         op: if flipped { flip_op(base) } else { base },
-        const_bits: encode_const_coerced((*konst).constvalue, consttype, kind)?,
+        const_bits: unsafe { encode_const_coerced((*konst).constvalue, consttype, kind)? },
     })
 }
 
@@ -504,26 +516,26 @@ pub(crate) unsafe fn extract_inlist_predicate(
     clause: *mut pg_sys::Node,
     relid: i32,
 ) -> Option<super::zonemap::InListPredicate> {
-    if clause.is_null() || (*clause).type_ != pg_sys::NodeTag::T_ScalarArrayOpExpr {
+    if clause.is_null() || unsafe { (*clause).type_ } != pg_sys::NodeTag::T_ScalarArrayOpExpr {
         return None;
     }
     let sa = clause as *mut pg_sys::ScalarArrayOpExpr;
-    if !(*sa).useOr {
+    if !unsafe { (*sa).useOr } {
         return None; // `= ANY` (IN); `<> ALL` (NOT IN) is useOr=false → decline
     }
-    let args = PgList::<pg_sys::Node>::from_pg((*sa).args);
+    let args = unsafe { PgList::<pg_sys::Node>::from_pg((*sa).args) };
     if args.len() != 2 {
         return None;
     }
     let (a0, a1) = (args.get_ptr(0)?, args.get_ptr(1)?);
-    if (*a0).type_ != pg_sys::NodeTag::T_Var {
+    if unsafe { (*a0).type_ } != pg_sys::NodeTag::T_Var {
         return None; // only `col IN (...)`, not `expr IN (...)`
     }
     let var = a0 as *mut pg_sys::Var;
-    if (*var).varno as i32 != relid {
+    if unsafe { (*var).varno } as i32 != relid {
         return None;
     }
-    let vartype = (*var).vartype;
+    let vartype = unsafe { (*var).vartype };
     let kind = super::columnar::minmax_kind_of(vartype.to_u32());
     // TRUE integer OIDs only (int2/int4/int8) — NOT `minmax_kind_of`, which folds temporal types into the integer
     // domain (timestamp/timestamptz→I8, date→I4). A temporal column would pass an I2/I4/I8 check yet the IN-list
@@ -532,31 +544,33 @@ pub(crate) unsafe fn extract_inlist_predicate(
     if !matches!(vartype.to_u32(), 20 | 21 | 23) {
         return None;
     }
-    let col = ((*var).varattno as i32).checked_sub(1)?; // 1-based → 0-based; system cols rejected
+    let col = (unsafe { (*var).varattno } as i32).checked_sub(1)?; // 1-based → 0-based; system cols rejected
     // The scalar operator must be `=` (btree strategy 3) in the column type's default opfamily (no hardcoded OIDs).
-    let opclass = pg_sys::GetDefaultOpClass(vartype, pg_sys::BTREE_AM_OID);
+    let opclass = unsafe { pg_sys::GetDefaultOpClass(vartype, pg_sys::BTREE_AM_OID) };
     if opclass == pg_sys::InvalidOid {
         return None;
     }
-    let opfamily = pg_sys::get_opclass_family(opclass);
-    if !pg_sys::op_in_opfamily((*sa).opno, opfamily) {
+    let opfamily = unsafe { pg_sys::get_opclass_family(opclass) };
+    if !unsafe { pg_sys::op_in_opfamily((*sa).opno, opfamily) } {
         return None;
     }
     let (mut strategy, mut lt, mut rt) = (0 as c_int, pg_sys::InvalidOid, pg_sys::InvalidOid);
-    pg_sys::get_op_opfamily_properties(
-        (*sa).opno,
-        opfamily,
-        false,
-        &mut strategy,
-        &mut lt,
-        &mut rt,
-    );
+    unsafe {
+        pg_sys::get_op_opfamily_properties(
+            (*sa).opno,
+            opfamily,
+            false,
+            &mut strategy,
+            &mut lt,
+            &mut rt,
+        )
+    };
     if strategy != 3 || lt != vartype {
         return None; // must be `=` and apply to the column type on the Var (left) side
     }
     // Collect the array's integer elements, each coerced+range-checked into the column type (→ i64 for the filter).
     let coerce = |datum: pg_sys::Datum, ctype: u32| -> Option<i64> {
-        let bits = encode_const_coerced(datum, ctype, kind)?;
+        let bits = unsafe { encode_const_coerced(datum, ctype, kind)? };
         Some(match kind {
             MinMaxKind::I2 => bits as i64 as i16 as i64,
             MinMaxKind::I4 => bits as i64 as i32 as i64,
@@ -565,53 +579,58 @@ pub(crate) unsafe fn extract_inlist_predicate(
     };
     let mut consts: Vec<i64> = Vec::new();
     let arr = a1;
-    if (*arr).type_ == pg_sys::NodeTag::T_ArrayExpr {
+    if unsafe { (*arr).type_ } == pg_sys::NodeTag::T_ArrayExpr {
         // `IN (a, b, c)` before const-folding: an ArrayExpr of Const elements.
-        let elems = PgList::<pg_sys::Node>::from_pg((*(arr as *mut pg_sys::ArrayExpr)).elements);
-        let elemtype = (*(arr as *mut pg_sys::ArrayExpr)).element_typeid.to_u32();
+        let elems =
+            unsafe { PgList::<pg_sys::Node>::from_pg((*(arr as *mut pg_sys::ArrayExpr)).elements) };
+        let elemtype = unsafe { (*(arr as *mut pg_sys::ArrayExpr)).element_typeid.to_u32() };
         for i in 0..elems.len() {
             let e = elems.get_ptr(i)?;
-            if (*e).type_ != pg_sys::NodeTag::T_Const {
+            if unsafe { (*e).type_ } != pg_sys::NodeTag::T_Const {
                 return None; // a non-literal element → decline
             }
             let k = e as *mut pg_sys::Const;
-            if (*k).constisnull {
+            if unsafe { (*k).constisnull } {
                 return None; // IN (NULL, …) → 3-valued logic, decline
             }
-            consts.push(coerce((*k).constvalue, elemtype)?);
+            consts.push(coerce(unsafe { (*k).constvalue }, elemtype)?);
         }
-    } else if (*arr).type_ == pg_sys::NodeTag::T_Const {
+    } else if unsafe { (*arr).type_ } == pg_sys::NodeTag::T_Const {
         // Const-folded array literal: deconstruct the array datum.
         let k = arr as *mut pg_sys::Const;
-        if (*k).constisnull {
+        if unsafe { (*k).constisnull } {
             return None;
         }
-        let arrtype = (*k).consttype;
-        let elemtype = pg_sys::get_element_type(arrtype);
+        let arrtype = unsafe { (*k).consttype };
+        let elemtype = unsafe { pg_sys::get_element_type(arrtype) };
         if elemtype == pg_sys::InvalidOid {
             return None;
         }
         let (mut elemlen, mut elembyval, mut elemalign) = (0i16, false, 0i8);
-        pg_sys::get_typlenbyvalalign(elemtype, &mut elemlen, &mut elembyval, &mut elemalign);
-        let arrp = (*k).constvalue.cast_mut_ptr::<pg_sys::ArrayType>();
+        unsafe {
+            pg_sys::get_typlenbyvalalign(elemtype, &mut elemlen, &mut elembyval, &mut elemalign)
+        };
+        let arrp = unsafe { (*k).constvalue.cast_mut_ptr::<pg_sys::ArrayType>() };
         let (mut elems_ptr, mut nulls_ptr, mut nelems) =
             (std::ptr::null_mut(), std::ptr::null_mut(), 0i32);
-        pg_sys::deconstruct_array(
-            arrp,
-            elemtype,
-            elemlen as c_int,
-            elembyval,
-            elemalign,
-            &mut elems_ptr,
-            &mut nulls_ptr,
-            &mut nelems,
-        );
+        unsafe {
+            pg_sys::deconstruct_array(
+                arrp,
+                elemtype,
+                elemlen as c_int,
+                elembyval,
+                elemalign,
+                &mut elems_ptr,
+                &mut nulls_ptr,
+                &mut nelems,
+            )
+        };
         let et = elemtype.to_u32();
         for i in 0..nelems as usize {
-            if !nulls_ptr.is_null() && *nulls_ptr.add(i) {
+            if !nulls_ptr.is_null() && unsafe { *nulls_ptr.add(i) } {
                 return None; // a NULL element → decline
             }
-            consts.push(coerce(*elems_ptr.add(i), et)?);
+            consts.push(coerce(unsafe { *elems_ptr.add(i) }, et)?);
         }
     } else {
         return None; // an array subquery / expr → decline
@@ -641,14 +660,14 @@ unsafe fn encode_const_coerced(
         B(bool),
     }
     let v = match consttype {
-        21 => V::I(i16::from_datum(datum, false)? as i128),
-        23 => V::I(i32::from_datum(datum, false)? as i128),
-        20 => V::I(i64::from_datum(datum, false)? as i128),
-        16 => V::B(bool::from_datum(datum, false)?),
-        700 => V::F(f32::from_datum(datum, false)? as f64),
-        701 => V::F(f64::from_datum(datum, false)?),
-        1114 | 1184 => V::I(i64::from_datum(datum, false)? as i128), // timestamp/tz μs
-        1082 => V::I(i32::from_datum(datum, false)? as i128),        // date days
+        21 => V::I(unsafe { i16::from_datum(datum, false)? } as i128),
+        23 => V::I(unsafe { i32::from_datum(datum, false)? } as i128),
+        20 => V::I(unsafe { i64::from_datum(datum, false)? } as i128),
+        16 => V::B(unsafe { bool::from_datum(datum, false)? }),
+        700 => V::F(unsafe { f32::from_datum(datum, false)? } as f64),
+        701 => V::F(unsafe { f64::from_datum(datum, false)? }),
+        1114 | 1184 => V::I(unsafe { i64::from_datum(datum, false)? } as i128), // timestamp/tz μs
+        1082 => V::I(unsafe { i32::from_datum(datum, false)? } as i128),        // date days
         _ => return None, // non-numeric const → cannot coerce
     };
     // Cast into the column's min/max domain, RANGE-CHECKED (i128 → i16/i32/i64 via try_from).
@@ -674,11 +693,11 @@ unsafe fn classify_text_op(opno: pg_sys::Oid) -> Option<TextOp> {
     if opno.to_u32() >= pg_sys::FirstNormalObjectId {
         return None; // user-defined operator — untrusted semantics
     }
-    let namep = pg_sys::get_opname(opno);
+    let namep = unsafe { pg_sys::get_opname(opno) };
     if namep.is_null() {
         return None;
     }
-    match CStr::from_ptr(namep).to_str().ok()? {
+    match unsafe { CStr::from_ptr(namep).to_str().ok()? } {
         "=" => Some(TextOp::Eq),
         "<>" => Some(TextOp::Ne),
         "~~" => Some(TextOp::Like),
@@ -698,41 +717,43 @@ unsafe fn classify_text_op(opno: pg_sys::Oid) -> Option<TextOp> {
 /// one of `=`/`<>`/LIKE/NOT LIKE (`classify_text_op`). NOT symmetric — only `col <op> 'const'` (LIKE has no
 /// commutator). Returns `None` for ANY other shape → the caller declines to the native plan.
 unsafe fn extract_text_predicate(clause: *mut pg_sys::Node, relid: i32) -> Option<TextPredicate> {
-    if clause.is_null() || (*clause).type_ != pg_sys::NodeTag::T_OpExpr {
+    if clause.is_null() || unsafe { (*clause).type_ } != pg_sys::NodeTag::T_OpExpr {
         return None;
     }
     let op = clause as *mut pg_sys::OpExpr;
-    let args = PgList::<pg_sys::Node>::from_pg((*op).args);
+    let args = unsafe { PgList::<pg_sys::Node>::from_pg((*op).args) };
     if args.len() != 2 {
         return None;
     }
     let (a0, a1) = (args.get_ptr(0)?, args.get_ptr(1)?);
     // Only `Var <op> Const` (LIKE is not commutable, so a flipped `'const' <op> col` is never admitted).
-    if (*a0).type_ != pg_sys::NodeTag::T_Var || (*a1).type_ != pg_sys::NodeTag::T_Const {
+    if unsafe { (*a0).type_ } != pg_sys::NodeTag::T_Var
+        || unsafe { (*a1).type_ } != pg_sys::NodeTag::T_Const
+    {
         return None;
     }
     let var = a0 as *mut pg_sys::Var;
     let konst = a1 as *mut pg_sys::Const;
-    if (*var).varno as i32 != relid || (*konst).constisnull {
+    if unsafe { (*var).varno } as i32 != relid || unsafe { (*konst).constisnull } {
         return None; // wrong rel or NULL const (`col = NULL` → native plan evaluates the 3-valued logic)
     }
-    let vartype = (*var).vartype.to_u32();
+    let vartype = unsafe { (*var).vartype.to_u32() };
     if vartype != 25 && vartype != 1043 {
         return None; // text (25) / varchar (1043) only — bpchar (1042) excluded (M153)
     }
-    let consttype = (*konst).consttype.to_u32();
+    let consttype = unsafe { (*konst).consttype.to_u32() };
     if consttype != 25 && consttype != 1043 {
         return None; // the literal must itself be a text-class value we can read as a UTF-8 string
     }
     // Collation guard (M153/M154): the operator compares under `inputcollid`; a byte-wise DataFusion compare only
     // matches PG under a DETERMINISTIC collation. `InvalidOid` = no collation (byte compare) → allowed.
-    let collid = (*op).inputcollid;
-    if collid != pg_sys::InvalidOid && !pg_sys::get_collation_isdeterministic(collid) {
+    let collid = unsafe { (*op).inputcollid };
+    if collid != pg_sys::InvalidOid && !unsafe { pg_sys::get_collation_isdeterministic(collid) } {
         admit_trace("text_where_nondeterministic_collation");
         return None;
     }
-    let text_op = classify_text_op((*op).opno)?;
-    if (*var).varattno < 1 {
+    let text_op = unsafe { classify_text_op((*op).opno)? };
+    if unsafe { (*var).varattno } < 1 {
         return None; // system column / whole-row Var — never a real text column to push (explicit, not implied)
     }
     // Read the literal's payload WITHOUT pgrx's UTF-8-asserting conversion (council-rust-pgrx HIGH): `String::from_datum`
@@ -740,8 +761,9 @@ unsafe fn extract_text_predicate(clause: *mut pg_sys::Node, relid: i32) -> Optio
     // SQL_ASCII → strict UTF-8), turning a valid query into a planner ERROR inside the upper-paths hook. Go through
     // `text_to_cstring` (raw payload copy, no assertion) and DECLINE fail-closed when the bytes are not valid UTF-8 —
     // the DataFusion `Utf8` filter cannot represent non-UTF-8 bytes anyway, so the native plan must handle that case.
-    let cstr = pg_sys::text_to_cstring((*konst).constvalue.cast_mut_ptr::<pg_sys::text>());
-    let needle = CStr::from_ptr(cstr).to_str().ok()?.to_owned();
+    let cstr =
+        unsafe { pg_sys::text_to_cstring((*konst).constvalue.cast_mut_ptr::<pg_sys::text>()) };
+    let needle = unsafe { CStr::from_ptr(cstr).to_str().ok()?.to_owned() };
     // M156 (council-index-storage MEDIUM): a LIKE/NOT LIKE pattern ending in an ODD number of `\` has a dangling
     // escape → PG raises ERROR 22025 ("LIKE pattern must not end with escape character", like_match.c) while arrow's
     // kernel treats the trailing `\` as a literal and returns rows. Decline so the native plan applies the real
@@ -753,7 +775,7 @@ unsafe fn extract_text_predicate(clause: *mut pg_sys::Node, relid: i32) -> Optio
             return None;
         }
     }
-    let col = ((*var).varattno as i32) - 1; // 1-based AttrNumber → 0-based (varattno ≥ 1 checked above)
+    let col = (unsafe { (*var).varattno } as i32) - 1; // 1-based AttrNumber → 0-based (varattno ≥ 1 checked above)
     Some(TextPredicate { col: col as usize, op: text_op, needle })
 }
 
@@ -765,21 +787,21 @@ unsafe fn extract_all_predicates(
     input_rel: *mut pg_sys::RelOptInfo,
     relid: i32,
 ) -> Option<(Vec<ZonePredicate>, Vec<TextPredicate>, Vec<super::zonemap::InListPredicate>)> {
-    let ris = PgList::<pg_sys::RestrictInfo>::from_pg((*input_rel).baserestrictinfo);
+    let ris = unsafe { PgList::<pg_sys::RestrictInfo>::from_pg((*input_rel).baserestrictinfo) };
     let mut zpreds = Vec::with_capacity(ris.len());
     let mut tpreds: Vec<TextPredicate> = Vec::new();
     let mut inpreds: Vec<super::zonemap::InListPredicate> = Vec::new();
     for i in 0..ris.len() {
         let ri = ris.get_ptr(i)?;
-        let clause = (*ri).clause as *mut pg_sys::Node;
-        if let Some(z) = extract_zone_predicate(clause, relid) {
+        let clause = unsafe { (*ri).clause } as *mut pg_sys::Node;
+        if let Some(z) = unsafe { extract_zone_predicate(clause, relid) } {
             zpreds.push(z);
-        } else if let Some(t) = extract_text_predicate(clause, relid) {
+        } else if let Some(t) = unsafe { extract_text_predicate(clause, relid) } {
             tpreds.push(t);
         } else {
             // `?` em vez de `else { return None }`: qual nao-empurravel declina o pushdown, e o plano
             // nativo aplica o WHERE completo. Mesmo efeito, e o clippy::question_mark deixa de reprovar.
-            inpreds.push(extract_inlist_predicate(clause, relid)?); // M161 — integer IN-list
+            inpreds.push(unsafe { extract_inlist_predicate(clause, relid)? }); // M161 — integer IN-list
         }
     }
     Some((zpreds, tpreds, inpreds))
@@ -905,50 +927,52 @@ unsafe fn classify_sum_int_add_const(node: *mut pg_sys::Node, relid: i32) -> Opt
     // Only a builtin operator has trusted semantics — a user-defined `OPERATOR +(int2,int4)` placed ahead of pg_catalog
     // in search_path could run arbitrary code while DataFusion computes `col+delta` (silent divergence). Decline it, as
     // classify_text_op does (council-rust-pgrx MEDIUM; parity with the builtin-only gate at line ~443).
-    if (*op).opno.to_u32() >= pg_sys::FirstNormalObjectId {
+    if unsafe { (*op).opno.to_u32() } >= pg_sys::FirstNormalObjectId {
         return None;
     }
-    let opname_ptr = pg_sys::get_opname((*op).opno);
+    let opname_ptr = unsafe { pg_sys::get_opname((*op).opno) };
     if opname_ptr.is_null() {
         return None;
     }
-    let opname = CStr::from_ptr(opname_ptr).to_string_lossy().into_owned();
+    let opname = unsafe { CStr::from_ptr(opname_ptr).to_string_lossy().into_owned() };
     if opname != "+" && opname != "-" {
         return None; // additive int arithmetic only
     }
-    let args = PgList::<pg_sys::Node>::from_pg((*op).args);
+    let args = unsafe { PgList::<pg_sys::Node>::from_pg((*op).args) };
     if args.len() != 2 {
         return None;
     }
     let (a0, a1) = (args.get_ptr(0)?, args.get_ptr(1)?);
     // Canonical `Var <op> Const` only (`k - col` is not `col - k`; decline the non-canonical form).
-    if (*a0).type_ != pg_sys::NodeTag::T_Var || (*a1).type_ != pg_sys::NodeTag::T_Const {
+    if unsafe { (*a0).type_ } != pg_sys::NodeTag::T_Var
+        || unsafe { (*a1).type_ } != pg_sys::NodeTag::T_Const
+    {
         return None;
     }
     let var = a0 as *mut pg_sys::Var;
     let konst = a1 as *mut pg_sys::Const;
-    if (*var).varno as i32 != relid || (*konst).constisnull {
+    if unsafe { (*var).varno } as i32 != relid || unsafe { (*konst).constisnull } {
         return None;
     }
-    let attno = (*var).varattno as i32;
+    let attno = unsafe { (*var).varattno } as i32;
     if attno <= 0 {
         return None; // system / whole-row column
     }
     // int2 base column ONLY: `int4col ± k` can overflow int4 per row (PG raises 22003) and the widened Int64 sum would
     // silently succeed instead — not byte-identical. int8/float/temporal base also decline.
-    if (*var).vartype.to_u32() != 21 {
+    if unsafe { (*var).vartype.to_u32() } != 21 {
         return None;
     }
     // Result type MUST be int4 (`int2 ± int4-const → int4`). An int2 result (`int2 ± int2-const`) declines — per-row
     // int2 overflow is reachable and un-reproduced by a widened sum; an int8 result declines likewise.
-    if (*op).opresulttype.to_u32() != 23 {
+    if unsafe { (*op).opresulttype.to_u32() } != 23 {
         return None;
     }
     // Read the const in its own int type → i64. A non-integer const → decline.
-    let k: i64 = match (*konst).consttype.to_u32() {
-        21 => i16::from_datum((*konst).constvalue, false)? as i64,
-        23 => i32::from_datum((*konst).constvalue, false)? as i64,
-        20 => i64::from_datum((*konst).constvalue, false)?,
+    let k: i64 = match unsafe { (*konst).consttype.to_u32() } {
+        21 => (unsafe { i16::from_datum((*konst).constvalue, false)? }) as i64,
+        23 => (unsafe { i32::from_datum((*konst).constvalue, false)? }) as i64,
+        20 => unsafe { i64::from_datum((*konst).constvalue, false)? },
         _ => return None,
     };
     // Fold the operator sign into `delta`: `col - k` == `col + (-k)`. `-i64::MIN` overflow → decline.
@@ -969,21 +993,21 @@ unsafe fn classify_target_node(
     relid: i32,
     grouped: bool,
 ) -> Option<TargetSlot> {
-    if (*node).type_ == pg_sys::NodeTag::T_Var {
+    if unsafe { (*node).type_ } == pg_sys::NodeTag::T_Var {
         // A bare column reference in the target of a GROUP BY query is a grouping key. Only when GROUP BY is
         // present, and only for a base-rel column of a `build_arrow`-supported type.
         if !grouped {
             return None;
         }
         let var = node as *mut pg_sys::Var;
-        if (*var).varno as i32 != relid {
+        if unsafe { (*var).varno } as i32 != relid {
             return None; // a Var from another rel → not a bare base-rel key
         }
-        let attno = (*var).varattno as i32;
+        let attno = unsafe { (*var).varattno } as i32;
         if attno <= 0 {
             return None; // system / whole-row column → decline
         }
-        if !super::df_executor::arrow_supported_group_type((*var).vartype.to_u32()) {
+        if !super::df_executor::arrow_supported_group_type(unsafe { (*var).vartype.to_u32() }) {
             admit_trace("group_key_type_unsupported"); // M152
             return None; // unsupported key type (numeric, etc.) → native plan
         }
@@ -992,7 +1016,7 @@ unsafe fn classify_target_node(
         // all NaN as equal — so `GROUP BY float` splits the −0.0/+0.0 rows into separate groups where PG merges them
         // (measured diverged=2 on the −0.0 edge). Decline float group keys to the native plan — mirrors the M154
         // count(DISTINCT float) decline (same IEEE-vs-float8eq root cause), now for grouping.
-        if matches!((*var).vartype, pg_sys::FLOAT4OID | pg_sys::FLOAT8OID) {
+        if matches!(unsafe { (*var).vartype }, pg_sys::FLOAT4OID | pg_sys::FLOAT8OID) {
             admit_trace("group_key_float_ieee_semantics"); // M163
             return None;
         }
@@ -1000,47 +1024,48 @@ unsafe fn classify_target_node(
         // They coincide only under a DETERMINISTIC collation (deterministic ⟺ equality is byte-wise). A
         // non-deterministic collation (ICU case/accent-insensitive) would group byte-different-but-collation-equal
         // strings SEPARATELY here but TOGETHER in PG → wrong group counts. Decline (covers BOTH HASHED and SORTED).
-        if (*var).varcollid != pg_sys::InvalidOid
-            && !pg_sys::get_collation_isdeterministic((*var).varcollid)
+        if unsafe { (*var).varcollid } != pg_sys::InvalidOid
+            && !unsafe { pg_sys::get_collation_isdeterministic((*var).varcollid) }
         {
             admit_trace("group_key_nondeterministic_collation"); // M153
             return None;
         }
-        Some(TargetSlot::Group(attno, (*var).vartype.to_u32()))
-    } else if (*node).type_ == pg_sys::NodeTag::T_FuncExpr {
+        Some(TargetSlot::Group(attno, unsafe { (*var).vartype.to_u32() }))
+    } else if unsafe { (*node).type_ } == pg_sys::NodeTag::T_FuncExpr {
         // M157 — a group key that is `date_trunc('unit', ts::timestamp)`. Only when GROUP BY is present.
         if !grouped {
             return None;
         }
         let fe = node as *mut pg_sys::FuncExpr;
         // Function name via the catalog (no hardcoded OID — ADR-1 / D5). `date_trunc` (M157) OR `extract` (M161).
-        let fnamep = pg_sys::get_func_name((*fe).funcid);
+        let fnamep = unsafe { pg_sys::get_func_name((*fe).funcid) };
         if fnamep.is_null() {
             return None;
         }
-        let fname = CStr::from_ptr(fnamep).to_string_lossy().into_owned();
+        let fname = unsafe { CStr::from_ptr(fnamep).to_string_lossy().into_owned() };
         let is_extract = fname == "extract"; // M161 — EXTRACT(field FROM ts) → func `extract`, returns numeric (PG14+)
         if fname != "date_trunc" && !is_extract {
             admit_trace("group_expr_func_unsupported"); // other function → native
             return None;
         }
-        let args = PgList::<pg_sys::Node>::from_pg((*fe).args);
+        let args = unsafe { PgList::<pg_sys::Node>::from_pg((*fe).args) };
         if args.len() != 2 {
             return None; // the 2-arg `date_trunc(unit, ts)` / `extract(unit, ts)` only (3-arg tz form out of scope)
         }
         let (a0, a1) = (args.get_ptr(0)?, args.get_ptr(1)?);
         // arg0 = a text Const granularity in the whitelist (the units where PG and Arrow agree — blueprint Corner 3).
-        if (*a0).type_ != pg_sys::NodeTag::T_Const {
+        if unsafe { (*a0).type_ } != pg_sys::NodeTag::T_Const {
             return None;
         }
         let unit_const = a0 as *mut pg_sys::Const;
-        let ut = (*unit_const).consttype.to_u32();
-        if (*unit_const).constisnull || (ut != 25 && ut != 1043) {
+        let ut = unsafe { (*unit_const).consttype.to_u32() };
+        if unsafe { (*unit_const).constisnull } || (ut != 25 && ut != 1043) {
             return None;
         }
-        let unit_cstr =
-            pg_sys::text_to_cstring((*unit_const).constvalue.cast_mut_ptr::<pg_sys::text>());
-        let unit = CStr::from_ptr(unit_cstr).to_str().ok()?.to_ascii_lowercase();
+        let unit_cstr = unsafe {
+            pg_sys::text_to_cstring((*unit_const).constvalue.cast_mut_ptr::<pg_sys::text>())
+        };
+        let unit = unsafe { CStr::from_ptr(unit_cstr).to_str().ok()?.to_ascii_lowercase() };
         // EPOCH GUARD (council-index-storage CRITICAL): the columnar timestamp is stored as µs-since-2000 (PG epoch)
         // but decoded into an Arrow `Timestamp` that DataFusion reads as µs-since-1970. The PG↔Arrow offset is exactly
         // 10957 days — a whole multiple of day/hour/minute/second, so those granularities are epoch-INVARIANT (the
@@ -1068,18 +1093,18 @@ unsafe fn classify_target_node(
         // arg1 = a base-rel Var of type `timestamp` (1114). `timestamptz` (1184) DIVERGES under `TimeZone≠UTC`
         // (PG uses session_timezone; DataFusion truncates in UTC) → decline unconditionally (ADR-2; same class the
         // M151 temporal cross-type review caught).
-        if (*a1).type_ != pg_sys::NodeTag::T_Var {
+        if unsafe { (*a1).type_ } != pg_sys::NodeTag::T_Var {
             return None;
         }
         let var = a1 as *mut pg_sys::Var;
-        if (*var).varno as i32 != relid {
+        if unsafe { (*var).varno } as i32 != relid {
             return None;
         }
-        let base_attno = (*var).varattno as i32;
+        let base_attno = unsafe { (*var).varattno } as i32;
         if base_attno <= 0 {
             return None;
         }
-        if (*var).vartype.to_u32() != 1114 {
+        if unsafe { (*var).vartype.to_u32() } != 1114 {
             admit_trace("group_expr_date_trunc_timestamptz"); // 1184 timestamptz / non-timestamp → native
             return None;
         }
@@ -1091,7 +1116,7 @@ unsafe fn classify_target_node(
             // date_trunc(timestamp) → timestamp (1114); extract(minute|hour FROM timestamp) → numeric (1700, PG14+).
             out_typoid: if is_extract { 1700 } else { 1114 },
         }))
-    } else if (*node).type_ == pg_sys::NodeTag::T_OpExpr && grouped {
+    } else if unsafe { (*node).type_ } == pg_sys::NodeTag::T_OpExpr && grouped {
         // M161 — a group key `col ± const` (int2/4/8). PG evaluates in the column's int type and RAISES 22003 on
         // overflow; DataFusion (Int32/Int64) would wrap. We compute WIDENED to Int64 (never overflows for int2/4/8 ±
         // int const) so the grouping is exact, and RANGE-CHECK back to the base type at materialize — reproducing PG's
@@ -1101,40 +1126,42 @@ unsafe fn classify_target_node(
         // Builtin operator only — a user-defined `OPERATOR +` ahead of pg_catalog in search_path could run arbitrary
         // semantics while DataFusion computes `col+delta` (silent divergence). Parity with classify_text_op (~:443) and
         // the SUM(int2±const) gate (council-rust-pgrx MEDIUM — close the class, not just the instance).
-        if (*op).opno.to_u32() >= pg_sys::FirstNormalObjectId {
+        if unsafe { (*op).opno.to_u32() } >= pg_sys::FirstNormalObjectId {
             admit_trace("group_expr_op_unsupported");
             return None;
         }
-        let opname_ptr = pg_sys::get_opname((*op).opno);
+        let opname_ptr = unsafe { pg_sys::get_opname((*op).opno) };
         if opname_ptr.is_null() {
             admit_trace("group_expr_op_unsupported");
             return None;
         }
-        let opname = CStr::from_ptr(opname_ptr).to_string_lossy().into_owned();
+        let opname = unsafe { CStr::from_ptr(opname_ptr).to_string_lossy().into_owned() };
         if opname != "+" && opname != "-" {
             admit_trace("group_expr_op_unsupported"); // only additive int arithmetic
             return None;
         }
-        let args = PgList::<pg_sys::Node>::from_pg((*op).args);
+        let args = unsafe { PgList::<pg_sys::Node>::from_pg((*op).args) };
         if args.len() != 2 {
             return None;
         }
         let (a0, a1) = (args.get_ptr(0)?, args.get_ptr(1)?);
         // Canonical `Var <op> Const` only (a flipped `k - col` is NOT `col - k`; decline the non-canonical form).
-        if (*a0).type_ != pg_sys::NodeTag::T_Var || (*a1).type_ != pg_sys::NodeTag::T_Const {
+        if unsafe { (*a0).type_ } != pg_sys::NodeTag::T_Var
+            || unsafe { (*a1).type_ } != pg_sys::NodeTag::T_Const
+        {
             admit_trace("group_expr_int_arith_shape"); // k - col / col - col / etc → native
             return None;
         }
         let var = a0 as *mut pg_sys::Var;
         let konst = a1 as *mut pg_sys::Const;
-        if (*var).varno as i32 != relid || (*konst).constisnull {
+        if unsafe { (*var).varno } as i32 != relid || unsafe { (*konst).constisnull } {
             return None;
         }
-        let base_attno = (*var).varattno as i32;
+        let base_attno = unsafe { (*var).varattno } as i32;
         if base_attno <= 0 {
             return None;
         }
-        let base_typoid = (*var).vartype.to_u32();
+        let base_typoid = unsafe { (*var).vartype.to_u32() };
         // TRUE integer OIDs only — NOT `minmax_kind_of` (which folds date→I4, timestamp→I8): `date + int` (date_pli)
         // would pass an I2/I4/I8 check yet materialize with out_typoid=1082, hitting `group_expr_cell`'s int-only
         // range-check → admitted-then-errored instead of declining. Gate on the OID so temporal ± int → native plan.
@@ -1143,11 +1170,11 @@ unsafe fn classify_target_node(
             return None;
         }
         // Read the const in its own int type → i64 (int2/4/8 all fit). A non-integer const type → decline.
-        let ct = (*konst).consttype.to_u32();
+        let ct = unsafe { (*konst).consttype.to_u32() };
         let k: i64 = match ct {
-            21 => i16::from_datum((*konst).constvalue, false)? as i64,
-            23 => i32::from_datum((*konst).constvalue, false)? as i64,
-            20 => i64::from_datum((*konst).constvalue, false)?,
+            21 => (unsafe { i16::from_datum((*konst).constvalue, false)? }) as i64,
+            23 => (unsafe { i32::from_datum((*konst).constvalue, false)? }) as i64,
+            20 => unsafe { i64::from_datum((*konst).constvalue, false)? },
             _ => {
                 admit_trace("group_expr_int_arith_nonint_const");
                 return None;
@@ -1162,7 +1189,7 @@ unsafe fn classify_target_node(
         // int8 result (opresulttype==20): the widened Int64 compute itself can overflow for an int8 result → not
         // PG-22003-equivalent (fail-closed, avoids a wrong answer). int2/int4 results keep the exact i64 compute
         // (int2/int4 column ± int const fits i64 with huge margin) + range-check to the result type at materialize.
-        let out_typoid = (*op).opresulttype.to_u32();
+        let out_typoid = unsafe { (*op).opresulttype.to_u32() };
         if !matches!(out_typoid, 21 | 23) {
             admit_trace("group_expr_int_arith_wide_result"); // int8 (or wider) result → native plan
             return None;
@@ -1174,59 +1201,59 @@ unsafe fn classify_target_node(
             delta,
             out_typoid, // = (*op).opresulttype (int2/int4); int8 result declined above
         }))
-    } else if (*node).type_ == pg_sys::NodeTag::T_Aggref {
+    } else if unsafe { (*node).type_ } == pg_sys::NodeTag::T_Aggref {
         let agg = node as *mut pg_sys::Aggref;
         // aggfilter / aggorder are always declined; aggdistinct is declined here EXCEPT for the
         // `count(DISTINCT single-var)` shape handled below (M154 — exact `count_distinct` via DataFusion).
-        if !(*agg).aggfilter.is_null() || !(*agg).aggorder.is_null() {
+        if !unsafe { (*agg).aggfilter.is_null() } || !unsafe { (*agg).aggorder.is_null() } {
             admit_trace("agg_distinct_filter_order"); // M152
             return None;
         }
-        let has_distinct = !(*agg).aggdistinct.is_null();
+        let has_distinct = !unsafe { (*agg).aggdistinct.is_null() };
         // Only a SIMPLE (non-split) aggregate has the FINAL result type. A partial/parallel split produces the
         // transtype (internal/bytea) → fail-safe to the native plan (council-rust-pgrx HIGH).
-        if (*agg).aggsplit != pg_sys::AggSplit::AGGSPLIT_SIMPLE {
+        if unsafe { (*agg).aggsplit } != pg_sys::AggSplit::AGGSPLIT_SIMPLE {
             return None;
         }
-        let fname = pg_sys::get_func_name((*agg).aggfnoid);
+        let fname = unsafe { pg_sys::get_func_name((*agg).aggfnoid) };
         if fname.is_null() {
             return None;
         }
-        let name = CStr::from_ptr(fname).to_string_lossy();
-        if name == "count" && (*agg).aggstar {
+        let name = unsafe { CStr::from_ptr(fname).to_string_lossy() };
+        if name == "count" && unsafe { (*agg).aggstar } {
             // count(*) is never DISTINCT — kind 0.
             Some(TargetSlot::Agg(ParsedAgg { kind: 0, attno: 0, delta: 0 }))
         } else if name == "count" && has_distinct {
             // count(DISTINCT col) — M154 (kind 8). Exactly 1 base-rel Var of an Arrow-decodable type, and — for
             // collatable (text) columns — a DETERMINISTIC collation (ADR-M154-3 / edge EC-1): DataFusion's
             // count_distinct uses byte-wise equality, which matches PG only under deterministic collations.
-            let args = PgList::<pg_sys::TargetEntry>::from_pg((*agg).args);
+            let args = unsafe { PgList::<pg_sys::TargetEntry>::from_pg((*agg).args) };
             if args.len() != 1 {
                 admit_trace("count_distinct_multiarg"); // count(DISTINCT a,b) → decline (ADR-M154-2)
                 return None;
             }
             let te = args.get_ptr(0)?;
-            let e = (*te).expr as *mut pg_sys::Node;
-            if e.is_null() || (*e).type_ != pg_sys::NodeTag::T_Var {
+            let e = unsafe { (*te).expr } as *mut pg_sys::Node;
+            if e.is_null() || unsafe { (*e).type_ } != pg_sys::NodeTag::T_Var {
                 admit_trace("agg_over_expression"); // count(DISTINCT col+1) → decline
                 return None;
             }
             let var = e as *mut pg_sys::Var;
-            if (*var).varno as i32 != relid {
+            if unsafe { (*var).varno } as i32 != relid {
                 return None; // Var from another rel → decline
             }
-            let attno = (*var).varattno as i32;
+            let attno = unsafe { (*var).varattno } as i32;
             if attno <= 0 {
                 return None; // system / whole-row column → decline
             }
-            if !super::df_executor::arrow_supported_group_type((*var).vartype.to_u32()) {
+            if !super::df_executor::arrow_supported_group_type(unsafe { (*var).vartype.to_u32() }) {
                 admit_trace("count_distinct_unsupported_type"); // type not decodable to Arrow → decline
                 return None;
             }
             // Float DISTINCT diverges (ADR-M154-4 / review HIGH): DataFusion's FloatDistinctCountAccumulator dedups
             // by IEEE total-order (-0.0 != +0.0; distinct NaN bit-patterns count separately), but PG's float8eq
             // treats 0.0 == -0.0 and all NaN as equal. Decline float to the native plan (provably-safe class only).
-            let vt = (*var).vartype;
+            let vt = unsafe { (*var).vartype };
             if vt == pg_sys::FLOAT4OID || vt == pg_sys::FLOAT8OID {
                 admit_trace("count_distinct_float_ieee_semantics");
                 return None;
@@ -1234,8 +1261,9 @@ unsafe fn classify_target_node(
             // Collation equality (ADR-M154-3 / EC-1): DataFusion count_distinct is byte-wise; PG uses the input
             // collation for the DISTINCT equality. Only deterministic collations coincide. Use `inputcollid` — the
             // exact collation PG drives the DISTINCT with (nodeAgg.c) — for precision + defense-in-depth.
-            let coll = (*agg).inputcollid;
-            if coll != pg_sys::InvalidOid && !pg_sys::get_collation_isdeterministic(coll) {
+            let coll = unsafe { (*agg).inputcollid };
+            if coll != pg_sys::InvalidOid && !unsafe { pg_sys::get_collation_isdeterministic(coll) }
+            {
                 admit_trace("count_distinct_nondeterministic_collation");
                 return None;
             }
@@ -1243,41 +1271,45 @@ unsafe fn classify_target_node(
         } else if !has_distinct
             && (name == "sum" || name == "avg" || name == "min" || name == "max")
         {
-            let args = PgList::<pg_sys::TargetEntry>::from_pg((*agg).args);
+            let args = unsafe { PgList::<pg_sys::TargetEntry>::from_pg((*agg).args) };
             if args.len() != 1 {
                 return None;
             }
             let te = args.get_ptr(0)?;
-            let e = (*te).expr as *mut pg_sys::Node;
+            let e = unsafe { (*te).expr } as *mut pg_sys::Node;
             if e.is_null() {
                 return None;
             }
             // M166 — SUM(int2_col ± const) (ClickBench q29): the argument is an OpExpr, not a bare Var. Admit the
             // provably-byte-identical `int2 base + int4 result` class here; every other expr shape (min/avg/max of an
             // expression, or a SUM that fails the safe-class gate) declines to the native plan below (fail-closed).
-            if name == "sum" && (*e).type_ == pg_sys::NodeTag::T_OpExpr {
-                if let Some(slot) = classify_sum_int_add_const(e, relid) {
+            if name == "sum" && unsafe { (*e).type_ } == pg_sys::NodeTag::T_OpExpr {
+                if let Some(slot) = unsafe { classify_sum_int_add_const(e, relid) } {
                     return Some(slot);
                 }
                 admit_trace("agg_sum_expr_unsupported"); // int4-col / int8 result / non-additive / out-of-range → native
                 return None;
             }
-            if (*e).type_ != pg_sys::NodeTag::T_Var {
+            if unsafe { (*e).type_ } != pg_sys::NodeTag::T_Var {
                 admit_trace("agg_over_expression"); // M152
                 return None; // bare column Var only — reject min(col+1) / cast (directory is pre-projection)
             }
             let var = e as *mut pg_sys::Var;
-            if (*var).varno as i32 != relid {
+            if unsafe { (*var).varno } as i32 != relid {
                 return None;
             }
-            let kind = parse_agg_kind(&name, (*var).vartype)?;
-            Some(TargetSlot::Agg(ParsedAgg { kind, attno: (*var).varattno as i32, delta: 0 }))
+            let kind = parse_agg_kind(&name, unsafe { (*var).vartype })?;
+            Some(TargetSlot::Agg(ParsedAgg {
+                kind,
+                attno: unsafe { (*var).varattno } as i32,
+                delta: 0,
+            }))
         } else {
             // Includes sum/avg/min/max(DISTINCT ...) → declined (ADR-M154-2).
             admit_trace("unsupported_agg_func");
             None
         }
-    } else if (*node).type_ == pg_sys::NodeTag::T_Const {
+    } else if unsafe { (*node).type_ } == pg_sys::NodeTag::T_Const {
         // M165 — a bare integer literal projected in the output target (`SELECT 1, url, count(*) …`). PG's planner
         // ELIMINATES a constant group key from groupClause/numCols, so the effective grouping is single-key
         // (`GROUP BY url`) and only the projected constant column blocks routing (the M161 q34 honest-negative). Admit
@@ -1290,15 +1322,15 @@ unsafe fn classify_target_node(
             return None;
         }
         let konst = node as *mut pg_sys::Const;
-        if (*konst).constisnull {
+        if unsafe { (*konst).constisnull } {
             admit_trace("const_out_null"); // NULL const → native plan (fail-closed)
             return None;
         }
-        let ctype = (*konst).consttype.to_u32();
+        let ctype = unsafe { (*konst).consttype.to_u32() };
         let val: i64 = match ctype {
-            21 => i16::from_datum((*konst).constvalue, false)? as i64,
-            23 => i32::from_datum((*konst).constvalue, false)? as i64,
-            20 => i64::from_datum((*konst).constvalue, false)?,
+            21 => (unsafe { i16::from_datum((*konst).constvalue, false)? }) as i64,
+            23 => (unsafe { i32::from_datum((*konst).constvalue, false)? }) as i64,
+            20 => unsafe { i64::from_datum((*konst).constvalue, false)? },
             _ => {
                 admit_trace("const_out_type_unsupported"); // float/text/numeric/bool/other const → native plan
                 return None;
@@ -1326,17 +1358,19 @@ unsafe fn build_admission(
 ) -> Option<Admitted> {
     // Mode: a columnar table (decode stripes) vs a heap table with a usable Arrow cache (M101 HTAP).
     let amoid = columnar_amoid();
-    let is_columnar = amoid != pg_sys::InvalidOid && pg_sys::get_rel_relam((*rte).relid) == amoid;
+    let is_columnar =
+        amoid != pg_sys::InvalidOid && unsafe { pg_sys::get_rel_relam((*rte).relid) } == amoid;
     if is_columnar {
         if grouped {
             // GROUP BY + WHERE combined (M114): un-pushable qual → `extract_all_predicates` None → decline.
-            let (preds, text_preds, in_preds) = match extract_all_predicates(input_rel, relid) {
-                Some(p) => p,
-                None => {
-                    admit_trace("unpushable_where_qual");
-                    return None;
-                } // M152
-            };
+            let (preds, text_preds, in_preds) =
+                match unsafe { extract_all_predicates(input_rel, relid) } {
+                    Some(p) => p,
+                    None => {
+                        admit_trace("unpushable_where_qual");
+                        return None;
+                    } // M152
+                };
             return Some(Admitted {
                 mode: 0,
                 relid,
@@ -1351,13 +1385,14 @@ unsafe fn build_admission(
             });
         }
         // Non-grouped: ALL quals must be pushable (`col <op> const`), else decline.
-        let (preds, text_preds, in_preds) = match extract_all_predicates(input_rel, relid) {
-            Some(p) => p,
-            None => {
-                admit_trace("unpushable_where_qual");
-                return None;
-            } // M152
-        };
+        let (preds, text_preds, in_preds) =
+            match unsafe { extract_all_predicates(input_rel, relid) } {
+                Some(p) => p,
+                None => {
+                    admit_trace("unpushable_where_qual");
+                    return None;
+                } // M152
+            };
         return Some(Admitted {
             mode: 0,
             relid,
@@ -1372,7 +1407,7 @@ unsafe fn build_admission(
         });
     }
     // Heap (M101 cache): non-grouped only in this slice, and does NOT filter → decline GROUP BY or any WHERE.
-    if grouped || !(*input_rel).baserestrictinfo.is_null() {
+    if grouped || !unsafe { (*input_rel).baserestrictinfo.is_null() } {
         return None;
     }
     // Admissible IFF this backend has a cache covering the source column of EVERY column-bearing aggregate
@@ -1381,12 +1416,17 @@ unsafe fn build_admission(
     let col_names: Vec<String> = col_aggs
         .iter()
         .filter_map(|a| {
-            let n = pg_sys::get_attname((*rte).relid, a.attno as pg_sys::AttrNumber, true);
-            if n.is_null() { None } else { Some(CStr::from_ptr(n).to_string_lossy().into_owned()) }
+            let n =
+                unsafe { pg_sys::get_attname((*rte).relid, a.attno as pg_sys::AttrNumber, true) };
+            if n.is_null() {
+                None
+            } else {
+                Some(unsafe { CStr::from_ptr(n).to_string_lossy().into_owned() })
+            }
         })
         .collect();
     if col_names.len() == col_aggs.len()
-        && super::arrow_cache::has_cached_columns((*rte).relid.to_u32(), &col_names)
+        && super::arrow_cache::has_cached_columns(unsafe { (*rte).relid.to_u32() }, &col_names)
     {
         return Some(Admitted {
             mode: 1,
@@ -1409,33 +1449,33 @@ unsafe fn admit(
     input_rel: *mut pg_sys::RelOptInfo,
     output_rel: *mut pg_sys::RelOptInfo,
 ) -> Option<Admitted> {
-    let parse = (*root).parse;
+    let parse = unsafe { (*root).parse };
     // GROUP BY is now admissible; groupingSets / HAVING / DISTINCT / window are still out of scope → native plan.
-    if !(*parse).groupingSets.is_null()
-        || !(*parse).havingQual.is_null()
-        || !(*parse).distinctClause.is_null()
-        || (*parse).hasWindowFuncs
+    if !unsafe { (*parse).groupingSets.is_null() }
+        || !unsafe { (*parse).havingQual.is_null() }
+        || !unsafe { (*parse).distinctClause.is_null() }
+        || unsafe { (*parse).hasWindowFuncs }
     {
         admit_trace("grouping_sets_having_distinct_window"); // M152
         return None;
     }
-    let grouped = !(*parse).groupClause.is_null();
-    if (*input_rel).reloptkind != pg_sys::RelOptKind::RELOPT_BASEREL {
+    let grouped = !unsafe { (*parse).groupClause.is_null() };
+    if unsafe { (*input_rel).reloptkind } != pg_sys::RelOptKind::RELOPT_BASEREL {
         return None;
     }
-    let relid = (*input_rel).relid as i32;
+    let relid = unsafe { (*input_rel).relid } as i32;
     if relid <= 0 {
         return None;
     }
-    let rte = *(*root).simple_rte_array.add(relid as usize);
-    if rte.is_null() || (*rte).rtekind != pg_sys::RTEKind::RTE_RELATION {
+    let rte = unsafe { *(*root).simple_rte_array.add(relid as usize) };
+    if rte.is_null() || unsafe { (*rte).rtekind } != pg_sys::RTEKind::RTE_RELATION {
         return None;
     }
-    let target = (*output_rel).reltarget;
+    let target = unsafe { (*output_rel).reltarget };
     if target.is_null() {
         return None;
     }
-    let exprs = PgList::<pg_sys::Node>::from_pg((*target).exprs);
+    let exprs = unsafe { PgList::<pg_sys::Node>::from_pg((*target).exprs) };
     if exprs.is_empty() {
         return None;
     }
@@ -1448,7 +1488,7 @@ unsafe fn admit(
     let mut layout: Vec<(u8, usize)> = Vec::with_capacity(exprs.len());
     for i in 0..exprs.len() {
         let node = exprs.get_ptr(i)?;
-        match classify_target_node(node, relid, grouped)? {
+        match unsafe { classify_target_node(node, relid, grouped)? } {
             TargetSlot::Group(attno, vartype) => {
                 layout.push((0, group_cols.len()));
                 group_cols.push((attno, vartype));
@@ -1470,17 +1510,19 @@ unsafe fn admit(
     if grouped && group_cols.is_empty() && group_exprs.is_empty() {
         return None; // GROUP BY with NO grouping key at all (a const-out alone is not a key) → native plan
     }
-    build_admission(
-        rte,
-        input_rel,
-        relid,
-        grouped,
-        aggs,
-        group_cols,
-        group_exprs,
-        const_outs,
-        layout,
-    )
+    unsafe {
+        build_admission(
+            rte,
+            input_rel,
+            relid,
+            grouped,
+            aggs,
+            group_cols,
+            group_exprs,
+            const_outs,
+            layout,
+        )
+    }
 }
 
 /// `create_upper_paths_hook` — run `admit` and STASH the result keyed by the base table's OID (M115). Does NOT add a
@@ -1495,21 +1537,21 @@ unsafe extern "C-unwind" fn upper_paths_hook(
     output_rel: *mut pg_sys::RelOptInfo,
     extra: *mut c_void,
 ) {
-    if let Some(prev) = PREV_UPPER_HOOK {
-        prev(root, stage, input_rel, output_rel, extra);
+    if let Some(prev) = unsafe { PREV_UPPER_HOOK } {
+        unsafe { prev(root, stage, input_rel, output_rel, extra) };
     }
     if !ENABLE_COLUMNAR_AGG.get() || stage != pg_sys::UpperRelationKind::UPPERREL_GROUP_AGG {
         return;
     }
-    let Some(adm) = admit(root, input_rel, output_rel) else {
+    let Some(adm) = (unsafe { admit(root, input_rel, output_rel) }) else {
         return; // fail-safe: any unsupported shape → native plan
     };
     // Resolve the base table's stable pg_class OID (the swap matches the planned Agg's child scan by OID).
-    let rte = *(*root).simple_rte_array.add(adm.relid as usize);
+    let rte = unsafe { *(*root).simple_rte_array.add(adm.relid as usize) };
     if rte.is_null() {
         return;
     }
-    let table_oid = (*rte).relid.to_u32();
+    let table_oid = unsafe { (*rte).relid.to_u32() };
     ADMIT_STASH.with(|s| s.borrow_mut().push(StashedAdmit { table_oid, adm, consumed: false }));
 }
 
@@ -1533,9 +1575,11 @@ unsafe extern "C-unwind" fn planner_hook(
     }
     let _guard =
         StashGuard(ADMIT_STASH.with(|s| std::mem::replace(&mut *s.borrow_mut(), Vec::new())));
-    let stmt = match PREV_PLANNER_HOOK {
-        Some(prev) => prev(parse, query_string, cursor_options, bound_params),
-        None => pg_sys::standard_planner(parse, query_string, cursor_options, bound_params),
+    let stmt = match unsafe { PREV_PLANNER_HOOK } {
+        Some(prev) => unsafe { prev(parse, query_string, cursor_options, bound_params) },
+        None => unsafe {
+            pg_sys::standard_planner(parse, query_string, cursor_options, bound_params)
+        },
     };
     let have_stash = ADMIT_STASH.with(|s| !s.borrow().is_empty());
     // Run the walk when EITHER an admitted aggregate awaits its Agg-swap (M115 — needs the stash + agg GUC), OR the
@@ -1545,17 +1589,19 @@ unsafe extern "C-unwind" fn planner_hook(
     if !stmt.is_null()
         && ((ENABLE_COLUMNAR_AGG.get() && have_stash) || ENABLE_COLUMNAR_LATE_MAT.get())
     {
-        swap_walk(&mut (*stmt).planTree, (*stmt).rtable, std::ptr::null_mut());
-        let subplans = (*stmt).subplans;
+        unsafe { swap_walk(&mut (*stmt).planTree, (*stmt).rtable, std::ptr::null_mut()) };
+        let subplans = unsafe { (*stmt).subplans };
         if !subplans.is_null() {
-            let n = (*subplans).length;
+            let n = unsafe { (*subplans).length };
             for i in 0..n {
-                let cell = (*subplans).elements.add(i as usize);
-                swap_walk(
-                    &mut (*cell).ptr_value as *mut _ as *mut *mut pg_sys::Plan,
-                    (*stmt).rtable,
-                    std::ptr::null_mut(),
-                );
+                let cell = unsafe { (*subplans).elements.add(i as usize) };
+                unsafe {
+                    swap_walk(
+                        &mut (*cell).ptr_value as *mut _ as *mut *mut pg_sys::Plan,
+                        (*stmt).rtable,
+                        std::ptr::null_mut(),
+                    )
+                };
             }
         }
     }
@@ -1570,12 +1616,12 @@ unsafe fn find_scan_relid(plan: *mut pg_sys::Plan) -> Option<u32> {
     if plan.is_null() {
         return None;
     }
-    match (*plan).type_ {
+    match unsafe { (*plan).type_ } {
         pg_sys::NodeTag::T_SeqScan => {
-            let rid = (*(plan as *mut pg_sys::SeqScan)).scan.scanrelid;
+            let rid = unsafe { (*(plan as *mut pg_sys::SeqScan)).scan.scanrelid };
             if rid > 0 { Some(rid) } else { None }
         }
-        pg_sys::NodeTag::T_Sort => find_scan_relid((*plan).lefttree),
+        pg_sys::NodeTag::T_Sort => unsafe { find_scan_relid((*plan).lefttree) },
         _ => None,
     }
 }
@@ -1583,26 +1629,30 @@ unsafe fn find_scan_relid(plan: *mut pg_sys::Plan) -> Option<u32> {
 /// Build the plain-typed-`Var(INDEX_VAR, resno)` targetlist matching `tlist` positionally — NO `Aggref` (M115). The
 /// exec callback fills the scan slot; the node never evaluates an aggregate, so no `Var` can escape into an upper node.
 unsafe fn plain_var_tlist(tlist: *mut pg_sys::List) -> *mut pg_sys::List {
-    let src = PgList::<pg_sys::TargetEntry>::from_pg(tlist);
+    let src = unsafe { PgList::<pg_sys::TargetEntry>::from_pg(tlist) };
     let mut out: *mut pg_sys::List = std::ptr::null_mut();
     for i in 0..src.len() {
         let te = src.get_ptr(i).expect("tlist entry");
-        let e = (*te).expr as *mut pg_sys::Node;
-        let var = pg_sys::makeVar(
-            pg_sys::INDEX_VAR as i32,
-            (i + 1) as pg_sys::AttrNumber,
-            pg_sys::exprType(e),
-            pg_sys::exprTypmod(e),
-            pg_sys::exprCollation(e),
-            0,
-        );
-        let nte = pg_sys::makeTargetEntry(
-            var as *mut pg_sys::Expr,
-            (i + 1) as pg_sys::AttrNumber,
-            (*te).resname,
-            (*te).resjunk,
-        );
-        out = pg_sys::lappend(out, nte as *mut c_void);
+        let e = unsafe { (*te).expr } as *mut pg_sys::Node;
+        let var = unsafe {
+            pg_sys::makeVar(
+                pg_sys::INDEX_VAR as i32,
+                (i + 1) as pg_sys::AttrNumber,
+                pg_sys::exprType(e),
+                pg_sys::exprTypmod(e),
+                pg_sys::exprCollation(e),
+                0,
+            )
+        };
+        let nte = unsafe {
+            pg_sys::makeTargetEntry(
+                var as *mut pg_sys::Expr,
+                (i + 1) as pg_sys::AttrNumber,
+                (*te).resname,
+                (*te).resjunk,
+            )
+        };
+        out = unsafe { pg_sys::lappend(out, nte as *mut c_void) };
     }
     out
 }
@@ -1645,12 +1695,12 @@ unsafe fn deparse_safe_tlist(
     adm: &Admitted,
     scanrelid: u32,
 ) -> *mut pg_sys::List {
-    let src = PgList::<pg_sys::TargetEntry>::from_pg(tlist);
+    let src = unsafe { PgList::<pg_sys::TargetEntry>::from_pg(tlist) };
     let mut out: *mut pg_sys::List = std::ptr::null_mut();
     for i in 0..src.len() {
         // Fail-closed on ANY inconsistency (see the descriptor-equality invariant above): NIL → caller declines.
         let Some(te) = src.get_ptr(i) else { return std::ptr::null_mut() };
-        let e = (*te).expr as *mut pg_sys::Node;
+        let e = unsafe { (*te).expr } as *mut pg_sys::Node;
         if e.is_null() {
             return std::ptr::null_mut();
         }
@@ -1666,14 +1716,18 @@ unsafe fn deparse_safe_tlist(
         };
         let expr: *mut pg_sys::Expr = if tag == 0 {
             match adm.group_cols.get(idx) {
-                Some(&(attno, typoid)) => pg_sys::makeVar(
-                    scanrelid as i32,
-                    attno as pg_sys::AttrNumber,
-                    pg_sys::Oid::from(typoid),
-                    pg_sys::exprTypmod(e),
-                    pg_sys::exprCollation(e),
-                    0,
-                ) as *mut pg_sys::Expr,
+                Some(&(attno, typoid)) => {
+                    (unsafe {
+                        pg_sys::makeVar(
+                            scanrelid as i32,
+                            attno as pg_sys::AttrNumber,
+                            pg_sys::Oid::from(typoid),
+                            pg_sys::exprTypmod(e),
+                            pg_sys::exprCollation(e),
+                            0,
+                        )
+                    }) as *mut pg_sys::Expr
+                }
                 None => return std::ptr::null_mut(),
             }
         } else if tag == 2 {
@@ -1685,14 +1739,18 @@ unsafe fn deparse_safe_tlist(
             // result; scanrelid=0, never a real scan). Deparse shows the base column for this slot — cosmetic; the value
             // is byte-identical.
             match adm.group_exprs.get(idx) {
-                Some(g) => pg_sys::makeVar(
-                    scanrelid as i32,
-                    g.base_attno as pg_sys::AttrNumber,
-                    pg_sys::Oid::from(g.out_typoid),
-                    pg_sys::exprTypmod(e),
-                    pg_sys::exprCollation(e),
-                    0,
-                ) as *mut pg_sys::Expr,
+                Some(g) => {
+                    (unsafe {
+                        pg_sys::makeVar(
+                            scanrelid as i32,
+                            g.base_attno as pg_sys::AttrNumber,
+                            pg_sys::Oid::from(g.out_typoid),
+                            pg_sys::exprTypmod(e),
+                            pg_sys::exprCollation(e),
+                            0,
+                        )
+                    }) as *mut pg_sys::Expr
+                }
                 None => return std::ptr::null_mut(),
             }
         } else if tag == 3 {
@@ -1701,7 +1759,7 @@ unsafe fn deparse_safe_tlist(
             // ruleutils' resolve_special_varno stops at it (no INDEX_VAR self-recursion, the M131 #135 hang) and a
             // literal carries no OUTER_VAR into the dropped subtree. Runtime tuples come from the materialized
             // const_outs (scanrelid=0, never a real scan); this entry is descriptor + deparse metadata only.
-            let copied = pg_sys::copyObjectImpl(e as *const c_void) as *mut pg_sys::Node;
+            let copied = unsafe { pg_sys::copyObjectImpl(e as *const c_void) } as *mut pg_sys::Node;
             if copied.is_null() {
                 return std::ptr::null_mut(); // never place a NULL expr — ExecTypeFromTL would deref it
             }
@@ -1709,33 +1767,35 @@ unsafe fn deparse_safe_tlist(
         } else {
             // Copy the Aggref so the original (shared) plan nodes are never mutated, then rebuild its argument Var
             // against the base rel so deparsing the arguments never follows OUTER_VAR into the dropped subtree.
-            let copied = pg_sys::copyObjectImpl(e as *const c_void) as *mut pg_sys::Node;
+            let copied = unsafe { pg_sys::copyObjectImpl(e as *const c_void) } as *mut pg_sys::Node;
             if copied.is_null() {
                 return std::ptr::null_mut(); // never place a NULL expr — ExecTypeFromTL would deref it
             }
-            if (*copied).type_ == pg_sys::NodeTag::T_Aggref {
+            if unsafe { (*copied).type_ } == pg_sys::NodeTag::T_Aggref {
                 let aggref = copied as *mut pg_sys::Aggref;
                 let Some(pa) = adm.aggs.get(idx) else { return std::ptr::null_mut() };
                 let attno = pa.attno;
                 if attno > 0 {
-                    let args = PgList::<pg_sys::TargetEntry>::from_pg((*aggref).args);
+                    let args = unsafe { PgList::<pg_sys::TargetEntry>::from_pg((*aggref).args) };
                     for j in 0..args.len() {
                         let Some(ate) = args.get_ptr(j) else { return std::ptr::null_mut() };
-                        let av = (*ate).expr as *mut pg_sys::Node;
-                        if !av.is_null() && (*av).type_ == pg_sys::NodeTag::T_Var {
+                        let av = unsafe { (*ate).expr } as *mut pg_sys::Node;
+                        if !av.is_null() && unsafe { (*av).type_ } == pg_sys::NodeTag::T_Var {
                             let v = av as *mut pg_sys::Var;
                             // makeVar sets the *syn fields consistently — safer than poking them field by field.
-                            (*ate).expr = pg_sys::makeVar(
-                                scanrelid as i32,
-                                attno as pg_sys::AttrNumber,
-                                (*v).vartype,
-                                (*v).vartypmod,
-                                (*v).varcollid,
-                                0,
-                            ) as *mut pg_sys::Expr;
+                            unsafe {
+                                (*ate).expr = pg_sys::makeVar(
+                                    scanrelid as i32,
+                                    attno as pg_sys::AttrNumber,
+                                    (*v).vartype,
+                                    (*v).vartypmod,
+                                    (*v).varcollid,
+                                    0,
+                                ) as *mut pg_sys::Expr
+                            };
                         } else if pa.kind == 9
                             && !av.is_null()
-                            && (*av).type_ == pg_sys::NodeTag::T_OpExpr
+                            && unsafe { (*av).type_ } == pg_sys::NodeTag::T_OpExpr
                         {
                             // M166 — the SumIntAddConst argument is `OpExpr(Var(base int2), Const)`. Its nested Var is
                             // OUTER_VAR post-set_plan_refs (into the subtree we dropped); leaving it would make
@@ -1744,35 +1804,39 @@ unsafe fn deparse_safe_tlist(
                             // of the base column's type — resolvable and descriptor-equal (exprType(Aggref)=int8 is
                             // unchanged); EXPLAIN then shows `sum(<col>)` (cosmetic — the `+ k` is folded into the
                             // executed sum, byte-identical, same convention as the group-expr slot's base-column deparse).
-                            let inner = PgList::<pg_sys::Node>::from_pg(
-                                (*(av as *mut pg_sys::OpExpr)).args,
-                            );
+                            let inner = unsafe {
+                                PgList::<pg_sys::Node>::from_pg((*(av as *mut pg_sys::OpExpr)).args)
+                            };
                             let Some(iv) = inner.get_ptr(0) else { return std::ptr::null_mut() };
-                            if (*iv).type_ != pg_sys::NodeTag::T_Var {
+                            if unsafe { (*iv).type_ } != pg_sys::NodeTag::T_Var {
                                 return std::ptr::null_mut(); // admit guaranteed a Var arg; otherwise decline the swap
                             }
                             let v = iv as *mut pg_sys::Var;
-                            (*ate).expr = pg_sys::makeVar(
-                                scanrelid as i32,
-                                attno as pg_sys::AttrNumber,
-                                (*v).vartype,
-                                (*v).vartypmod,
-                                (*v).varcollid,
-                                0,
-                            ) as *mut pg_sys::Expr;
+                            unsafe {
+                                (*ate).expr = pg_sys::makeVar(
+                                    scanrelid as i32,
+                                    attno as pg_sys::AttrNumber,
+                                    (*v).vartype,
+                                    (*v).vartypmod,
+                                    (*v).varcollid,
+                                    0,
+                                ) as *mut pg_sys::Expr
+                            };
                         }
                     }
                 }
             }
             copied as *mut pg_sys::Expr
         };
-        let nte = pg_sys::makeTargetEntry(
-            expr,
-            (i + 1) as pg_sys::AttrNumber,
-            (*te).resname,
-            (*te).resjunk,
-        );
-        out = pg_sys::lappend(out, nte as *mut c_void);
+        let nte = unsafe {
+            pg_sys::makeTargetEntry(
+                expr,
+                (i + 1) as pg_sys::AttrNumber,
+                (*te).resname,
+                (*te).resjunk,
+            )
+        };
+        out = unsafe { pg_sys::lappend(out, nte as *mut c_void) };
     }
     out
 }
@@ -1781,42 +1845,42 @@ unsafe fn deparse_safe_tlist(
 /// `[table_oid, mode, nagg, (kind,attno,delta_hi,delta_lo)×nagg, npred, (col,op,hi,lo)×npred, ngroup,
 ///  (attno,typoid)×ngroup, noutput, (kind,idx)×noutput]`. (M166 — `delta` is the SumIntAddConst offset, 0 otherwise.)
 unsafe fn encode_private(adm: &Admitted, table_oid: u32) -> *mut pg_sys::List {
-    let mut pl = pg_sys::lappend_int(std::ptr::null_mut(), table_oid as i32);
-    pl = pg_sys::lappend_int(pl, adm.mode);
-    pl = pg_sys::lappend_int(pl, adm.aggs.len() as i32);
+    let mut pl = unsafe { pg_sys::lappend_int(std::ptr::null_mut(), table_oid as i32) };
+    pl = unsafe { pg_sys::lappend_int(pl, adm.mode) };
+    pl = unsafe { pg_sys::lappend_int(pl, adm.aggs.len() as i32) };
     for a in &adm.aggs {
-        pl = pg_sys::lappend_int(pl, a.kind);
-        pl = pg_sys::lappend_int(pl, a.attno);
+        pl = unsafe { pg_sys::lappend_int(pl, a.kind) };
+        pl = unsafe { pg_sys::lappend_int(pl, a.attno) };
         // M166 — delta (SumIntAddConst offset, kind 9; 0 otherwise) split hi/lo i32 like the IN-list/const-out words.
-        pl = pg_sys::lappend_int(pl, (a.delta >> 32) as i32);
-        pl = pg_sys::lappend_int(pl, (a.delta & 0xFFFF_FFFF) as i32);
+        pl = unsafe { pg_sys::lappend_int(pl, (a.delta >> 32) as i32) };
+        pl = unsafe { pg_sys::lappend_int(pl, (a.delta & 0xFFFF_FFFF) as i32) };
     }
-    pl = pg_sys::lappend_int(pl, adm.preds.len() as i32);
+    pl = unsafe { pg_sys::lappend_int(pl, adm.preds.len() as i32) };
     for p in &adm.preds {
-        pl = pg_sys::lappend_int(pl, p.col as i32);
-        pl = pg_sys::lappend_int(pl, p.op as i32);
-        pl = pg_sys::lappend_int(pl, (p.const_bits >> 32) as i32);
-        pl = pg_sys::lappend_int(pl, (p.const_bits & 0xFFFF_FFFF) as i32);
+        pl = unsafe { pg_sys::lappend_int(pl, p.col as i32) };
+        pl = unsafe { pg_sys::lappend_int(pl, p.op as i32) };
+        pl = unsafe { pg_sys::lappend_int(pl, (p.const_bits >> 32) as i32) };
+        pl = unsafe { pg_sys::lappend_int(pl, (p.const_bits & 0xFFFF_FFFF) as i32) };
     }
-    pl = pg_sys::lappend_int(pl, adm.group_cols.len() as i32);
+    pl = unsafe { pg_sys::lappend_int(pl, adm.group_cols.len() as i32) };
     for &(attno, typoid) in &adm.group_cols {
-        pl = pg_sys::lappend_int(pl, attno);
-        pl = pg_sys::lappend_int(pl, typoid as i32);
+        pl = unsafe { pg_sys::lappend_int(pl, attno) };
+        pl = unsafe { pg_sys::lappend_int(pl, typoid as i32) };
     }
-    pl = pg_sys::lappend_int(pl, adm.layout.len() as i32);
+    pl = unsafe { pg_sys::lappend_int(pl, adm.layout.len() as i32) };
     for &(kind, idx) in &adm.layout {
-        pl = pg_sys::lappend_int(pl, kind as i32);
-        pl = pg_sys::lappend_int(pl, idx as i32);
+        pl = unsafe { pg_sys::lappend_int(pl, kind as i32) };
+        pl = unsafe { pg_sys::lappend_int(pl, idx as i32) };
     }
     // M165 — const-out block (layout kind=3): [nconst, (val_hi, val_lo, typoid)×nconst]. Rides the int channel (a
     // projected integer literal is varlena-free); the i64 value is split hi/lo i32 exactly like the IN-list/delta
     // encodings (a `List` Integer is i32). Appended LAST so a pre-M165 decoder that stops after the layout block
     // round-trips as zero const-outs (the exec-side `if i < n` guard treats absence as nconst 0).
-    pl = pg_sys::lappend_int(pl, adm.const_outs.len() as i32);
+    pl = unsafe { pg_sys::lappend_int(pl, adm.const_outs.len() as i32) };
     for &(val, typoid) in &adm.const_outs {
-        pl = pg_sys::lappend_int(pl, (val >> 32) as i32);
-        pl = pg_sys::lappend_int(pl, (val & 0xFFFF_FFFF) as i32);
-        pl = pg_sys::lappend_int(pl, typoid as i32);
+        pl = unsafe { pg_sys::lappend_int(pl, (val >> 32) as i32) };
+        pl = unsafe { pg_sys::lappend_int(pl, (val & 0xFFFF_FFFF) as i32) };
+        pl = unsafe { pg_sys::lappend_int(pl, typoid as i32) };
     }
     pl
 }
@@ -1830,12 +1894,12 @@ unsafe fn encode_text_preds(tpreds: &[TextPredicate]) -> Option<*mut pg_sys::Lis
     let mut outer: *mut pg_sys::List = std::ptr::null_mut();
     for t in tpreds {
         let cneedle = std::ffi::CString::new(t.needle.as_str()).ok()?; // interior NUL → decline (never for text)
-        let pgstr = pg_sys::pstrdup(cneedle.as_ptr()); // copy into the current (planner) memory context
+        let pgstr = unsafe { pg_sys::pstrdup(cneedle.as_ptr()) }; // copy into the current (planner) memory context
         let mut entry: *mut pg_sys::List = std::ptr::null_mut();
-        entry = pg_sys::lappend(entry, pg_sys::makeInteger(t.col as i32) as *mut c_void);
-        entry = pg_sys::lappend(entry, pg_sys::makeInteger(t.op as i32) as *mut c_void);
-        entry = pg_sys::lappend(entry, pg_sys::makeString(pgstr) as *mut c_void);
-        outer = pg_sys::lappend(outer, entry as *mut c_void);
+        entry = unsafe { pg_sys::lappend(entry, pg_sys::makeInteger(t.col as i32) as *mut c_void) };
+        entry = unsafe { pg_sys::lappend(entry, pg_sys::makeInteger(t.op as i32) as *mut c_void) };
+        entry = unsafe { pg_sys::lappend(entry, pg_sys::makeString(pgstr) as *mut c_void) };
+        outer = unsafe { pg_sys::lappend(outer, entry as *mut c_void) };
     }
     Some(outer)
 }
@@ -1851,18 +1915,25 @@ unsafe fn encode_group_exprs(gexprs: &[GroupExprSpec]) -> Option<*mut pg_sys::Li
         // `unit` is a lowercase ASCII granularity from a validated whitelist (or "" for int±k/const) — never contains
         // an interior NUL. Still, decline fail-closed on one (council-rust-pgrx LOW: symmetry with `encode_text_preds`).
         let cs = std::ffi::CString::new(g.unit.as_str()).ok()?;
-        let pgstr = pg_sys::pstrdup(cs.as_ptr());
+        let pgstr = unsafe { pg_sys::pstrdup(cs.as_ptr()) };
         let mut entry: *mut pg_sys::List = std::ptr::null_mut();
-        entry = pg_sys::lappend(entry, pg_sys::makeInteger(g.base_attno) as *mut c_void);
-        entry = pg_sys::lappend(entry, pg_sys::makeInteger(g.func as i32) as *mut c_void);
-        entry = pg_sys::lappend(entry, pg_sys::makeString(pgstr) as *mut c_void);
-        entry = pg_sys::lappend(entry, pg_sys::makeInteger(g.out_typoid as i32) as *mut c_void);
-        entry = pg_sys::lappend(entry, pg_sys::makeInteger((g.delta >> 32) as i32) as *mut c_void);
-        entry = pg_sys::lappend(
-            entry,
-            pg_sys::makeInteger((g.delta & 0xFFFF_FFFF) as i32) as *mut c_void,
-        );
-        outer = pg_sys::lappend(outer, entry as *mut c_void);
+        entry = unsafe { pg_sys::lappend(entry, pg_sys::makeInteger(g.base_attno) as *mut c_void) };
+        entry =
+            unsafe { pg_sys::lappend(entry, pg_sys::makeInteger(g.func as i32) as *mut c_void) };
+        entry = unsafe { pg_sys::lappend(entry, pg_sys::makeString(pgstr) as *mut c_void) };
+        entry = unsafe {
+            pg_sys::lappend(entry, pg_sys::makeInteger(g.out_typoid as i32) as *mut c_void)
+        };
+        entry = unsafe {
+            pg_sys::lappend(entry, pg_sys::makeInteger((g.delta >> 32) as i32) as *mut c_void)
+        };
+        entry = unsafe {
+            pg_sys::lappend(
+                entry,
+                pg_sys::makeInteger((g.delta & 0xFFFF_FFFF) as i32) as *mut c_void,
+            )
+        };
+        outer = unsafe { pg_sys::lappend(outer, entry as *mut c_void) };
     }
     Some(outer)
 }
@@ -1875,16 +1946,19 @@ unsafe fn encode_in_preds(inpreds: &[super::zonemap::InListPredicate]) -> *mut p
     let mut outer: *mut pg_sys::List = std::ptr::null_mut();
     for p in inpreds {
         let mut entry: *mut pg_sys::List = std::ptr::null_mut();
-        entry = pg_sys::lappend(entry, pg_sys::makeInteger(p.col as i32) as *mut c_void);
-        entry = pg_sys::lappend(entry, pg_sys::makeInteger(p.consts.len() as i32) as *mut c_void);
+        entry = unsafe { pg_sys::lappend(entry, pg_sys::makeInteger(p.col as i32) as *mut c_void) };
+        entry = unsafe {
+            pg_sys::lappend(entry, pg_sys::makeInteger(p.consts.len() as i32) as *mut c_void)
+        };
         for &c in &p.consts {
-            entry = pg_sys::lappend(entry, pg_sys::makeInteger((c >> 32) as i32) as *mut c_void);
-            entry = pg_sys::lappend(
-                entry,
-                pg_sys::makeInteger((c & 0xFFFF_FFFF) as i32) as *mut c_void,
-            );
+            entry = unsafe {
+                pg_sys::lappend(entry, pg_sys::makeInteger((c >> 32) as i32) as *mut c_void)
+            };
+            entry = unsafe {
+                pg_sys::lappend(entry, pg_sys::makeInteger((c & 0xFFFF_FFFF) as i32) as *mut c_void)
+            };
         }
-        outer = pg_sys::lappend(outer, entry as *mut c_void);
+        outer = unsafe { pg_sys::lappend(outer, entry as *mut c_void) };
     }
     outer
 }
@@ -1900,7 +1974,7 @@ unsafe fn try_swap_agg(
     // B1 (review): only a SIMPLE (non-split) aggregate carries the FINAL result. A parallel plan splits into
     // Finalize(SIMPLE)→Gather→Partial(INITIAL_SERIAL)→ParallelSeqScan; swapping the Partial would emit the FINAL value
     // where a partial transvalue is expected → wrong result. Decline any non-SIMPLE split.
-    if (*agg).aggsplit != pg_sys::AggSplit::AGGSPLIT_SIMPLE {
+    if unsafe { (*agg).aggsplit } != pg_sys::AggSplit::AGGSPLIT_SIMPLE {
         admit_trace("swap_agg_split_nonsimple"); // M152
         return None;
     }
@@ -1908,7 +1982,7 @@ unsafe fn try_swap_agg(
     // ABOVE) swap freely. SORTED (GroupAgg) relies on its INPUT sort for output order; our exec re-imposes an ASC
     // nulls-last sort on the group keys — so a SORTED node is admitted ONLY when its input Sort is exactly ASC
     // nulls-last on numeric/temporal keys (checked below); DESC / nulls-first / text → decline (review B2).
-    let strat = (*agg).aggstrategy;
+    let strat = unsafe { (*agg).aggstrategy };
     if strat != pg_sys::AggStrategy::AGG_PLAIN
         && strat != pg_sys::AggStrategy::AGG_HASHED
         && strat != pg_sys::AggStrategy::AGG_SORTED
@@ -1916,15 +1990,16 @@ unsafe fn try_swap_agg(
         admit_trace("swap_unsupported_agg_strategy"); // M152
         return None;
     }
-    let scanrelid = find_scan_relid((*agg).plan.lefttree)?;
-    let scan_rte = pg_sys::list_nth(rtable, (scanrelid - 1) as i32) as *mut pg_sys::RangeTblEntry;
+    let scanrelid = unsafe { find_scan_relid((*agg).plan.lefttree)? };
+    let scan_rte =
+        unsafe { pg_sys::list_nth(rtable, (scanrelid - 1) as i32) } as *mut pg_sys::RangeTblEntry;
     if scan_rte.is_null() {
         admit_trace("swap_scan_rte_null"); // M152
         return None;
     }
-    let table_oid = (*scan_rte).relid.to_u32();
-    let out_arity = pg_sys::list_length((*agg).plan.targetlist) as usize;
-    let numcols = (*agg).numCols as usize;
+    let table_oid = unsafe { (*scan_rte).relid.to_u32() };
+    let out_arity = unsafe { pg_sys::list_length((*agg).plan.targetlist) } as usize;
+    let numcols = unsafe { (*agg).numCols } as usize;
     // B3 (review): match the first unconsumed stash entry for this OID WHOSE SHAPE matches the planned Agg — same
     // group-key count and output arity — so a scalar Agg cannot bind a grouped `Admitted` (or vice-versa) on the same
     // table, which would emit the wrong row shape.
@@ -1954,24 +2029,24 @@ unsafe fn try_swap_agg(
             // Text (text/varchar; bpchar excluded at admit — review MEDIUM). Safe ONLY when a full `Sort` above
             // re-sorts the output (group order then irrelevant). Fall
             // through to the swap WITHOUT the numeric ASC-nulls-last input-Sort check (we don't reproduce key order).
-            if parent.is_null() || (*parent).type_ != pg_sys::NodeTag::T_Sort {
+            if parent.is_null() || unsafe { (*parent).type_ } != pg_sys::NodeTag::T_Sort {
                 admit_trace("swap_sorted_text_group_not_resorted"); // M153 — direct group-order consumption
                 return None;
             }
         } else {
             // Numeric/temporal: reproduce the promised order exactly. The input Sort must be ASC nulls-last (else the
             // plan's output order isn't our ASC order).
-            let child = (*agg).plan.lefttree;
-            if child.is_null() || (*child).type_ != pg_sys::NodeTag::T_Sort {
+            let child = unsafe { (*agg).plan.lefttree };
+            if child.is_null() || unsafe { (*child).type_ } != pg_sys::NodeTag::T_Sort {
                 return None;
             }
             let s = child as *mut pg_sys::Sort;
-            for i in 0..(*s).numCols as usize {
-                if *(*s).nullsFirst.add(i) {
+            for i in 0..unsafe { (*s).numCols } as usize {
+                if unsafe { *(*s).nullsFirst.add(i) } {
                     admit_trace("swap_agg_sorted_nulls_first"); // M152
                     return None; // nulls-first ≠ our nulls-last
                 }
-                let opno = *(*s).sortOperators.add(i);
+                let opno = unsafe { *(*s).sortOperators.add(i) };
                 // M135: PG18 generalized the btree strategy number into an AM-agnostic `CompareType`, so the last
                 // out-param changed TYPE. The VALUE did not change — `access/cmptype.h:34` defines `COMPARE_LT = 1`,
                 // i.e. exactly `BTLessStrategyNumber` — so this is a type port, not a semantic one. (An earlier
@@ -1985,12 +2060,14 @@ unsafe fn try_swap_agg(
                 // results, no error. Seeding the reject value costs nothing.
                 let (mut opfamily, mut opcintype, mut cmptype) =
                     (pg_sys::InvalidOid, pg_sys::InvalidOid, pg_sys::CompareType::COMPARE_INVALID);
-                pg_sys::get_ordering_op_properties(
-                    opno,
-                    &mut opfamily,
-                    &mut opcintype,
-                    &mut cmptype,
-                );
+                unsafe {
+                    pg_sys::get_ordering_op_properties(
+                        opno,
+                        &mut opfamily,
+                        &mut opcintype,
+                        &mut cmptype,
+                    )
+                };
                 if cmptype != pg_sys::CompareType::COMPARE_LT {
                     admit_trace("swap_agg_sorted_desc_or_nonbtree"); // M152
                     return None; // DESC (or non-btree) ≠ our ascending
@@ -1999,21 +2076,22 @@ unsafe fn try_swap_agg(
         }
     }
 
-    let tlist = (*agg).plan.targetlist;
-    let mut cscan = PgBox::<pg_sys::CustomScan>::alloc_node(pg_sys::NodeTag::T_CustomScan);
+    let tlist = unsafe { (*agg).plan.targetlist };
+    let mut cscan =
+        unsafe { PgBox::<pg_sys::CustomScan>::alloc_node(pg_sys::NodeTag::T_CustomScan) };
     {
         let plan_out = &mut cscan.scan.plan;
-        plan_out.targetlist = plain_var_tlist(tlist);
+        plan_out.targetlist = unsafe { plain_var_tlist(tlist) };
         plan_out.qual = std::ptr::null_mut();
         plan_out.lefttree = std::ptr::null_mut(); // drop the Agg's child subtree — the CustomScan scans itself
         plan_out.righttree = std::ptr::null_mut();
-        plan_out.plan_node_id = (*agg).plan.plan_node_id;
-        plan_out.startup_cost = (*agg).plan.startup_cost;
-        plan_out.total_cost = (*agg).plan.total_cost;
-        plan_out.plan_rows = (*agg).plan.plan_rows;
-        plan_out.plan_width = (*agg).plan.plan_width;
+        plan_out.plan_node_id = unsafe { (*agg).plan.plan_node_id };
+        plan_out.startup_cost = unsafe { (*agg).plan.startup_cost };
+        plan_out.total_cost = unsafe { (*agg).plan.total_cost };
+        plan_out.plan_rows = unsafe { (*agg).plan.plan_rows };
+        plan_out.plan_width = unsafe { (*agg).plan.plan_width };
         plan_out.parallel_aware = false;
-        plan_out.parallel_safe = (*agg).plan.parallel_safe;
+        plan_out.parallel_safe = unsafe { (*agg).plan.parallel_safe };
     }
     cscan.scan.scanrelid = 0;
     cscan.flags = 0;
@@ -2024,22 +2102,22 @@ unsafe fn try_swap_agg(
     // The int-only channel (M115 layout) cannot carry a varlena, so text predicates (M156), expression group keys
     // (M157), and integer IN-list predicates (M161, hi/lo i32 halves) ride parallel node channels (ADR-1). A text
     // needle with an interior NUL (impossible for a text value) → decline the swap rather than ship an incomplete filter.
-    let int_channel = encode_private(&adm, table_oid);
-    let text_channel = encode_text_preds(&adm.text_preds)?;
-    let group_expr_channel = encode_group_exprs(&adm.group_exprs)?;
-    let in_channel = encode_in_preds(&adm.in_preds); // M161 — 4th channel (integer IN-list)
-    let mut outer = pg_sys::lappend(std::ptr::null_mut(), int_channel as *mut c_void);
-    outer = pg_sys::lappend(outer, text_channel as *mut c_void);
-    outer = pg_sys::lappend(outer, group_expr_channel as *mut c_void);
-    outer = pg_sys::lappend(outer, in_channel as *mut c_void);
+    let int_channel = unsafe { encode_private(&adm, table_oid) };
+    let text_channel = unsafe { encode_text_preds(&adm.text_preds)? };
+    let group_expr_channel = unsafe { encode_group_exprs(&adm.group_exprs)? };
+    let in_channel = unsafe { encode_in_preds(&adm.in_preds) }; // M161 — 4th channel (integer IN-list)
+    let mut outer = unsafe { pg_sys::lappend(std::ptr::null_mut(), int_channel as *mut c_void) };
+    outer = unsafe { pg_sys::lappend(outer, text_channel as *mut c_void) };
+    outer = unsafe { pg_sys::lappend(outer, group_expr_channel as *mut c_void) };
+    outer = unsafe { pg_sys::lappend(outer, in_channel as *mut c_void) };
     cscan.custom_private = outer;
     // M131 (#135): NOT `plain_var_tlist` — a self-referential INDEX_VAR here makes ruleutils' `resolve_special_varno`
     // recurse forever when a Sort above this node has a key on the aggregate output, hanging EXPLAIN. This list also
     // becomes the node's RUNTIME scan TupleDesc (`ExecTypeFromTL`), so it must stay descriptor-equal to
     // `plan.targetlist` — see `deparse_safe_tlist`. NIL means it could not be built consistently → decline the swap
     // and let the native plan run (fail-closed; never ship a short descriptor).
-    let safe_tlist = deparse_safe_tlist(tlist, &adm, scanrelid);
-    if safe_tlist.is_null() || pg_sys::list_length(safe_tlist) as usize != out_arity {
+    let safe_tlist = unsafe { deparse_safe_tlist(tlist, &adm, scanrelid) };
+    if safe_tlist.is_null() || unsafe { pg_sys::list_length(safe_tlist) } as usize != out_arity {
         admit_trace("swap_deparse_safe_tlist_sort_on_agg"); // M152 — Sort/ORDER-BY on the agg output (M131 #135)
         return None;
     }
@@ -2067,26 +2145,26 @@ unsafe fn encode_topk_private(
     proj_cols: &[(i32, u32)],
     preds: &[ZonePredicate],
 ) -> *mut pg_sys::List {
-    let mut pl = pg_sys::lappend_int(std::ptr::null_mut(), table_oid as i32);
-    pl = pg_sys::lappend_int(pl, 2); // mode = 2 (top-k)
-    pl = pg_sys::lappend_int(pl, k as i32);
-    pl = pg_sys::lappend_int(pl, sort_keys.len() as i32);
+    let mut pl = unsafe { pg_sys::lappend_int(std::ptr::null_mut(), table_oid as i32) };
+    pl = unsafe { pg_sys::lappend_int(pl, 2) }; // mode = 2 (top-k)
+    pl = unsafe { pg_sys::lappend_int(pl, k as i32) };
+    pl = unsafe { pg_sys::lappend_int(pl, sort_keys.len() as i32) };
     for &(attno, asc, nf) in sort_keys {
-        pl = pg_sys::lappend_int(pl, attno);
-        pl = pg_sys::lappend_int(pl, asc as i32);
-        pl = pg_sys::lappend_int(pl, nf as i32);
+        pl = unsafe { pg_sys::lappend_int(pl, attno) };
+        pl = unsafe { pg_sys::lappend_int(pl, asc as i32) };
+        pl = unsafe { pg_sys::lappend_int(pl, nf as i32) };
     }
-    pl = pg_sys::lappend_int(pl, proj_cols.len() as i32);
+    pl = unsafe { pg_sys::lappend_int(pl, proj_cols.len() as i32) };
     for &(attno, typoid) in proj_cols {
-        pl = pg_sys::lappend_int(pl, attno);
-        pl = pg_sys::lappend_int(pl, typoid as i32);
+        pl = unsafe { pg_sys::lappend_int(pl, attno) };
+        pl = unsafe { pg_sys::lappend_int(pl, typoid as i32) };
     }
-    pl = pg_sys::lappend_int(pl, preds.len() as i32);
+    pl = unsafe { pg_sys::lappend_int(pl, preds.len() as i32) };
     for p in preds {
-        pl = pg_sys::lappend_int(pl, p.col as i32);
-        pl = pg_sys::lappend_int(pl, p.op as i32);
-        pl = pg_sys::lappend_int(pl, (p.const_bits >> 32) as i32);
-        pl = pg_sys::lappend_int(pl, (p.const_bits & 0xFFFF_FFFF) as i32);
+        pl = unsafe { pg_sys::lappend_int(pl, p.col as i32) };
+        pl = unsafe { pg_sys::lappend_int(pl, p.op as i32) };
+        pl = unsafe { pg_sys::lappend_int(pl, (p.const_bits >> 32) as i32) };
+        pl = unsafe { pg_sys::lappend_int(pl, (p.const_bits & 0xFFFF_FFFF) as i32) };
     }
     pl
 }
@@ -2107,23 +2185,23 @@ unsafe fn try_swap_topk(
     }
     admit_trace("topk_entered_sort"); // M158 diag — reached a Sort under the late-mat GUC
     // Parent must be a plain LIMIT k with no OFFSET (OFFSET would need the top k+offset — out of scope).
-    if parent.is_null() || (*parent).type_ != pg_sys::NodeTag::T_Limit {
+    if parent.is_null() || unsafe { (*parent).type_ } != pg_sys::NodeTag::T_Limit {
         admit_trace("topk_parent_not_limit");
         return None;
     }
     let limit = parent as *mut pg_sys::Limit;
-    if !(*limit).limitOffset.is_null() {
+    if !unsafe { (*limit).limitOffset.is_null() } {
         return None;
     }
-    let lc = (*limit).limitCount;
-    if lc.is_null() || (*lc).type_ != pg_sys::NodeTag::T_Const {
+    let lc = unsafe { (*limit).limitCount };
+    if lc.is_null() || unsafe { (*lc).type_ } != pg_sys::NodeTag::T_Const {
         return None; // non-constant LIMIT (param/expr) → decline
     }
     let lc_const = lc as *mut pg_sys::Const;
-    if (*lc_const).constisnull || (*lc_const).consttype.to_u32() != 20 {
+    if unsafe { (*lc_const).constisnull } || unsafe { (*lc_const).consttype.to_u32() } != 20 {
         return None; // LIMIT ALL (NULL) or non-int8 → decline
     }
-    let k_i64 = i64::from_datum((*lc_const).constvalue, false)?;
+    let k_i64 = unsafe { i64::from_datum((*lc_const).constvalue, false)? };
     // k must be positive AND fit i32: it is serialized into the int-only `custom_private` channel as one i32
     // (`lappend_int`), so a LIMIT ≥ 2^31 would truncate to a wrong/negative k → too-few rows the parent Limit cannot
     // add back (council-index-storage + council-rust-pgrx LOW). Such a limit is absurd (O(N) memory would OOM first);
@@ -2137,22 +2215,22 @@ unsafe fn try_swap_topk(
     // scope limit, not a safety property.
     let sort = plan as *mut pg_sys::Sort;
     // Grandchild must be a theodb_columnar_project CustomScan (M149) over a columnar rel.
-    let child = (*sort).plan.lefttree;
-    if child.is_null() || (*child).type_ != pg_sys::NodeTag::T_CustomScan {
+    let child = unsafe { (*sort).plan.lefttree };
+    if child.is_null() || unsafe { (*child).type_ } != pg_sys::NodeTag::T_CustomScan {
         return None;
     }
     let proj = child as *mut pg_sys::CustomScan;
-    let mname = (*(*proj).methods).CustomName;
-    if mname.is_null() || CStr::from_ptr(mname) != c"theodb_columnar_project" {
+    let mname = unsafe { (*(*proj).methods).CustomName };
+    if mname.is_null() || unsafe { CStr::from_ptr(mname) } != c"theodb_columnar_project" {
         return None;
     }
-    let scanrelid = (*proj).scan.scanrelid;
+    let scanrelid = unsafe { (*proj).scan.scanrelid };
     if scanrelid == 0 {
         return None;
     }
     // The projection = the project node's own targetlist (base-rel Vars). The top-k node (replacing the Sort) emits the
     // SAME columns in the SAME order (Sort only re-orders rows), so this is descriptor-equal to the Sort's output.
-    let src = PgList::<pg_sys::TargetEntry>::from_pg((*proj).scan.plan.targetlist);
+    let src = unsafe { PgList::<pg_sys::TargetEntry>::from_pg((*proj).scan.plan.targetlist) };
     if src.is_empty() {
         return None;
     }
@@ -2160,51 +2238,55 @@ unsafe fn try_swap_topk(
     let mut cst: *mut pg_sys::List = std::ptr::null_mut(); // custom_scan_tlist (fresh base Vars)
     for i in 0..src.len() {
         let te = src.get_ptr(i)?;
-        let e = (*te).expr as *mut pg_sys::Node;
-        if e.is_null() || (*e).type_ != pg_sys::NodeTag::T_Var {
+        let e = unsafe { (*te).expr } as *mut pg_sys::Node;
+        if e.is_null() || unsafe { (*e).type_ } != pg_sys::NodeTag::T_Var {
             return None; // a computed target expr → cannot materialize as a column (fail-closed)
         }
         let v = e as *mut pg_sys::Var;
-        if (*v).varno as u32 != scanrelid {
+        if unsafe { (*v).varno } as u32 != scanrelid {
             return None; // not a base column of the scanned rel
         }
-        let attno = (*v).varattno as i32;
+        let attno = unsafe { (*v).varattno } as i32;
         if attno <= 0 {
             return None; // system / whole-row col → decline
         }
-        let typoid = (*v).vartype.to_u32();
+        let typoid = unsafe { (*v).vartype.to_u32() };
         if !topk_type_supported(typoid) {
             return None; // build_arrow / arrow_value_to_datum cannot handle it → decline
         }
         proj_meta.push((attno, typoid));
-        let nv = pg_sys::makeVar(
-            scanrelid as i32,
-            attno as pg_sys::AttrNumber,
-            (*v).vartype,
-            (*v).vartypmod,
-            (*v).varcollid,
-            0,
-        );
-        let nte = pg_sys::makeTargetEntry(
-            nv as *mut pg_sys::Expr,
-            (i + 1) as pg_sys::AttrNumber,
-            (*te).resname,
-            (*te).resjunk,
-        );
-        cst = pg_sys::lappend(cst, nte as *mut c_void);
+        let nv = unsafe {
+            pg_sys::makeVar(
+                scanrelid as i32,
+                attno as pg_sys::AttrNumber,
+                (*v).vartype,
+                (*v).vartypmod,
+                (*v).varcollid,
+                0,
+            )
+        };
+        let nte = unsafe {
+            pg_sys::makeTargetEntry(
+                nv as *mut pg_sys::Expr,
+                (i + 1) as pg_sys::AttrNumber,
+                (*te).resname,
+                (*te).resjunk,
+            )
+        };
+        cst = unsafe { pg_sys::lappend(cst, nte as *mut c_void) };
     }
     // Sort keys (M167 ADR-3 — generalized from M158's single key). `sortColIdx[i]` is a 1-based resno into the
     // Sort's tlist, positionally aligned with the project's tlist (Sort passes columns through unchanged). EVERY key
     // must pass EVERY guard: the checks below are per-key properties, not a scope limit, so a multi-key sort is
     // admissible exactly when each of its keys is. Fail-closed — one bad key declines the whole swap.
-    let nkeys = (*sort).numCols as usize;
+    let nkeys = unsafe { (*sort).numCols } as usize;
     if nkeys == 0 || nkeys > TOPK_MAX_SORT_KEYS {
         admit_trace("topk_sort_key_count_out_of_range");
         return None;
     }
     let mut sort_keys: Vec<(i32, bool, bool)> = Vec::with_capacity(nkeys);
     for ki in 0..nkeys {
-        let key_pos = *(*sort).sortColIdx.add(ki) as usize;
+        let key_pos = unsafe { *(*sort).sortColIdx.add(ki) } as usize;
         if key_pos == 0 || key_pos > proj_meta.len() {
             return None;
         }
@@ -2217,7 +2299,7 @@ unsafe fn try_swap_topk(
         // varcollid — `ORDER BY s COLLATE "C"` overrides the column collation and the override lives on the Sort.
         // (Text FILTER predicates keep the determinism guard — filter equality, not order — unchanged.)
         if matches!(key_type, 25 | 1043) {
-            let sort_coll = (*(*sort).collations.add(ki)).to_u32();
+            let sort_coll = unsafe { (*(*sort).collations.add(ki)).to_u32() };
             if !sort_collation_is_byte_order(sort_coll) {
                 admit_trace("topk_text_key_non_byte_collation");
                 return None;
@@ -2226,44 +2308,46 @@ unsafe fn try_swap_topk(
             return None; // bpchar sort key → PG trims trailing blanks; DataFusion does not → decline
         }
         // Direction from this key's sort operator (M135: PG18 CompareType port; COMPARE_LT == ascending).
-        let opno = *(*sort).sortOperators.add(ki);
+        let opno = unsafe { *(*sort).sortOperators.add(ki) };
         let (mut opfamily, mut opcintype, mut cmptype) =
             (pg_sys::InvalidOid, pg_sys::InvalidOid, pg_sys::CompareType::COMPARE_INVALID);
-        pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut cmptype);
+        unsafe {
+            pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut cmptype)
+        };
         let ascending = match cmptype {
             pg_sys::CompareType::COMPARE_LT => true,
             pg_sys::CompareType::COMPARE_GT => false,
             _ => return None, // non-btree ordering operator → decline
         };
-        sort_keys.push((attno, ascending, *(*sort).nullsFirst.add(ki)));
+        sort_keys.push((attno, ascending, unsafe { *(*sort).nullsFirst.add(ki) }));
     }
     // Predicates: the project node applies the WHERE via its own qual (a List of final clauses whose Vars are base
     // Vars with varno == scanrelid). Every clause MUST be pushable (zone or text) — else decline, because the top-k
     // node OWNS the filter (the project subtree is dropped).
-    let qual = PgList::<pg_sys::Node>::from_pg((*proj).scan.plan.qual);
+    let qual = unsafe { PgList::<pg_sys::Node>::from_pg((*proj).scan.plan.qual) };
     let mut zpreds: Vec<ZonePredicate> = Vec::new();
     let mut tpreds: Vec<TextPredicate> = Vec::new();
     for i in 0..qual.len() {
         let clause = qual.get_ptr(i)?;
-        if let Some(z) = extract_zone_predicate(clause, scanrelid as i32) {
+        if let Some(z) = unsafe { extract_zone_predicate(clause, scanrelid as i32) } {
             zpreds.push(z);
         } else {
             // idem ao pushdown de agregacao acima: `?` declina o pushdown sem mudar o efeito.
-            tpreds.push(extract_text_predicate(clause, scanrelid as i32)?);
+            tpreds.push(unsafe { extract_text_predicate(clause, scanrelid as i32)? });
         }
     }
     // Resolve the table OID from the RTE (the project's scanrelid indexes the flat range table).
-    let scan_rte = pg_sys::rt_fetch(scanrelid, rtable);
+    let scan_rte = unsafe { pg_sys::rt_fetch(scanrelid, rtable) };
     if scan_rte.is_null() {
         return None;
     }
-    let table_oid = (*scan_rte).relid.to_u32();
+    let table_oid = unsafe { (*scan_rte).relid.to_u32() };
     // M167 ADR-4 / EC-1 — bound the O(N) decode. `run_columnar_topk` decodes {projection ∪ keys ∪ filter} for ALL
     // rows into one Arrow batch BEFORE the bounded-heap TopK, so this path costs O(N) memory where the native top-N
     // heapsort costs O(k). M158 mitigated that by defaulting the GUC OFF; M167 flipped it ON, so the bound lives
     // here. Fail-closed: declining falls back to the native plan, correct for any input.
     let est_decode_bytes = relation_physical_bytes(table_oid);
-    let work_mem_bytes = f64::from(pg_sys::work_mem.max(64)) * 1024.0;
+    let work_mem_bytes = f64::from(unsafe { pg_sys::work_mem.max(64) }) * 1024.0;
     if est_decode_bytes > work_mem_bytes * TOPK_DECODE_WORK_MEM_FACTOR {
         if admit_trace_enabled() {
             admit_trace(&format!(
@@ -2275,31 +2359,32 @@ unsafe fn try_swap_topk(
     }
 
     // Build the replacement CustomScan (scanrelid = 0 — it scans the columnar rel by OID, like the agg node).
-    let mut cscan = PgBox::<pg_sys::CustomScan>::alloc_node(pg_sys::NodeTag::T_CustomScan);
+    let mut cscan =
+        unsafe { PgBox::<pg_sys::CustomScan>::alloc_node(pg_sys::NodeTag::T_CustomScan) };
     {
         let plan_out = &mut cscan.scan.plan;
-        plan_out.targetlist = plain_var_tlist((*proj).scan.plan.targetlist);
+        plan_out.targetlist = unsafe { plain_var_tlist((*proj).scan.plan.targetlist) };
         plan_out.qual = std::ptr::null_mut();
         plan_out.lefttree = std::ptr::null_mut(); // drop the project subtree — the CustomScan scans itself
         plan_out.righttree = std::ptr::null_mut();
-        plan_out.plan_node_id = (*sort).plan.plan_node_id;
-        plan_out.startup_cost = (*sort).plan.startup_cost;
-        plan_out.total_cost = (*sort).plan.total_cost;
+        plan_out.plan_node_id = unsafe { (*sort).plan.plan_node_id };
+        plan_out.startup_cost = unsafe { (*sort).plan.startup_cost };
+        plan_out.total_cost = unsafe { (*sort).plan.total_cost };
         plan_out.plan_rows = k_i64 as f64;
-        plan_out.plan_width = (*sort).plan.plan_width;
+        plan_out.plan_width = unsafe { (*sort).plan.plan_width };
         plan_out.parallel_aware = false;
-        plan_out.parallel_safe = (*sort).plan.parallel_safe;
+        plan_out.parallel_safe = unsafe { (*sort).plan.parallel_safe };
     }
     cscan.scan.scanrelid = 0;
     cscan.flags = 0;
     cscan.custom_plans = std::ptr::null_mut();
     cscan.custom_exprs = std::ptr::null_mut();
-    let int_channel = encode_topk_private(table_oid, k, &sort_keys, &proj_meta, &zpreds);
-    let text_channel = encode_text_preds(&tpreds)?;
-    let mut outer = pg_sys::lappend(std::ptr::null_mut(), int_channel as *mut c_void);
-    outer = pg_sys::lappend(outer, text_channel as *mut c_void);
-    outer = pg_sys::lappend(outer, std::ptr::null_mut()); // 3rd channel unused for top-k
-    outer = pg_sys::lappend(outer, std::ptr::null_mut()); // 4th channel (IN-list) unused for top-k (M161)
+    let int_channel = unsafe { encode_topk_private(table_oid, k, &sort_keys, &proj_meta, &zpreds) };
+    let text_channel = unsafe { encode_text_preds(&tpreds)? };
+    let mut outer = unsafe { pg_sys::lappend(std::ptr::null_mut(), int_channel as *mut c_void) };
+    outer = unsafe { pg_sys::lappend(outer, text_channel as *mut c_void) };
+    outer = unsafe { pg_sys::lappend(outer, std::ptr::null_mut()) }; // 3rd channel unused for top-k
+    outer = unsafe { pg_sys::lappend(outer, std::ptr::null_mut()) }; // 4th channel (IN-list) unused for top-k (M161)
     cscan.custom_private = outer;
     cscan.custom_scan_tlist = cst;
     cscan.custom_relids = std::ptr::null_mut();
@@ -2316,35 +2401,35 @@ unsafe fn swap_walk(
     rtable: *mut pg_sys::List,
     parent: *mut pg_sys::Plan,
 ) {
-    let plan = *slot;
+    let plan = unsafe { *slot };
     if plan.is_null() {
         return;
     }
-    if (*plan).type_ == pg_sys::NodeTag::T_Agg {
-        if let Some(newnode) = try_swap_agg(plan, rtable, parent) {
-            *slot = newnode;
+    if unsafe { (*plan).type_ } == pg_sys::NodeTag::T_Agg {
+        if let Some(newnode) = unsafe { try_swap_agg(plan, rtable, parent) } {
+            unsafe { *slot = newnode };
             return; // replaced — the Agg's child subtree is dropped
         }
     }
     // M158 — a `Sort` under a `Limit(k)` over the columnar-project scan → late-materialization top-k CustomScan.
-    if (*plan).type_ == pg_sys::NodeTag::T_Sort {
-        if let Some(newnode) = try_swap_topk(plan, rtable, parent) {
-            *slot = newnode;
+    if unsafe { (*plan).type_ } == pg_sys::NodeTag::T_Sort {
+        if let Some(newnode) = unsafe { try_swap_topk(plan, rtable, parent) } {
+            unsafe { *slot = newnode };
             return; // replaced — the Sort's project subtree is dropped; the Limit above re-applies k
         }
     }
-    swap_walk(&mut (*plan).lefttree, rtable, plan);
-    swap_walk(&mut (*plan).righttree, rtable, plan);
-    match (*plan).type_ {
-        pg_sys::NodeTag::T_Append => {
+    unsafe { swap_walk(&mut (*plan).lefttree, rtable, plan) };
+    unsafe { swap_walk(&mut (*plan).righttree, rtable, plan) };
+    match unsafe { (*plan).type_ } {
+        pg_sys::NodeTag::T_Append => unsafe {
             swap_walk_list((*(plan as *mut pg_sys::Append)).appendplans, rtable, plan)
-        }
-        pg_sys::NodeTag::T_MergeAppend => {
+        },
+        pg_sys::NodeTag::T_MergeAppend => unsafe {
             swap_walk_list((*(plan as *mut pg_sys::MergeAppend)).mergeplans, rtable, plan)
-        }
-        pg_sys::NodeTag::T_SubqueryScan => {
+        },
+        pg_sys::NodeTag::T_SubqueryScan => unsafe {
             swap_walk(&mut (*(plan as *mut pg_sys::SubqueryScan)).subplan, rtable, plan)
-        }
+        },
         _ => {}
     }
 }
@@ -2358,10 +2443,12 @@ unsafe fn swap_walk_list(
     if list.is_null() {
         return;
     }
-    let n = (*list).length;
+    let n = unsafe { (*list).length };
     for i in 0..n {
-        let cell = (*list).elements.add(i as usize);
-        swap_walk(&mut (*cell).ptr_value as *mut _ as *mut *mut pg_sys::Plan, rtable, parent);
+        let cell = unsafe { (*list).elements.add(i as usize) };
+        unsafe {
+            swap_walk(&mut (*cell).ptr_value as *mut _ as *mut *mut pg_sys::Plan, rtable, parent)
+        };
     }
 }
 
@@ -2369,8 +2456,9 @@ unsafe fn swap_walk_list(
 unsafe extern "C-unwind" fn create_custom_scan_state(
     _cscan: *mut pg_sys::CustomScan,
 ) -> *mut pg_sys::Node {
-    let ptr = pg_sys::palloc0(std::mem::size_of::<ColumnarAggState>()) as *mut ColumnarAggState;
-    let st = &mut *ptr;
+    let ptr = unsafe { pg_sys::palloc0(std::mem::size_of::<ColumnarAggState>()) }
+        as *mut ColumnarAggState;
+    let st = unsafe { &mut *ptr };
     st.css.ss.ps.type_ = pg_sys::NodeTag::T_CustomScanState;
     st.css.methods = &EXEC_METHODS.0;
     st.result = std::ptr::null_mut();
@@ -2384,7 +2472,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     estate: *mut pg_sys::EState,
     eflags: c_int,
 ) {
-    let st = &mut *(node as *mut ColumnarAggState);
+    let st = unsafe { &mut *(node as *mut ColumnarAggState) };
     st.cursor = 0;
     st.result = std::ptr::null_mut();
     if (eflags & pg_sys::EXEC_FLAG_EXPLAIN_ONLY as c_int) != 0 {
@@ -2394,26 +2482,26 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     // M156/M157 — custom_private is the 3-channel outer List `[int_channel, text_channel, group_expr_channel]` (a
     // T_List). A flat IntList (T_IntList) — a legacy/channel-less encode — is read directly with zero text preds /
     // group exprs (backward compatible). The 3rd channel is read via list_length (absent → NIL → zero group exprs).
-    let raw_priv = (*cscan).custom_private;
+    let raw_priv = unsafe { (*cscan).custom_private };
     let (priv_list, text_list, group_expr_list, in_list): (
         *mut pg_sys::List,
         *mut pg_sys::List,
         *mut pg_sys::List,
         *mut pg_sys::List,
     ) = if !raw_priv.is_null()
-        && (*(raw_priv as *mut pg_sys::Node)).type_ == pg_sys::NodeTag::T_List
+        && unsafe { (*(raw_priv as *mut pg_sys::Node)).type_ } == pg_sys::NodeTag::T_List
     {
-        let outer_len = pg_sys::list_length(raw_priv);
+        let outer_len = unsafe { pg_sys::list_length(raw_priv) };
         (
-            pg_sys::list_nth(raw_priv, 0) as *mut pg_sys::List,
-            pg_sys::list_nth(raw_priv, 1) as *mut pg_sys::List,
+            unsafe { pg_sys::list_nth(raw_priv, 0) } as *mut pg_sys::List,
+            unsafe { pg_sys::list_nth(raw_priv, 1) } as *mut pg_sys::List,
             if outer_len >= 3 {
-                pg_sys::list_nth(raw_priv, 2) as *mut pg_sys::List
+                (unsafe { pg_sys::list_nth(raw_priv, 2) }) as *mut pg_sys::List
             } else {
                 std::ptr::null_mut()
             },
             if outer_len >= 4 {
-                pg_sys::list_nth(raw_priv, 3) as *mut pg_sys::List // M161 — 4th channel (integer IN-list)
+                (unsafe { pg_sys::list_nth(raw_priv, 3) }) as *mut pg_sys::List // M161 — 4th channel (integer IN-list)
             } else {
                 std::ptr::null_mut()
             },
@@ -2421,49 +2509,56 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     } else {
         (raw_priv, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut())
     };
-    let n = pg_sys::list_length(priv_list);
+    let n = unsafe { pg_sys::list_length(priv_list) };
     // M115 layout: [table_oid, mode, nagg, ...]. The base table is resolved by its stable pg_class OID (the Agg-swap
     // dropped the child scan, so there is no scanrelid to index es_range_table).
-    let relid = pg_sys::Oid::from_u32_unchecked(pg_sys::list_nth_int(priv_list, 0) as u32);
-    let mode = pg_sys::list_nth_int(priv_list, 1);
+    let relid =
+        unsafe { pg_sys::Oid::from_u32_unchecked(pg_sys::list_nth_int(priv_list, 0) as u32) };
+    let mode = unsafe { pg_sys::list_nth_int(priv_list, 1) };
 
     // Materialize the result rows in the durable per-query context so text/varlena GROUP BY key datums survive across
     // exec() calls (ADR-3). By-value datums (int8/float8/date/timestamptz) are context-independent.
-    let oldcxt = pg_sys::MemoryContextSwitchTo((*estate).es_query_cxt);
+    let oldcxt = unsafe { pg_sys::MemoryContextSwitchTo((*estate).es_query_cxt) };
     let res = (|| -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
         // M158 — top-k late materialization (mode == 2). Distinct IntList layout keyed by mode:
         // [relid, 2, k, nkeys, (attno,asc,nf)×nkeys, nproj, (attno,typoid)×nproj, npred, (col,op,hi,lo)×npred].
         if mode == 2 {
-            let k = pg_sys::list_nth_int(priv_list, 2) as usize;
-            let nkeys = pg_sys::list_nth_int(priv_list, 3) as usize;
+            let k = unsafe { pg_sys::list_nth_int(priv_list, 2) } as usize;
+            let nkeys = unsafe { pg_sys::list_nth_int(priv_list, 3) } as usize;
             let mut j = 4;
             let mut sort_keys: Vec<(String, bool, bool)> = Vec::with_capacity(nkeys);
             for _ in 0..nkeys {
-                let attno = pg_sys::list_nth_int(priv_list, j);
-                let asc = pg_sys::list_nth_int(priv_list, j + 1) != 0;
-                let nf = pg_sys::list_nth_int(priv_list, j + 2) != 0;
+                let attno = unsafe { pg_sys::list_nth_int(priv_list, j) };
+                let asc = unsafe { pg_sys::list_nth_int(priv_list, j + 1) } != 0;
+                let nf = unsafe { pg_sys::list_nth_int(priv_list, j + 2) } != 0;
                 j += 3;
-                let nm = pg_sys::get_attname(relid, attno as pg_sys::AttrNumber, false);
-                sort_keys.push((CStr::from_ptr(nm).to_string_lossy().into_owned(), asc, nf));
+                let nm = unsafe { pg_sys::get_attname(relid, attno as pg_sys::AttrNumber, false) };
+                sort_keys.push((
+                    unsafe { CStr::from_ptr(nm).to_string_lossy().into_owned() },
+                    asc,
+                    nf,
+                ));
             }
-            let nproj = pg_sys::list_nth_int(priv_list, j) as usize;
+            let nproj = unsafe { pg_sys::list_nth_int(priv_list, j) } as usize;
             j += 1;
             let mut proj_cols: Vec<(String, u32)> = Vec::with_capacity(nproj);
             for _ in 0..nproj {
-                let attno = pg_sys::list_nth_int(priv_list, j);
-                let typoid = pg_sys::list_nth_int(priv_list, j + 1) as u32;
+                let attno = unsafe { pg_sys::list_nth_int(priv_list, j) };
+                let typoid = unsafe { pg_sys::list_nth_int(priv_list, j + 1) } as u32;
                 j += 2;
-                let nm = pg_sys::get_attname(relid, attno as pg_sys::AttrNumber, false);
-                proj_cols.push((CStr::from_ptr(nm).to_string_lossy().into_owned(), typoid));
+                let nm = unsafe { pg_sys::get_attname(relid, attno as pg_sys::AttrNumber, false) };
+                proj_cols
+                    .push((unsafe { CStr::from_ptr(nm).to_string_lossy().into_owned() }, typoid));
             }
-            let np = if j < n { pg_sys::list_nth_int(priv_list, j) as usize } else { 0 };
+            let np =
+                if j < n { (unsafe { pg_sys::list_nth_int(priv_list, j) }) as usize } else { 0 };
             j += 1;
             let mut tk_preds = Vec::with_capacity(np);
             for _ in 0..np {
-                let col = pg_sys::list_nth_int(priv_list, j) as usize;
-                let opn = pg_sys::list_nth_int(priv_list, j + 1);
-                let hi = pg_sys::list_nth_int(priv_list, j + 2) as u32 as u64;
-                let lo = pg_sys::list_nth_int(priv_list, j + 3) as u32 as u64;
+                let col = unsafe { pg_sys::list_nth_int(priv_list, j) } as usize;
+                let opn = unsafe { pg_sys::list_nth_int(priv_list, j + 1) };
+                let hi = unsafe { pg_sys::list_nth_int(priv_list, j + 2) } as u32 as u64;
+                let lo = unsafe { pg_sys::list_nth_int(priv_list, j + 3) } as u32 as u64;
                 j += 4;
                 let op = match opn {
                     0 => ZoneOp::Lt,
@@ -2478,12 +2573,13 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             }
             // Text predicates from the shared 2nd channel (same leaf-Value layout as the agg path).
             let mut tk_text: Vec<TextPredicate> = Vec::new();
-            let tn = pg_sys::list_length(text_list);
+            let tn = unsafe { pg_sys::list_length(text_list) };
             for kk in 0..tn {
-                let entry = pg_sys::list_nth(text_list, kk) as *mut pg_sys::List;
-                let col = (*(pg_sys::list_nth(entry, 0) as *mut pg_sys::Integer)).ival as usize;
-                let opn = (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival;
-                let sval = (*(pg_sys::list_nth(entry, 2) as *mut pg_sys::String)).sval;
+                let entry = unsafe { pg_sys::list_nth(text_list, kk) } as *mut pg_sys::List;
+                let col = unsafe { (*(pg_sys::list_nth(entry, 0) as *mut pg_sys::Integer)).ival }
+                    as usize;
+                let opn = unsafe { (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival };
+                let sval = unsafe { (*(pg_sys::list_nth(entry, 2) as *mut pg_sys::String)).sval };
                 let op = match opn {
                     0 => TextOp::Eq,
                     1 => TextOp::Ne,
@@ -2494,44 +2590,48 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 tk_text.push(TextPredicate {
                     col,
                     op,
-                    needle: CStr::from_ptr(sval).to_string_lossy().into_owned(),
+                    needle: unsafe { CStr::from_ptr(sval).to_string_lossy().into_owned() },
                 });
             }
-            let rel = pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
-            let r = super::df_executor::run_columnar_topk(
-                rel,
-                &proj_cols,
-                &sort_keys,
-                k,
-                &tk_preds,
-                &tk_text,
-                &[], // M161 — top-k routing does not admit IN-list predicates
-                super::guc::columnar_zonemap_skip(),
-            );
-            pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let rel = unsafe {
+                pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE)
+            };
+            let r = unsafe {
+                super::df_executor::run_columnar_topk(
+                    rel,
+                    &proj_cols,
+                    &sort_keys,
+                    k,
+                    &tk_preds,
+                    &tk_text,
+                    &[], // M161 — top-k routing does not admit IN-list predicates
+                    super::guc::columnar_zonemap_skip(),
+                )
+            };
+            unsafe { pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE) };
             return r;
         }
         // IntList: [mode, relid, nagg, (kind,attno,delta_hi,delta_lo)×nagg, npred, (col,op,hi,lo)×npred,
         //           ngroup, (attno,typoid)×ngroup, noutput, (kind,idx)×noutput].
-        let nagg = pg_sys::list_nth_int(priv_list, 2) as usize;
+        let nagg = unsafe { pg_sys::list_nth_int(priv_list, 2) } as usize;
         let mut specs = Vec::with_capacity(nagg);
         let mut i = 3;
         for _ in 0..nagg {
-            let kind = pg_sys::list_nth_int(priv_list, i);
-            let attno = pg_sys::list_nth_int(priv_list, i + 1);
+            let kind = unsafe { pg_sys::list_nth_int(priv_list, i) };
+            let attno = unsafe { pg_sys::list_nth_int(priv_list, i + 1) };
             // M166 — delta (SumIntAddConst offset, kind 9; 0 for every other kind), reconstructed from its hi/lo i32
             // pair (a `List` Integer is i32, so an i64 rides two words — same split as the IN-list/const-out channels).
-            let dhi = pg_sys::list_nth_int(priv_list, i + 2);
-            let dlo = pg_sys::list_nth_int(priv_list, i + 3);
+            let dhi = unsafe { pg_sys::list_nth_int(priv_list, i + 2) };
+            let dlo = unsafe { pg_sys::list_nth_int(priv_list, i + 3) };
             let delta = ((dhi as i64) << 32) | (dlo as u32 as i64);
             i += 4;
             let col_name = |ano: i32| -> String {
-                let nm = pg_sys::get_attname(relid, ano as pg_sys::AttrNumber, false);
-                CStr::from_ptr(nm).to_string_lossy().into_owned()
+                let nm = unsafe { pg_sys::get_attname(relid, ano as pg_sys::AttrNumber, false) };
+                unsafe { CStr::from_ptr(nm).to_string_lossy().into_owned() }
             };
             // min/max output type = the input column type; recover its OID from the relation attribute (kinds 6/7).
             let col_typoid = |ano: i32| -> u32 {
-                pg_sys::get_atttype(relid, ano as pg_sys::AttrNumber).to_u32()
+                unsafe { pg_sys::get_atttype(relid, ano as pg_sys::AttrNumber).to_u32() }
             };
             match kind {
                 0 => specs.push(AggSpec::CountStar),
@@ -2547,14 +2647,15 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 _ => return Err(format!("columnar_agg: bad agg kind {kind}")),
             }
         }
-        let npred = if i < n { pg_sys::list_nth_int(priv_list, i) as usize } else { 0 };
+        let npred =
+            if i < n { (unsafe { pg_sys::list_nth_int(priv_list, i) }) as usize } else { 0 };
         i += 1;
         let mut preds = Vec::with_capacity(npred);
         for _ in 0..npred {
-            let col = pg_sys::list_nth_int(priv_list, i) as usize;
-            let opn = pg_sys::list_nth_int(priv_list, i + 1);
-            let hi = pg_sys::list_nth_int(priv_list, i + 2) as u32 as u64;
-            let lo = pg_sys::list_nth_int(priv_list, i + 3) as u32 as u64;
+            let col = unsafe { pg_sys::list_nth_int(priv_list, i) } as usize;
+            let opn = unsafe { pg_sys::list_nth_int(priv_list, i + 1) };
+            let hi = unsafe { pg_sys::list_nth_int(priv_list, i + 2) } as u32 as u64;
+            let lo = unsafe { pg_sys::list_nth_int(priv_list, i + 3) } as u32 as u64;
             i += 4;
             let op = match opn {
                 0 => ZoneOp::Lt,
@@ -2570,12 +2671,13 @@ unsafe extern "C-unwind" fn begin_custom_scan(
         // M156 — decode the text predicates from the 2nd channel (`text_list`; NIL → none). Each entry is a
         // `[Integer(col), Integer(op), String(needle)]` list of leaf Value nodes.
         let mut text_preds: Vec<TextPredicate> = Vec::new();
-        let tn = pg_sys::list_length(text_list);
+        let tn = unsafe { pg_sys::list_length(text_list) };
         for k in 0..tn {
-            let entry = pg_sys::list_nth(text_list, k) as *mut pg_sys::List;
-            let col = (*(pg_sys::list_nth(entry, 0) as *mut pg_sys::Integer)).ival as usize;
-            let opn = (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival;
-            let sval = (*(pg_sys::list_nth(entry, 2) as *mut pg_sys::String)).sval;
+            let entry = unsafe { pg_sys::list_nth(text_list, k) } as *mut pg_sys::List;
+            let col =
+                unsafe { (*(pg_sys::list_nth(entry, 0) as *mut pg_sys::Integer)).ival } as usize;
+            let opn = unsafe { (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival };
+            let sval = unsafe { (*(pg_sys::list_nth(entry, 2) as *mut pg_sys::String)).sval };
             let op = match opn {
                 0 => TextOp::Eq,
                 1 => TextOp::Ne,
@@ -2583,59 +2685,66 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 3 => TextOp::NotLike,
                 _ => return Err(format!("columnar_agg: bad text op {opn}")),
             };
-            let needle = CStr::from_ptr(sval).to_string_lossy().into_owned();
+            let needle = unsafe { CStr::from_ptr(sval).to_string_lossy().into_owned() };
             text_preds.push(TextPredicate { col, op, needle });
         }
         // M161 — decode the integer IN-list predicates from the 4th channel (`in_list`; NIL → none). Each entry is a
         // `[Integer(col), Integer(n), Integer(c0_hi), Integer(c0_lo), …]` list of leaf Value nodes; each i64 const is
         // reconstructed from its hi/lo i32 pair (makeInteger is i32, so encode_in_preds split every const in two).
         let mut in_preds: Vec<super::zonemap::InListPredicate> = Vec::new();
-        let inn = pg_sys::list_length(in_list);
+        let inn = unsafe { pg_sys::list_length(in_list) };
         for k in 0..inn {
-            let entry = pg_sys::list_nth(in_list, k) as *mut pg_sys::List;
-            let col = (*(pg_sys::list_nth(entry, 0) as *mut pg_sys::Integer)).ival as usize;
-            let n = (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival as usize;
+            let entry = unsafe { pg_sys::list_nth(in_list, k) } as *mut pg_sys::List;
+            let col =
+                unsafe { (*(pg_sys::list_nth(entry, 0) as *mut pg_sys::Integer)).ival } as usize;
+            let n =
+                unsafe { (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival } as usize;
             let mut consts = Vec::with_capacity(n);
             for j in 0..n {
-                let hi =
-                    (*(pg_sys::list_nth(entry, (2 + j * 2) as i32) as *mut pg_sys::Integer)).ival;
-                let lo = (*(pg_sys::list_nth(entry, (2 + j * 2 + 1) as i32)
-                    as *mut pg_sys::Integer))
-                    .ival;
+                let hi = unsafe {
+                    (*(pg_sys::list_nth(entry, (2 + j * 2) as i32) as *mut pg_sys::Integer)).ival
+                };
+                let lo = unsafe {
+                    (*(pg_sys::list_nth(entry, (2 + j * 2 + 1) as i32) as *mut pg_sys::Integer))
+                }
+                .ival;
                 consts.push(((hi as i64) << 32) | (lo as u32 as i64));
             }
             in_preds.push(super::zonemap::InListPredicate { col, consts });
         }
         // Group block (appended last; absent → ngroup 0 → scalar path, backward compatible).
-        let ngroup = if i < n { pg_sys::list_nth_int(priv_list, i) as usize } else { 0 };
+        let ngroup =
+            if i < n { (unsafe { pg_sys::list_nth_int(priv_list, i) }) as usize } else { 0 };
         i += 1;
         let mut group_cols: Vec<(String, u32)> = Vec::with_capacity(ngroup);
         for _ in 0..ngroup {
-            let attno = pg_sys::list_nth_int(priv_list, i);
-            let typoid = pg_sys::list_nth_int(priv_list, i + 1) as u32;
+            let attno = unsafe { pg_sys::list_nth_int(priv_list, i) };
+            let typoid = unsafe { pg_sys::list_nth_int(priv_list, i + 1) } as u32;
             i += 2;
-            let nm = pg_sys::get_attname(relid, attno as pg_sys::AttrNumber, false);
-            group_cols.push((CStr::from_ptr(nm).to_string_lossy().into_owned(), typoid));
+            let nm = unsafe { pg_sys::get_attname(relid, attno as pg_sys::AttrNumber, false) };
+            group_cols.push((unsafe { CStr::from_ptr(nm).to_string_lossy().into_owned() }, typoid));
         }
-        let noutput = if i < n { pg_sys::list_nth_int(priv_list, i) as usize } else { 0 };
+        let noutput =
+            if i < n { (unsafe { pg_sys::list_nth_int(priv_list, i) }) as usize } else { 0 };
         i += 1;
         let mut layout: Vec<(u8, usize)> = Vec::with_capacity(noutput);
         for _ in 0..noutput {
-            let kind = pg_sys::list_nth_int(priv_list, i) as u8;
-            let idx = pg_sys::list_nth_int(priv_list, i + 1) as usize;
+            let kind = unsafe { pg_sys::list_nth_int(priv_list, i) } as u8;
+            let idx = unsafe { pg_sys::list_nth_int(priv_list, i + 1) } as usize;
             i += 2;
             layout.push((kind, idx));
         }
         // M165 — const-out block (layout kind=3): [nconst, (val_hi, val_lo, typoid)×nconst], appended after the layout
         // by encode_private. Absent in a pre-M165 IntList (i == n → nconst 0), so backward compatible. Each i64 value
         // is reconstructed from its hi/lo i32 pair (lappend_int is i32).
-        let nconst = if i < n { pg_sys::list_nth_int(priv_list, i) as usize } else { 0 };
+        let nconst =
+            if i < n { (unsafe { pg_sys::list_nth_int(priv_list, i) }) as usize } else { 0 };
         i += 1;
         let mut const_outs: Vec<(i64, u32)> = Vec::with_capacity(nconst);
         for _ in 0..nconst {
-            let hi = pg_sys::list_nth_int(priv_list, i);
-            let lo = pg_sys::list_nth_int(priv_list, i + 1);
-            let typoid = pg_sys::list_nth_int(priv_list, i + 2) as u32;
+            let hi = unsafe { pg_sys::list_nth_int(priv_list, i) };
+            let lo = unsafe { pg_sys::list_nth_int(priv_list, i + 1) };
+            let typoid = unsafe { pg_sys::list_nth_int(priv_list, i + 2) } as u32;
             i += 3;
             let val = ((hi as i64) << 32) | (lo as u32 as i64);
             const_outs.push((val, typoid));
@@ -2644,20 +2753,24 @@ unsafe extern "C-unwind" fn begin_custom_scan(
         // [Integer(base_attno), Integer(func), String(unit), Integer(out_typoid), Integer(delta_hi), Integer(delta_lo)].
         // Resolve base_attno → column name. NIL → empty.
         let mut group_exprs: Vec<super::df_executor::GroupExprExec> = Vec::new();
-        let gn = pg_sys::list_length(group_expr_list);
+        let gn = unsafe { pg_sys::list_length(group_expr_list) };
         for k in 0..gn {
-            let entry = pg_sys::list_nth(group_expr_list, k) as *mut pg_sys::List;
-            let base_attno = (*(pg_sys::list_nth(entry, 0) as *mut pg_sys::Integer)).ival;
-            let func = (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival;
-            let unit = CStr::from_ptr((*(pg_sys::list_nth(entry, 2) as *mut pg_sys::String)).sval)
-                .to_string_lossy()
-                .into_owned();
-            let out_typoid = (*(pg_sys::list_nth(entry, 3) as *mut pg_sys::Integer)).ival as u32;
-            let dhi = (*(pg_sys::list_nth(entry, 4) as *mut pg_sys::Integer)).ival;
-            let dlo = (*(pg_sys::list_nth(entry, 5) as *mut pg_sys::Integer)).ival;
+            let entry = unsafe { pg_sys::list_nth(group_expr_list, k) } as *mut pg_sys::List;
+            let base_attno =
+                unsafe { (*(pg_sys::list_nth(entry, 0) as *mut pg_sys::Integer)).ival };
+            let func = unsafe { (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival };
+            let unit = unsafe {
+                CStr::from_ptr((*(pg_sys::list_nth(entry, 2) as *mut pg_sys::String)).sval)
+            }
+            .to_string_lossy()
+            .into_owned();
+            let out_typoid =
+                unsafe { (*(pg_sys::list_nth(entry, 3) as *mut pg_sys::Integer)).ival } as u32;
+            let dhi = unsafe { (*(pg_sys::list_nth(entry, 4) as *mut pg_sys::Integer)).ival };
+            let dlo = unsafe { (*(pg_sys::list_nth(entry, 5) as *mut pg_sys::Integer)).ival };
             let delta = ((dhi as i64) << 32) | (dlo as u32 as i64);
-            let nm = pg_sys::get_attname(relid, base_attno as pg_sys::AttrNumber, false);
-            let base_name = CStr::from_ptr(nm).to_string_lossy().into_owned();
+            let nm = unsafe { pg_sys::get_attname(relid, base_attno as pg_sys::AttrNumber, false) };
+            let base_name = unsafe { CStr::from_ptr(nm).to_string_lossy().into_owned() };
             group_exprs.push(super::df_executor::GroupExprExec {
                 base_name,
                 func,
@@ -2670,27 +2783,33 @@ unsafe extern "C-unwind" fn begin_custom_scan(
         if ngroup > 0 || !group_exprs.is_empty() {
             // GROUP BY (columnar only — admit declined grouped heap / grouped+WHERE). Multi-row result. M157: a
             // grouped query may have ONLY expression keys (bare group_cols empty) — still the grouped path.
-            let rel = pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
-            let r = run_columnar_grouped_aggs(
-                rel,
-                &group_cols,
-                &group_exprs,
-                &specs,
-                &layout,
-                &const_outs,
-                &preds,
-                &text_preds,
-                &in_preds,
-                super::guc::columnar_zonemap_skip(),
-            );
-            pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let rel = unsafe {
+                pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE)
+            };
+            let r = unsafe {
+                run_columnar_grouped_aggs(
+                    rel,
+                    &group_cols,
+                    &group_exprs,
+                    &specs,
+                    &layout,
+                    &const_outs,
+                    &preds,
+                    &text_preds,
+                    &in_preds,
+                    super::guc::columnar_zonemap_skip(),
+                )
+            };
+            unsafe { pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE) };
             r
         } else if mode == 1 {
             // M101 HTAP: aggregate the heap-authoritative Arrow cache. Single row → wrap.
-            super::arrow_cache::run_cache_aggs(relid, &specs).map(|row| vec![row])
+            unsafe { super::arrow_cache::run_cache_aggs(relid, &specs).map(|row| vec![row]) }
         } else {
             // M100 scalar: decode the columnar stripes with zone-map skip-pruning. Single row → wrap.
-            let rel = pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let rel = unsafe {
+                pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE)
+            };
             // Phase B (columnar-minmax): a scalar all-min/max output with NO predicate can be answered from the
             // zone-map directory (+ pending) WITHOUT decoding any column chunk. Try every agg; if all fold, emit that
             // row; if any gates out (unordered, max-float, has_minmax=false group, all-NaN pending), fall back to the
@@ -2710,7 +2829,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                             AggSpec::MaxCol(n, t) => (n.as_str(), *t, true),
                             _ => unreachable!(),
                         };
-                        match super::columnar::directory_minmax(rel, name, typoid, want_max) {
+                        match unsafe { super::columnar::directory_minmax(rel, name, typoid, want_max) } {
                             Ok(Some(cell)) => row.push(cell),
                             Ok(None) => {
                                 ok = false;
@@ -2740,21 +2859,23 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             }
             let r = match fast {
                 Some(res) => res,
-                None => run_columnar_aggs(
-                    rel,
-                    &specs,
-                    &preds,
-                    &text_preds,
-                    &in_preds,
-                    super::guc::columnar_zonemap_skip(),
-                )
+                None => unsafe {
+                    run_columnar_aggs(
+                        rel,
+                        &specs,
+                        &preds,
+                        &text_preds,
+                        &in_preds,
+                        super::guc::columnar_zonemap_skip(),
+                    )
+                }
                 .map(|row| vec![row]),
             };
-            pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            unsafe { pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE) };
             r
         }
     })();
-    pg_sys::MemoryContextSwitchTo(oldcxt);
+    unsafe { pg_sys::MemoryContextSwitchTo(oldcxt) };
     match res {
         Ok(v) => st.result = Box::into_raw(Box::new(v)),
         Err(e) => pg_sys::error!("{e}"),
@@ -2765,34 +2886,34 @@ unsafe extern "C-unwind" fn begin_custom_scan(
 unsafe extern "C-unwind" fn exec_custom_scan(
     node: *mut pg_sys::CustomScanState,
 ) -> *mut pg_sys::TupleTableSlot {
-    let st = &mut *(node as *mut ColumnarAggState);
+    let st = unsafe { &mut *(node as *mut ColumnarAggState) };
     let slot = st.css.ss.ss_ScanTupleSlot;
     if st.result.is_null() {
-        return pg_sys::ExecClearTuple(slot);
+        return unsafe { pg_sys::ExecClearTuple(slot) };
     }
-    let rows = &*st.result;
+    let rows = unsafe { &*st.result };
     if st.cursor >= rows.len() {
-        return pg_sys::ExecClearTuple(slot); // all rows emitted (scalar: 1 row; GROUP BY: N rows; empty: 0)
+        return unsafe { pg_sys::ExecClearTuple(slot) }; // all rows emitted (scalar: 1 row; GROUP BY: N rows; empty: 0)
     }
     let vals = &rows[st.cursor];
-    pg_sys::ExecClearTuple(slot);
-    let natts = (*(*slot).tts_tupleDescriptor).natts as usize;
-    let tts_values = std::slice::from_raw_parts_mut((*slot).tts_values, natts);
-    let tts_isnull = std::slice::from_raw_parts_mut((*slot).tts_isnull, natts);
+    unsafe { pg_sys::ExecClearTuple(slot) };
+    let natts = unsafe { (*(*slot).tts_tupleDescriptor).natts } as usize;
+    let tts_values = unsafe { std::slice::from_raw_parts_mut((*slot).tts_values, natts) };
+    let tts_isnull = unsafe { std::slice::from_raw_parts_mut((*slot).tts_isnull, natts) };
     for i in 0..natts.min(vals.len()) {
         tts_values[i] = vals[i].0;
         tts_isnull[i] = vals[i].1;
     }
-    pg_sys::ExecStoreVirtualTuple(slot);
+    unsafe { pg_sys::ExecStoreVirtualTuple(slot) };
     st.cursor += 1;
     slot
 }
 
 #[pg_guard]
 unsafe extern "C-unwind" fn end_custom_scan(node: *mut pg_sys::CustomScanState) {
-    let st = &mut *(node as *mut ColumnarAggState);
+    let st = unsafe { &mut *(node as *mut ColumnarAggState) };
     if !st.result.is_null() {
-        drop(Box::from_raw(st.result));
+        drop(unsafe { Box::from_raw(st.result) });
         st.result = std::ptr::null_mut();
     }
 }
@@ -2801,7 +2922,7 @@ unsafe extern "C-unwind" fn end_custom_scan(node: *mut pg_sys::CustomScanState) 
 unsafe extern "C-unwind" fn rescan_custom_scan(node: *mut pg_sys::CustomScanState) {
     // The aggregate is unparameterized (admission required no correlated Var / param_info), so its result is
     // invariant across rescans — just rewind the cursor and re-emit the cached rows.
-    let st = &mut *(node as *mut ColumnarAggState);
+    let st = unsafe { &mut *(node as *mut ColumnarAggState) };
     st.cursor = 0;
 }
 
