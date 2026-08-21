@@ -217,7 +217,16 @@ fn batches_to_jsonb(batches: &[RecordBatch]) -> Result<Vec<pgrx::JsonB>, String>
         for r in 0..b.num_rows() {
             let mut m = Map::with_capacity(campos.len());
             for (c, nome) in campos.iter().enumerate() {
-                m.insert(nome.clone(), extratores[c](r));
+                // CHAVE NULA É OMITIDA, não emitida como `null`.
+                //
+                // MEDIDO pelo teste de equivalência, que falhou na primeira implementação: o
+                // `arrow-json` OMITE campos nulos, e eu os emitia como `null`. Em `jsonb` isso não é
+                // cosmético — `doc ? 'nome'` e `jsonb_object_keys(doc)` dariam respostas diferentes
+                // das que o usuário recebia. Um ganho de tempo que muda o documento não é ganho.
+                let v = extratores[c](r);
+                if !v.is_null() {
+                    m.insert(nome.clone(), v);
+                }
             }
             out.push(pgrx::JsonB(Value::Object(m)));
         }

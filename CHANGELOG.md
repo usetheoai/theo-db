@@ -22,6 +22,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   como oráculo dos testes de equivalência e como fallback para tipos que a conversão direta não cobre
   (nested, temporal, decimal). **O ganho ainda NÃO foi medido** — quando for, entra aqui com o número
   e sai do arnês (B-096, B-069)
+- **Chave nula em `read_parquet` continua OMITIDA, não emitida como `null`.** O `arrow-json` omite
+  campos nulos, e a primeira versão da conversão direta os emitia — diferença invisível em qualquer
+  benchmark e visível em `doc ? 'chave'` e `jsonb_object_keys(doc)`. Pega pelo teste de equivalência
+  antes de sair daqui (B-096)
 
 ### Fixed
 - **O planner via ZERO linha em toda tabela colunar.** `columnar_relation_estimate_size` devolvia
