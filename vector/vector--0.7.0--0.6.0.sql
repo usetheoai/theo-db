@@ -1,0 +1,9 @@
+-- Downgrade 0.7.0 -> 0.6.0: corrige uma ALEGACAO, nao remove capacidade (B-038 / ADR-0063).
+--
+-- A superficie e IDENTICA nas duas: tipo `vector` provido pelo `theodb_rs`, mais os aliases `hnsw`
+-- e `ivfflat`. O que muda e o que a instalacao DIZ ter. A "0.7.0" anterior afirmava a versao do
+-- pgvector que introduziu `halfvec`/`sparsevec`, e uma app que consulta `extversion >= '0.7.0'`
+-- recebia SIM e quebrava na primeira coluna `halfvec(N)`.
+--
+-- Sem corpo de proposito: nao ha objeto a criar nem a destruir. `ALTER EXTENSION vector UPDATE TO
+-- '0.6.0'` existe para que uma instalacao ja feita possa parar de mentir sem ser recriada.

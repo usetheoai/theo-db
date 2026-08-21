@@ -62,3 +62,5 @@
 * [M2 — Escolha do índice ANN default, dirigida por evidência](m2-index-decision.md) - HNSW é o índice default porque venceu em recall, QPS, tempo de build e — em baixa dimensão — tamanho; a vantagem de compressão do DiskANN mostrou-se artefato de alta dimensionalidade.
 - [ADR-0061 — Todo pilar mensurável tem benchmark oficial público](0061-benchmark-oficial-por-pilar.md) — arnês de terceiros, concorrente na mesma máquina, qualidade ao lado de velocidade
 - [ADR-0062 — O portão passa a olhar antes do merge, e paga por si trocando de gatilho](0062-portao-antes-do-merge.md) — a premissa de custo caiu (runner grátis em repo público), e a medição mostra 30 corridas pesadas para 13 integrações
+- [ADR-0063 — halfvec/sparsevec fora de escopo, e a versão do shim que dizia tê-los](0063-halfvec-fora-de-escopo-e-a-versao-que-mentia.md) — o número de versão de um shim é contrato de capacidade, não número de build
+- [ADR-0064 — `maintenance_work_mem` não é um contrato de memória neste produto](0064-maintenance-work-mem-nao-e-contrato.md) — um componente o ignora, outro o excede em 7×; a regra passa a ser projetar e recusar nomeando o número

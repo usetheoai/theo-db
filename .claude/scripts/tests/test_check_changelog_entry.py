@@ -120,3 +120,30 @@ def test_it_passes_against_cf7633a_which_carried_its_entry() -> None:
 
         _pytest.skip("cf7633a nao esta neste checkout")
     assert _rc("cf7633a") == 0
+
+
+# ---------------------------------------------------------------------------
+# Um MERGE COMMIT nao introduz trabalho proprio, e nao lista arquivos.
+#
+# Medido em 2026-08-20: o hook bloqueou o encerramento da sessao logo apos um
+# `git merge origin/develop`. `git show --name-only` num merge limpo devolve VAZIO, o script saiu 2
+# ("nao pude inspecionar") e o hook tratou qualquer nao-zero como violacao — colapsando "nao pude
+# perguntar" com "perguntei e a resposta e nao".
+#
+# E a mesma distincao que o portao do B-051 faz entre `[]` e `None` para as tags semver, e que eu
+# construi la e nao apliquei aqui.
+# ---------------------------------------------------------------------------
+
+
+def test_a_merge_commit_is_not_a_violation() -> None:
+    """Um merge integra trabalho ja registrado; exigir entrada nova dele e exigir entrada em dobro."""
+    raiz = Path(__file__).resolve().parents[3]
+    merge = subprocess.run(
+        ["git", "log", "--merges", "--format=%H", "-1"],
+        cwd=raiz, capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    if not merge:
+        import pytest as _pytest
+
+        _pytest.skip("sem merge commit neste checkout")
+    assert _rc(merge) == 0

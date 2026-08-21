@@ -44,6 +44,19 @@ for d in skills/*/tests; do
     run_suite "$d"
 done
 
+# B-091 — `scripts/tests` e `hooks/tests` NAO eram varridos, e a ausencia era invisivel: quem
+# escreve um teste ali ve `ALL SUITES GREEN` e conclui que ele passou, quando ele nem rodou.
+#
+# Medido em 2026-08-20: os 7 testes de `scripts/tests/test_check_changelog_entry.py` — escritos
+# NESTA MESMA SESSAO, incluindo o que prova que o gate reprova o commit real que motivou o item —
+# nunca haviam sido executados por este runner. `run_slice_tests.sh | grep -c check_changelog_entry`
+# devolvia 0.
+#
+# O glob nao falha quando o diretorio nao existe porque `run_suite` ja pula o que nao e diretorio.
+for d in scripts/tests hooks/tests; do
+    run_suite "$d"
+done
+
 echo
 if [ "${#failures[@]}" -eq 0 ]; then
     echo "ALL SUITES GREEN"

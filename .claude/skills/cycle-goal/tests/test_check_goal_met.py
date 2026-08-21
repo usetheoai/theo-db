@@ -109,7 +109,11 @@ class TestHookContract:
         out = self._run({"milestones": ["M2"]}, tmp_path)
 
         assert out["decision"] == "block"
-        assert "stop criterion is the acceptance run" in out["reason"]
+        # B-056 — o texto dizia "the acceptance run", o que fica FALSO para um objetivo expresso
+        # em itens de backlog. Um gate que descreve errado a propria condicao e um gate que ninguem
+        # consegue satisfazer de proposito. A assercao continua pinando o TEXTO porque ele e parte
+        # do contrato: e o que o agente le quando e recusado.
+        assert "stop criterion is the ARTIFACT ON DISK" in out["reason"]
 
     def test_libera_e_limpa_o_estado_quando_cumprida(self, tmp_path: Path) -> None:
         self._project(tmp_path, "x", "ACCEPTED")
@@ -439,3 +443,121 @@ class TestGoalRefusesUnsatisfiable:
         result = self._arm(root, "--force")
 
         assert result.returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# B-056 bullet 2 — o registro de execucao e evidencia de PRIMEIRA CLASSE.
+#
+# `cycle-maintenance.md` define `knowledge-base/maintenance-runs/{B-NNN}-{date}.md` como o registro
+# de uma passagem do loop, e este ecossistema e backlog-driven: `cycle-roadmap` foi aposentado, e
+# nao ha `ROADMAP.md` com milestones aqui. Um gate que so sabe avaliar o par
+# (registro de acceptance + checkbox do ROADMAP) nao tem como julgar um objetivo expresso em itens
+# de backlog — e foi exatamente esse descompasso que produziu os cinco bloqueios de 2026-08-13/14,
+# com o trabalho entregue, commitado e empurrado.
+# ---------------------------------------------------------------------------
+
+from check_goal_met import evaluate_backlog_items  # noqa: E402
+
+
+def _backlog(itens: dict[str, str]) -> str:
+    blocos = []
+    for bid, status in itens.items():
+        marca = "x" if status in ("shipped", "killed") else " "
+        extra = "kill_reason: a medição não sustentou\n" if status == "killed" else ""
+        blocos.append(
+            f"## {bid} — um item qualquer   [{marca}]\n\n"
+            f"domain: governanca\nrepo: theo-db\nstatus: {status}\n{extra}"
+        )
+    return "# Backlog\n\n" + "\n".join(blocos)
+
+
+def test_a_shipped_item_satisfies_the_goal(tmp_path: Path) -> None:
+    runs = tmp_path / "maintenance-runs"
+    runs.mkdir()
+    (runs / "B-055-2026-08-20.md").write_text("status: completed\n", encoding="utf-8")
+    assert evaluate_backlog_items(["B-055"], _backlog({"B-055": "shipped"}), runs) == []
+
+
+def test_a_killed_item_satisfies_the_goal(tmp_path: Path) -> None:
+    """Matar um item e um desfecho de SUCESSO do ciclo — `cycle-discover` diz isso em texto.
+
+    Um gate que exigisse `shipped` criaria o incentivo de enviar uma hipotese fraca em vez de
+    mata-la, que e o oposto do que o ciclo existe para proteger.
+    """
+    runs = tmp_path / "maintenance-runs"
+    runs.mkdir()
+    (runs / "B-060-2026-08-20.md").write_text("status: completed\n", encoding="utf-8")
+    assert evaluate_backlog_items(["B-060"], _backlog({"B-060": "killed"}), runs) == []
+
+
+def test_an_open_item_blocks_and_says_which_status_it_has(tmp_path: Path) -> None:
+    runs = tmp_path / "maintenance-runs"
+    runs.mkdir()
+    motivos = evaluate_backlog_items(["B-055"], _backlog({"B-055": "triaged"}), runs)
+    assert len(motivos) == 1
+    assert "triaged" in motivos[0]
+
+
+def test_an_item_absent_from_the_registry_is_named_as_absent(tmp_path: Path) -> None:
+    """Ausente e diferente de aberto, e a mensagem tem de distinguir — um id errado no objetivo
+    bloquearia para sempre por uma razao que ninguem entenderia."""
+    runs = tmp_path / "maintenance-runs"
+    runs.mkdir()
+    motivos = evaluate_backlog_items(["B-999"], _backlog({"B-055": "shipped"}), runs)
+    assert len(motivos) == 1
+    assert "B-999" in motivos[0]
+    assert "não está" in motivos[0] or "nao esta" in motivos[0]
+
+
+def test_a_shipped_item_without_a_run_record_still_satisfies_but_says_so(tmp_path: Path) -> None:
+    """O registro de execucao e evidencia de primeira classe — nao um segundo portao.
+
+    `cycle-maintenance` produz o registro; o `status` no `BACKLOG.md` e que carrega o veredito, e
+    ele so chega a `shipped` passando pelos gates do sub-ciclo. Exigir os DOIS transformaria o
+    registro num requisito burocratico e faria o gate reprovar trabalho legitimo feito antes de o
+    registro existir — que e a classe de bloqueio que este item existe para remover.
+    """
+    runs = tmp_path / "maintenance-runs"
+    runs.mkdir()
+    assert evaluate_backlog_items(["B-055"], _backlog({"B-055": "shipped"}), runs) == []
+
+
+def test_a_missing_runs_dir_is_misconfiguration_not_a_verdict(tmp_path: Path) -> None:
+    """Mesma protecao que o `acceptance_dir` ja tem: diretorio ausente e erro de configuracao,
+    e a mensagem precisa dizer isso em vez de soar como veredito legitimo."""
+    motivos = evaluate_backlog_items(
+        ["B-055"], _backlog({"B-055": "triaged"}), tmp_path / "nao-existe"
+    )
+    assert len(motivos) == 1
+    assert "MISCONFIGURED" in motivos[0]
+
+
+# ---------------------------------------------------------------------------
+# B-056 bullet 4 — o custo dos bloqueios repetidos tem de ser MENSURAVEL.
+#
+# O numero historico esta perdido: o registro de 2026-08-13/14 nao capturou contagem nem tempo, e
+# nenhum artefato daquela sessao carrega isso. O que se pode fazer e tornar o custo mensuravel daqui
+# em diante — e um gate que nao sabe dizer quanto custou nao pode ser avaliado por ninguem.
+# ---------------------------------------------------------------------------
+
+
+def test_the_state_records_when_the_blocking_started_and_last_happened(tmp_path: Path) -> None:
+    estado = tmp_path / "estado.json"
+    estado.write_text(json.dumps({"items": ["B-001"]}), encoding="utf-8")
+    (tmp_path / "BACKLOG.md").write_text(
+        "## B-001 — x   [ ]\n\ndomain: g\nrepo: r\nstatus: triaged\n", encoding="utf-8"
+    )
+    (tmp_path / "knowledge-base" / "maintenance-runs").mkdir(parents=True)
+
+    script = Path(__file__).resolve().parent.parent / "scripts" / "check_goal_met.py"
+    for _ in range(2):
+        subprocess.run(
+            [sys.executable, str(script), "--state", str(estado), "--project-root", str(tmp_path)],
+            capture_output=True, text=True, check=False,
+        )
+
+    gravado = json.loads(estado.read_text(encoding="utf-8"))
+    assert gravado["blocks"] == 2
+    assert "first_block_at" in gravado, "sem marca do primeiro bloqueio o custo nao e calculavel"
+    assert "last_block_at" in gravado
+    assert gravado["first_block_at"] <= gravado["last_block_at"]
