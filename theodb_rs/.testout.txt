@@ -1,0 +1,4 @@
+test parquet::tests::pg_batch_para_jsonb_preserva_escalares ... ok
+test parquet::tests::pg_batch_para_jsonb_preserva_nulos ... ok
+test parquet::tests::pg_batch_vazio_nao_produz_linha ... ok
+test result: ok. 502 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 117.65s

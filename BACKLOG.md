@@ -4244,7 +4244,7 @@ dod:
 > Registrado 2026-08-20 ao mergear o #258. **É o B-052 outra vez, um diretório adiante**: um portão que não
 > olha um código é indistinguível de um portão que aprova aquele código, e a diferença só aparece quando
 > alguém quebra alguma coisa.
-## B-091 — O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo   [ ]
+## B-091 — O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo   [x]
 
 domain: governanca
 repo: theo-db
@@ -4262,7 +4262,19 @@ falta `lock-in`, `<competidor> killer`, `drop-in replacement` e `zero downtime`.
 why_now: um lint com as duas falhas ao mesmo tempo é pior que nenhum: ele treina o leitor a ignorar o aviso
 (porque o aviso que ele dá é sobre o texto certo) enquanto deixa passar o que deveria pegar. A frase da linha
 10 foi corrigida na mesma sessão, mas por leitura humana — o portão não a teria pego.
-status: planned
+status: shipped
+verificacao_2026_08_21: os três bullets conferidos executando, não lendo. (1) negação removida por
+  LINHA antes dos checks, e `test_the_projects_own_readme_is_clean` roda o lint contra o `README.md`
+  **real** — os quatro avisos viraram zero. (2) as quatro famílias do `public-copy.md § 6` verificadas
+  (`test_the_four_banned_framings_of_section_6_are_checked`); o próprio comentário do lint registra que
+  a evidência original deste item — *"cobre 3 das 4 famílias"* — era **FALSA**, e que o defeito real era
+  mais estreito e só aparecia em português (`sem lock-in`). (3) o teste monta o JSON que o hook espera
+  (`{"tool_input": {...}}`) e o entrega por **stdin** ao `bash`, que é a única forma de exercitar o
+  caminho real — invocá-lo sem stdin sai 0 sem olhar nada. 15 testes, todos passando.
+  .
+  E dois deles **fixam as limitações em vez de escondê-las**: `test_a_line_that_negates_one_term_and_asserts_another_loses_both`
+  e `test_a_claim_split_across_two_lines_is_not_seen`. A heurística é por linha, e isso está declarado
+  no código e provado por teste — errar para o lado de não avisar é a escolha certa num gate advisory.
 status_nota: 2026-08-20 — os três bullets fecharam, e **duas correções de rota ficam registradas**.
   (1) A evidência original dizia "3 das 4 famílias"; era falsa — o lint cobre as quatro, e o defeito real era
   só a forma portuguesa. (2) O filtro de negação que escrevi derruba a LINHA inteira, então uma linha que
@@ -4311,7 +4323,7 @@ dod:
 > Registrado 2026-08-21 pelo ciclo que reproduziu o [[B-018]]. Separado dele porque o B-018 é "o
 > planner larga o índice" e este é "o índice é grande demais" — o primeiro é sintoma do segundo, e
 > fundi-los faria o conserto ser avaliado pelo sintoma.
-## B-093 — O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca   [ ]
+## B-093 — O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca   [x]
 
 domain: lexical
 repo: theodb-bench
@@ -4319,7 +4331,15 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-21. O `m186` publica nDCG@10 de **0,6269** no SciFact e declara tê-lo obtido somando scores por termo do lado de fora. Somar top-k por termo **trunca**: o documento que não entra no top-k de nenhum termo isolado, mas entraria no top-k combinado, é perdido. O adapter atual (`theodb-bench/src/adapters/postgres.py:1590`) já manda `query.text` inteiro numa chamada — o caminho correto existe e está pronto, e foi introduzido depois do m186 (`a8910c0`, 2026-08-17).
 why_now: o `0,6269` é citado como o número do pilar e é um PISO, não a medição. Enquanto não for re-medido, publicamos um número que sabemos estar subestimado e não sabemos por quanto.
-status: planned
+status: shipped
+verificacao_2026_08_21: os quatro bullets conferidos NO DISCO, não no texto deste item. (1) corpus
+  registrado — `theodb-bench list` mostra `retrieval/scifact/lexical` com a ressalva das pernas densa e
+  híbrida no próprio texto do benchmark; manifesto `beir-scifact` em `datasets/manifests`. (2) re-medido
+  pelo adapter atual: nDCG@10 **0,6864**, 3 repetições, **stdev 0,0** — a medição é determinística, então
+  o intervalo é degenerado por natureza e não por falta de rigor; declarado assim em vez de fabricar uma
+  barra. (3) conceito `m186-lexical-ndcg-scifact-verdict.md` atualizado **por acréscimo**, citando o
+  bundle `20260821T102520Z-retrieval-scifact-lexical-theodb-be514035`, e a citação resolve
+  (`check_bundle_citations.py` passa). (4) não se aplica: a diferença não foi nula (+9,5% relativo).
 resultado: 2026-08-21 — **nDCG@10 = 0,6864**, contra os 0,6269 do `m186`: **+9,5% relativo**,
   determinístico (stdev 0,0 em 3 repetições), recall@10 0,8227, QPS 213,5 (CV 2,1%). Primeiro número
   lexical deste projeto produzido DENTRO do arnês.
