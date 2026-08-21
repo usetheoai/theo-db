@@ -7,6 +7,23 @@ item: B-018
 generated: { by: claude-code/opus-5, at: 2026-08-21T00:00:00Z }
 ---
 
+> **CORREÇÃO POR ACRÉSCIMO, 2026-08-21, algumas horas depois de publicar.** A razão de tamanho abaixo
+> foi escrita como **1,78×** a partir de **uma** amostra de cada lado. O índice HNSW do pgvector varia
+> entre builds (atribuição de nível é aleatória): medido três vezes, **444 / 416 / 482** páginas,
+> CV de **7,4%**. O nosso é determinístico: **680 / 680 / 680**.
+>
+> A razão honesta é **1,52× (IC 95% [1,41×, 1,63×], p = 0,0067, n=3 de cada)** — Welch não-pareado com
+> bootstrap sobre a razão, pela ferramenta do [[B-049]]. **A diferença continua real e significativa; a
+> precisão que "1,78×" sugeria não era.**
+>
+> O corpo abaixo fica como estava, com os números daquela rodada. Eles não são falsos: para o par de
+> índices presente naquele momento, a razão de custo (1,769×) casou com a razão de tamanho daqueles dois
+> índices (680/382). O que estava errado era **generalizar de N=1** num eixo que varia 7%.
+>
+> É desconfortável registrar isto: o [[B-049]] entregou nesta mesma sessão a ferramenta que existe
+> exatamente para não publicar razão a partir de uma corrida, e eu publiquei uma horas depois. Fica
+> escrito porque o erro já tinha sido citado no `BACKLOG.md` e apagá-lo esconderia isso.
+
 Peça relacionada: [pgrx](../technologies/pgrx.md) e o
 [ADR-0065](../decisions/0065-b032-unsafe-op-marcado-por-operacao.md), que também trocou um número
 herdado por um medido.

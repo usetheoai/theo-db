@@ -1014,7 +1014,13 @@ dod:
 > (`numIndexTuples = (entryLevel+2)*m`, `startup = total`), então aquilo mediu a distância entre duas
 > gerações do modelo, não entre duas implementações dele.
 >
-> **Próximo passo, agora barato e específico:** medir POR QUE 680 contra 382 para vetores idênticos de
+> **CORREÇÃO POR ACRÉSCIMO (mesmo dia, algumas horas depois):** o "1,78×" acima saiu de UMA amostra de
+> cada lado. O índice do pgvector varia entre builds — 444/416/482 páginas, CV de 7,4% —, o nosso é
+> determinístico em 680. A razão honesta é **1,52× (IC 95% [1,41×, 1,63×], p = 0,0067, n=3 de cada)**,
+> pela ferramenta do [[B-049]] entregue nesta mesma sessão. A diferença segue real e significativa; a
+> precisão que três algarismos sugeriam não era.
+>
+> **Próximo passo, agora barato e específico:** medir POR QUE ~680 contra ~447 para vetores idênticos de
 > 384 dimensões — ver [[B-092]].
 
 ## B-019 — `CREATE INDEX` de HNSW não é idempotente: estoura em vez de ser no-op   [ ]
@@ -4072,11 +4078,11 @@ domain: vetorial
 repo: theo-db
 suggested_mode: evolve
 source: discover-evolve
-evidence: medido em 2026-08-21 (`wiki/benchmarks/b018-planner-hnsw-juncao.md`). Mesmo dado — 3000 vetores de 384 dimensões, `documents`/`chunks`/`embeddings` — o `theodb_hnsw` ocupa **680 páginas** e o `hnsw` do pgvector 0.8.6 ocupa **382**. O `genericcostestimate` cobra proporcionalmente a páginas de índice, e a razão de custo medida (**1,769×**, partida 425,60 contra 240,62 em `ef_search=40`) casa com a razão de tamanho (**1,78×**).
+evidence: medido em 2026-08-21 (`wiki/benchmarks/b018-planner-hnsw-juncao.md`), com **três builds de cada lado**. O `theodb_hnsw` ocupa **680/680/680** páginas — determinístico. O `hnsw` do pgvector 0.8.6 ocupa **444/416/482** — média 447,3, CV 7,4%, porque a atribuição de nível do HNSW é aleatória. Razão **1,52× (IC 95% [1,41×, 1,63×], p = 0,0067)** pela ferramenta do [[B-049]]. O `genericcostestimate` cobra proporcionalmente a páginas de índice, e foi essa diferença que tirou o HNSW do plano da junção filtrada do [[B-018]] (partida 425,60 contra 240,62 em `ef_search=40`).
 why_now: o [[B-018]] reproduziu e a causa dele é esta. O custo maior é VERDADEIRO — o índice é maior mesmo —, então não há conserto em `am/cost.rs`: inflar ou desinflar a fórmula seria mentir ao planner. Enquanto o índice for 1,78× maior, toda comparação de plano com `LIMIT` corre com esse handicap, e a do `theo-rag` já perde por uma margem de 24%.
 status: triaged
 dod:
-  - medido POR QUE 680 contra 382 — o que ocupa as 298 páginas de diferença (layout de nó, fator de preenchimento, cópia do vetor, metadados por vizinho)
+  - medido POR QUE ~680 contra ~447 — o que ocupa as ~233 páginas de diferença (layout de nó, fator de preenchimento, cópia do vetor, metadados por vizinho)
   - decidido em ADR se a diferença é essencial (o nosso nó carrega algo que o deles não carrega e que serve a um requisito) ou acidental
   - se acidental, o índice do mesmo dado passa a caber em páginas comparáveis, e a junção filtrada do [[B-018]] escolhe o HNSW no `ef_search` default
   - recall@10 medido antes e depois: encolher o nó não pode ser pago em recall sem que o número apareça
