@@ -90,6 +90,41 @@ Abaixo de ~6 corridas/mês o snapshot **dá prejuízo em dinheiro**. O argumento
 tempo, é confiabilidade: as seis armadilhas acima custaram ~70 min numa única sessão — quase um mês
 de snapshot, de uma vez.
 
+## Medido em 2026-08-21: quanto o snapshot economiza
+
+Mesmo ref (`3253f86`), mesmo tamanho de droplet, mesma região. Os dois caminhos medidos de ponta a
+ponta:
+
+| etapa | host limpo | do snapshot |
+|---|---|---|
+| provisionamento | 57 s | **9–18 s** |
+| build da imagem | **15 min 40 s** | **11–16 s** — todas as camadas `CACHED` |
+| até a primeira medição | ~17 min | **~2 min** |
+
+**O cache de camadas do Docker sobrevive ao snapshot**, que era a incógnita que sustentava ou
+derrubava o custo mensal. O build fica ~58× mais rápido.
+
+O ganho que importa não é a soma dos minutos: é que medir deixa de ser um compromisso de vinte
+minutos e vira algo de dois. Com equilíbrio em ~6 corridas/mês, o custo se paga; abaixo disso o
+argumento é confiabilidade, não dinheiro.
+
+### O que NÃO sobrevive: `/var/run`
+
+Das nove capacidades verificadas, **oito sobreviveram ao snapshot e uma não**: `/var/run/postgresql`.
+`/var/run` é **tmpfs** — recriado vazio a cada boot, por construção. Não é defeito do snapshot; é o
+Linux funcionando como projetado, e supor persistência ali era erro de quem escreveu o script.
+
+O conserto é o mecanismo nativo, não reprovisionar: uma regra `tmpfiles.d`, que o `provision.sh` passa
+a instalar. Enquanto o snapshot for anterior a ela, o portão detecta a ausência e o script se cura em
+~18 s — que é a arquitetura fazendo o que promete: **o script é a verdade, o cache se atualiza.**
+
+### Um snapshot carrega o que estava no disco
+
+O snapshot foi tirado de um host que já havia medido, então trouxe `~1 MB` de resultados antigos em
+`/root/res-*`. A coleta que varria `res-*` juntava corrida velha com nova — **pior que não colher,
+porque parece completo.** O `bench-run.sh` passou a registrar qual corrida acabou de rodar, e a coleta
+leva só essa.
+
 # Tarball ou `git clone`: o que decide o veredito
 
 O arnês valida `clean_source_tree`, e ele **reprova com código enviado por tarball**:

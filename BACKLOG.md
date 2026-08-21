@@ -4366,7 +4366,7 @@ dod:
 > Registrado 2026-08-21 pelo ciclo do [[B-043]]. É o item mais desconfortável do backlog: o produto
 > que este projeto publica como instrumento de medição não sustenta a carga que se propõe a medir.
 
-## B-098 — Provisionar um host de bench leva 20 min e falha por capacidade ausente, uma por vez   [ ]
+## B-098 — Provisionar um host de bench leva 20 min e falha por capacidade ausente, uma por vez   [x]
 
 domain: arnes
 repo: theodb-bench
@@ -4374,7 +4374,8 @@ suggested_mode: evolve
 source: human
 evidence: medido em 2026-08-21, provisionando do zero para o sweep do [[B-097]]. **Cinco falhas, todas da mesma classe — capacidade que existe na máquina de desenvolvimento e não num host limpo — e cada uma descoberta separadamente, do jeito caro:** (1) `docker.io` do Ubuntu 24.04 não traz `buildx`, e sem ele o `COPY <<EOF` do Dockerfile falha no **passo 26 de 28**, depois de compilar a extensão inteira — **40 min de droplet ocioso**; (2) `pip install` sem o extra `[postgres]` → adapter recusa no bootstrap; (3) `pip install` de tarball não leva `schemas/`, e o arnês invalida o bundle inteiro no fim; (4) o diretório `parquet_directory` não é criado pelo procedimento do runbook, e sua ausência faz o arnês reportar `sut_alive` FAIL — **culpando o servidor por uma falha que foi de uma consulta**; (5) comando de registro (`psql` com nome de extensão obsoleto) sob `set -e` derrubando a corrida — **29 min ociosos**. Total: **~70 min de host pago desperdiçados numa sessão (~US$ 0,88)**, com zero medições produzidas.
 why_now: o custo não é o tempo de build — é que **cada corrida redescobre as mesmas ausências**, e o modo de falha é sempre o pior possível: falhar DEPOIS do trabalho caro. O runbook lista as armadilhas como uma lista que cresce item a item; uma lista não impede a sexta. O que impede é um portão de capacidades executável, rodado antes de qualquer trabalho caro, mais uma imagem que já as satisfaça.
-status: raw
+status: shipped
+evidence_final: medido em 2026-08-21, executando o sistema contra droplets reais (não inspeção). **Host limpo → primeira medição: ~17 min** (provisionamento 57 s + build 15 min 40 s). **Do snapshot: ~2 min** (provisionamento 9–18 s + build 11–16 s, todas as camadas `CACHED`). O cache de camadas do Docker **sobrevive ao snapshot** — era a incógnita que sustentava seu custo de ~US$ 1,24/mês. Executar achou **oito defeitos** que checagem de sintaxe não acharia, entre eles: o arnês nunca era enviado (host limpo jamais funcionaria); corrida de largada com o lock do `apt`, engolida em silêncio; `trap RETURN` que não dispara no topo do script; coleta depois da destruição; e `scp` de arquivo vazio contando como colheita. Um nono suspeito foi investigado e **não** era defeito. Registrado em [[droplet-de-medicao]].
 dod:
   - `ops/provision.sh` versionado é a fonte de verdade do que o host precisa, com modo `--verify` idempotente que reprova ANTES de qualquer trabalho caro
   - `ops/bench-run.sh` roda um smoke barato (um N, três caminhos) e só libera o sweep caro se ele passar
