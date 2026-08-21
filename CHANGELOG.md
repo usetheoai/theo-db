@@ -13,6 +13,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Primeira medição do pilar de grafo contra um baseline: travessia de 1, 2 e 3 saltos pelo CSR e por
+  `WITH RECURSIVE` indexado no mesmo servidor. **O CSR perde até 2 saltos** (2,17× e 1,90×) e ganha
+  do 3º em diante (2,26×); ganha em espaço sempre (14,4 MB contra 30 MB de índices). Veredito
+  desfavorável publicado conforme a DoD do item (B-007)
+
+
 ### Fixed
 - **RETRATADO: o "teto de vazão é o cliente do arnês" lançado em `v0.166.0` estava errado, e o erro
   era do desenho da medição.** O laço concorrente emitia um total **fixo** de 300 operações
