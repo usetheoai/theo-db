@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-91 items — **Open** 22 · **In flight** 6 · **Closed** 63
+91 items — **Open** 21 · **In flight** 7 · **Closed** 63
 
-### Open (22)
+### Open (21)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -95,9 +95,8 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela----) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `triaged` | — |
 | [`B-066`](#b-066--a-contenção-escritascan-não-é-medível-não-existe-arnês-concorrente----) | A contenção escrita×scan não é medível: não existe arnês concorrente | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
-| [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 
-### In flight (6)
+### In flight (7)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -106,6 +105,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
+| [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
 | [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `planned` | — |
 
 ### Closed (63)
@@ -3253,7 +3253,24 @@ why_now: a escala de referência de 20M ([[B-075]]) carrega e consulta (20M linh
 constrói grafo** neste host, e o dimensionamento que eu mesmo publiquei olhava o disco: 1,27 GB/milhão
 dizia que ~200M cabiam. Pela RAM, um host de 16 GB comporta **~5,8M**. Qualquer fronteira recall×QPS a
 20M e qualquer alegação de escala bilhão dependem disto.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — bullets 1 e 3 fechados; o 2 está bloqueado e digo por quê.
+  **Bullet 1**: o build passou a PROJETAR o pico e recusar antes de materializar, nomeando os
+  números. Modelo `184 MB + 3,45 × corpus`, ajustado sobre os dois pontos medidos e reproduzindo os
+  dois exatamente (250k→606 MB, 1M→1871 MB); projeta 33 GB para 20M×128, batendo com o OOM observado
+  num host de 16 GB. Orçamento vem do GUC `theodb_hnsw.build_memory_mb` ou, sem ele, do
+  `MemAvailable` do host — que é o que o OOM killer olha. Fail-open quando `/proc/meminfo` não é
+  legível: recusar por incapacidade NOSSA transformaria incerteza em erro do operador.
+  **Por que recusar em vez de streamar**: HNSW não é streamável como o IVF — a construção do grafo
+  precisa de acesso aleatório aos vizinhos, então a rota do M96 não se aplica. O DoD já aceitava essa
+  saída, e ela é a honesta.
+  **Bullet 3**: `wiki/decisions/0064-maintenance-work-mem-nao-e-contrato.md`. O colunar consome ~7× o
+  `maintenance_work_mem` (issue #221) e o build do HNSW o ignora — não são dois bugs, é a ausência de
+  contrato. A regra que passa a valer: projetar antes de tentar e recusar nomeando o número.
+  **Bullet 2 BLOQUEADO**: re-medir a curva nos mesmos três pontos exige host dedicado, e os droplets
+  ativos são do owner e estão em uso. Não vou tomá-los nem fabricar a medição.
+  Verificado: 5 testes novos, suíte completa **488 passed, 0 failed** — o portão não recusa nenhum
+  build existente, que era o risco de ligar uma verificação em todo `CREATE INDEX`.
 dod:
   - o build do `theodb_hnsw` respeita um orçamento de memória declarado, ou **falha cedo com mensagem que
     o nomeie** — hoje o operador recebe um servidor reiniciado e nenhuma pista

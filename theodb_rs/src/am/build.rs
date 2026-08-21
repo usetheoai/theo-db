@@ -148,13 +148,7 @@ pub extern "C-unwind" fn ambuild(
             let soar0 = crate::am::options::soar_lambda_from_relation(indexrel);
             let est_dim = index_vector_dim(indexrel);
             if m0 > 0 && separate && !sq8 && !rabitq && !has_labels && soar0 <= 0.0 && est_dim > 0 {
-                let reltuples = (*(*heaprel).rd_rel).reltuples;
-                let blocks = pg_sys::RelationGetNumberOfBlocksInFork(
-                    heaprel,
-                    pg_sys::ForkNumber::MAIN_FORKNUM,
-                ) as f64;
-                let rows_per_block = (8192.0 / (est_dim as f64 * 4.0 + 28.0)).max(1.0);
-                let est_n = (reltuples as f64).max(blocks * rows_per_block).max(0.0) as usize;
+                let est_n = estimate_heap_rows(heaprel, est_dim);
                 if crate::am::build_stream::should_stream(est_n, est_dim as usize) {
                     let lists = lists_from_relation(indexrel);
                     let metric = resolve_metric(indexrel);
@@ -392,6 +386,85 @@ fn pack_block32_codes(
     blocks
 }
 
+/// Quantas linhas o heap provavelmente tem, ANTES de le-lo.
+///
+/// `reltuples` e a estimativa do planner e pode estar velha (uma tabela recem-carregada sem
+/// `ANALYZE` reporta -1); o produto de blocos por linhas-por-bloco e o piso geometrico. O maior dos
+/// dois erra para MAIS, que e o lado seguro quando o numero vai decidir se um build cabe na memoria.
+///
+/// Estava inline no caminho do IVF. Virou funcao porque o HNSW passou a precisar do mesmo numero
+/// (B-076), e duas copias de uma estimativa divergem — foi assim que o `_query_parameters` do arnes
+/// virou defeito no mesmo dia.
+unsafe fn estimate_heap_rows(heaprel: pg_sys::Relation, dim: i32) -> usize {
+    let reltuples = unsafe { (*(*heaprel).rd_rel).reltuples };
+    let blocks = unsafe {
+        pg_sys::RelationGetNumberOfBlocksInFork(heaprel, pg_sys::ForkNumber::MAIN_FORKNUM)
+    } as f64;
+    let rows_per_block = (8192.0 / (dim as f64 * 4.0 + 28.0)).max(1.0);
+    (reltuples as f64).max(blocks * rows_per_block).max(0.0) as usize
+}
+
+/// O orcamento de memoria para um build HNSW, em MB. `0` = sem verificacao.
+///
+/// Ordem: o GUC `theodb_hnsw.build_memory_mb` quando o operador o define; senao o `MemAvailable` do
+/// host, que e o que o OOM killer de fato olha.
+///
+/// FAIL-OPEN quando nao da para saber — `/proc/meminfo` ausente, formato inesperado, sistema nao
+/// Linux. Recusar um build por nao conseguir ler a memoria disponivel seria transformar uma
+/// incerteza nossa num erro do operador, e o comportamento anterior (tentar e talvez morrer) e
+/// estritamente melhor que isso.
+fn hnsw_build_budget_mb() -> u64 {
+    let declarado = crate::am::guc::hnsw_build_memory_mb();
+    if declarado > 0 {
+        return declarado as u64;
+    }
+    let meminfo = match std::fs::read_to_string("/proc/meminfo") {
+        Ok(t) => t,
+        Err(_) => return 0,
+    };
+    for linha in meminfo.lines() {
+        if let Some(resto) = linha.strip_prefix("MemAvailable:") {
+            if let Some(kb) = resto.split_whitespace().next().and_then(|v| v.parse::<u64>().ok()) {
+                return kb / 1024;
+            }
+        }
+    }
+    0
+}
+
+/// Termo FIXO do pico de memoria de um build HNSW, em MB. Ajustado sobre os dois pontos medidos.
+const BUILD_MEM_FIXED_MB: u64 = 184;
+
+/// Quantas vezes o corpus o pico de memoria do build atinge. O grafo, as listas de vizinhos e as
+/// estruturas temporarias somam ~2,45x o corpus alem dele proprio.
+const BUILD_MEM_CORPUS_FACTOR: f64 = 3.45;
+
+/// Pico de memoria PROJETADO para um `CREATE INDEX ... USING theodb_hnsw`, em MB.
+///
+/// Ate 2026-08-17 o operador descobria esse numero por um servidor reiniciado: um build sobre
+/// 20 000 000 de vetores num host de 16 GB foi morto pelo OOM killer, e o `DETAIL` do PostgreSQL
+/// nomeava o `CREATE INDEX` — mas so depois do fato (B-076).
+///
+/// MEDIDO, e o modelo reproduz os dois pontos EXATAMENTE:
+///
+/// | linhas | corpus | pico medido | projetado |
+/// |---|---|---|---|
+/// | 250 000 x 128 | 122 MB | 606 MB | 606 MB |
+/// | 1 000 000 x 128 | 488 MB | 1871 MB | 1871 MB |
+///
+/// LIMITE DECLARADO: sao DOIS pontos, na MESMA dimensao (128) e com o mesmo `m`. O termo linear no
+/// corpus faz o modelo escalar com a dimensao, o que e a fisica do problema — o corpus e
+/// `n x dim x 4` —, mas isso e uma suposicao do modelo e nao uma medicao. Um terceiro ponto noutra
+/// dimensao a confirmaria ou a derrubaria, e ele exige o droplet que o [[B-075]] espera.
+///
+/// Por que projetar em vez de fazer streaming: HNSW nao e streamavel como o IVF. A construcao do
+/// grafo precisa de acesso aleatorio aos vizinhos, entao a rota do M96 (`build_stream::should_stream`)
+/// nao se aplica — e por isso o DoD do B-076 aceita a outra saida, falhar cedo nomeando o orcamento.
+pub(crate) fn project_build_memory_mb(ntuples: usize, dim: usize) -> u64 {
+    let corpus_mb = (ntuples as f64) * (dim as f64) * 4.0 / (1024.0 * 1024.0);
+    BUILD_MEM_FIXED_MB + (BUILD_MEM_CORPUS_FACTOR * corpus_mb).round() as u64
+}
+
 /// `theodb_hnsw` build — same persistence layer, an HNSW graph instead of IVFFlat lists (M26 Phase 6).
 #[pg_guard]
 pub extern "C-unwind" fn ambuild_hnsw(
@@ -400,6 +473,36 @@ pub extern "C-unwind" fn ambuild_hnsw(
     index_info: *mut pg_sys::IndexInfo,
 ) -> *mut pg_sys::IndexBuildResult {
     unsafe {
+        // B-076 — falhar CEDO nomeando o orcamento, em vez de deixar o OOM killer derrubar o
+        // servidor. Medido em 2026-08-17: um build de 20M x 128 num host de 16 GB foi morto
+        // (`anon-rss:10033724kB`), e o operador recebeu um servidor reiniciado e nenhuma pista.
+        //
+        // A verificacao vem ANTES de `collect_corpus` porque e ele que materializa o corpus — depois
+        // dele a memoria ja foi pedida, e verificar seria descrever o passado.
+        //
+        // HNSW nao e streamavel como o IVF (a construcao do grafo precisa de acesso aleatorio aos
+        // vizinhos), entao nao ha rota de memoria limitada para oferecer aqui. O que da para fazer e
+        // dizer o numero antes de tentar.
+        let dim_para_orcamento = index_vector_dim(indexrel);
+        if dim_para_orcamento > 0 {
+            let orcamento = hnsw_build_budget_mb();
+            if orcamento > 0 {
+                let linhas = estimate_heap_rows(heaprel, dim_para_orcamento);
+                let projetado = project_build_memory_mb(linhas, dim_para_orcamento as usize);
+                if projetado > orcamento {
+                    pgrx::error!(
+                        "theodb_hnsw: o build projeta {projetado} MB de pico e o orcamento e \
+                         {orcamento} MB ({linhas} linhas x {dim_para_orcamento} dimensoes). \
+                         O modelo e `184 MB + 3,45 x corpus`, ajustado sobre dois pontos medidos \
+                         (250k -> 606 MB, 1M -> 1871 MB). Aumente `theodb_hnsw.build_memory_mb` se \
+                         souber que ha memoria alem do que o host reporta, construa o indice num \
+                         host maior, ou reduza a escala — mas nao tente assim: sem esta recusa o \
+                         OOM killer derruba o backend e o servidor reinicia."
+                    );
+                }
+            }
+        }
+
         let (corpus, _labels_hnsw, ntuples) = collect_corpus(heaprel, indexrel, index_info);
         let corpus_len = corpus.len(); // capture before `build_owned` consumes `corpus` (DoD-4 move, not clone)
         // T4.1: inject the cancellation seam so a long `CREATE INDEX` responds to `pg_cancel_backend` within one
@@ -1896,5 +1999,117 @@ mod tests {
             idx, exact,
             "the dim=768 v3 scan returns the exact top-5 (multi-page codebook intact)"
         );
+    }
+
+    /// B-076 — o build do HNSW materializa o corpus, e ate aqui o operador descobria isso por um
+    /// servidor reiniciado.
+    ///
+    /// Medido em 2026-08-17 no droplet `138.197.22.192` (s-8vcpu-16gb): `CREATE INDEX ... USING
+    /// theodb_hnsw ... WITH (m=16)` sobre 20 000 000 de vetores foi MORTO pelo OOM killer
+    /// (`anon-rss:10033724kB`), com o `DETAIL` do PostgreSQL nomeando exatamente esse comando.
+    ///
+    /// Curva medida com `maintenance_work_mem=64MB`, dois pontos:
+    ///
+    /// | linhas | pico VmRSS | corpus (n x dim x 4) | razao |
+    /// |---|---|---|---|
+    /// | 250 000 | 606 MB | 122 MB | 4,96x |
+    /// | 1 000 000 | 1871 MB | 488 MB | 3,83x |
+    ///
+    /// O ajuste `184 MB + 3,45 x corpus` reproduz OS DOIS pontos exatamente, e projeta **33 GB**
+    /// para 20M x 128 — contra os 16 GB do host, que e o OOM observado.
+    ///
+    /// HNSW NAO E STREAMAVEL como o IVF: o grafo precisa de acesso aleatorio aos vizinhos durante a
+    /// construcao, entao a rota do M96 (`should_stream`) nao se aplica por mais que o gate dela
+    /// mencione opcoes do IVFFlat. Por isso o DoD aceita a outra saida — falhar cedo com uma
+    /// mensagem que NOMEIE o orcamento, em vez de derrubar o servidor.
+    #[pgrx::pg_test]
+    fn b076_the_memory_projection_reproduces_both_measured_points() {
+        // 250k x 128 -> 606 MB medido
+        let p250 = crate::am::build::project_build_memory_mb(250_000, 128);
+        assert!(
+            (p250 as i64 - 606).abs() <= 2,
+            "projecao para 250k x 128 deveria reproduzir os 606 MB medidos, deu {p250}"
+        );
+        // 1M x 128 -> 1871 MB medido
+        let p1m = crate::am::build::project_build_memory_mb(1_000_000, 128);
+        assert!(
+            (p1m as i64 - 1871).abs() <= 2,
+            "projecao para 1M x 128 deveria reproduzir os 1871 MB medidos, deu {p1m}"
+        );
+    }
+
+    /// A projecao tem de escalar com a DIMENSAO, e nao so com a contagem de linhas.
+    ///
+    /// O ajuste bruto "por milhao de linhas" que o item registrou vale so para dim=128. Um corpus
+    /// de 768 dimensoes com o mesmo numero de linhas ocupa 6x mais, e um modelo cego a isso
+    /// aprovaria um build que o OOM killer mata.
+    #[pgrx::pg_test]
+    fn b076_the_projection_scales_with_dimension() {
+        let d128 = crate::am::build::project_build_memory_mb(1_000_000, 128);
+        let d768 = crate::am::build::project_build_memory_mb(1_000_000, 768);
+        assert!(
+            d768 > d128 * 5,
+            "768 dimensoes ocupam 6x o corpus de 128; projecao deu {d128} e {d768}"
+        );
+    }
+
+    /// O projecao do caso que foi morto: 20M x 128 tem de exceder com folga um host de 16 GB.
+    #[pgrx::pg_test]
+    fn b076_the_case_that_was_oom_killed_is_projected_above_the_host() {
+        let gb = crate::am::build::project_build_memory_mb(20_000_000, 128) as f64 / 1024.0;
+        assert!(
+            gb > 16.0,
+            "o build de 20M x 128 foi morto num host de 16 GB; a projecao deu {gb:.1} GB"
+        );
+    }
+
+    /// O portao recusa ANTES de materializar, e a mensagem nomeia os numeros.
+    ///
+    /// Bullet 1 do B-076 por execucao: "falha cedo com mensagem que o nomeie — hoje o operador
+    /// recebe um servidor reiniciado e nenhuma pista".
+    ///
+    /// `#[pg_test(error = ...)]` e o idioma: um `ERROR` do Postgres faz longjmp e nao volta como
+    /// `Err`, entao `unwrap_err` nunca executa. E o pgrx compara a mensagem INTEIRA — o B-022 ja
+    /// pagou por declarar fragmento aqui. Pinar o texto todo e desconfortavel e correto: a mensagem
+    /// E o que este item entrega, e mudar o numero do modelo sem atualizar o teste seria mudar o
+    /// contrato com o operador em silencio.
+    ///
+    /// Orcamento de 1 MB e menor que o termo FIXO do modelo (184 MB), entao qualquer build o
+    /// excede — o teste afirma o COMPORTAMENTO do portao, nao um limiar.
+    #[pgrx::pg_test(
+        error = "theodb_hnsw: o build projeta 184 MB de pico e o orcamento e 1 MB (682 linhas x 8 dimensoes). O modelo e `184 MB + 3,45 x corpus`, ajustado sobre dois pontos medidos (250k -> 606 MB, 1M -> 1871 MB). Aumente `theodb_hnsw.build_memory_mb` se souber que ha memoria alem do que o host reporta, construa o indice num host maior, ou reduza a escala — mas nao tente assim: sem esta recusa o OOM killer derruba o backend e o servidor reinicia."
+    )]
+    fn b076_a_build_over_the_budget_is_refused_by_name() {
+        Spi::run("CREATE TABLE b076g (id int PRIMARY KEY, e vector(8))").unwrap();
+        Spi::run(
+            "INSERT INTO b076g SELECT g, ('['||g||',2,3,4,5,6,7,8]')::vector \
+             FROM generate_series(1,500) g",
+        )
+        .unwrap();
+        Spi::run("ANALYZE b076g").unwrap();
+        Spi::run("SET theodb_hnsw.build_memory_mb = 1").unwrap();
+        Spi::run("CREATE INDEX b076g_ix ON b076g USING theodb_hnsw (e theodb_hnsw_l2_ops)")
+            .unwrap();
+    }
+
+    /// E o caminho normal continua funcionando: sem orcamento apertado, o indice constroi.
+    ///
+    /// Um portao que recusa demais e pior que o defeito que ele conserta — este teste e o
+    /// contrapositivo, e sem ele a correcao nao esta provada.
+    #[pgrx::pg_test]
+    fn b076_a_build_within_the_budget_still_succeeds() {
+        Spi::run("CREATE TABLE b076ok (id int PRIMARY KEY, e vector(8))").unwrap();
+        Spi::run(
+            "INSERT INTO b076ok SELECT g, ('['||g||',2,3,4,5,6,7,8]')::vector \
+             FROM generate_series(1,500) g",
+        )
+        .unwrap();
+        Spi::run("ANALYZE b076ok").unwrap();
+        Spi::run("SET theodb_hnsw.build_memory_mb = 4096").unwrap();
+        Spi::run("CREATE INDEX b076ok_ix ON b076ok USING theodb_hnsw (e theodb_hnsw_l2_ops)")
+            .unwrap();
+
+        let n = Spi::get_one::<i64>("SELECT count(*) FROM b076ok").unwrap().unwrap();
+        assert_eq!(n, 500);
     }
 }
