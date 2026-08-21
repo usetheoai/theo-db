@@ -13,6 +13,32 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.166.0] - 2026-08-21
+
+### Changed
+- **O teto de vazão lexical é o CLIENTE do arnês, não o servidor — medido.** O #B-043 recusara-se a
+  publicar a curva de saturação sem discriminar as três causas candidatas. Com o gerador externo que o
+  DoD exigia: o `pgbench` estabiliza em **~4.150 TPS** a partir de 20 clientes e **fica lá** até 80
+  (queda de 2%), com latência linear — fila contra capacidade fixa, o que um servidor saudável faz. O
+  arnês **pica em 1.617,7 a 10 clientes e colapsa para 623,4 a 80**, queda de 61%. A 80 clientes a
+  razão é **6,53×**; com **um** cliente já é 1,64×.
+  .
+  **Isso reenquadra o número original:** a "saturação em ~20 clientes" de 2026-08-13 é muito
+  provavelmente a curva do instrumento, não uma propriedade do pilar lexical. O teto real do servidor,
+  neste corpus, é ~4.150 TPS com enfileiramento limpo. Aberto o #B-094 para o arnês.
+  `wiki/benchmarks/b043-teto-lexical-e-o-cliente.md`. (#B-043)
+
+- **O crossover do colunar foi medido, e a resposta não é um número — são quatro, e duas são gaps.**
+  De 10K a 2M linhas, mesmo dado nos três caminhos, no mesmo binário: `total_rows` ganha **abaixo de
+  10K** (pico 4,02× em 500K); `sum_amount` vira **entre 10K e 50K**; **`filtered_sum` PERDE em toda a
+  faixa e piora com a escala** — 0,42× a 10K e **0,25× a 2M**, ou seja 4× mais lento que o heap na
+  forma mais comum de consulta analítica, com a curva indo na direção errada; e **`group_by_category`
+  foi recusado nos seis pontos** pelo portão de caminho, porque o `GROUP BY` não faz pushdown.
+  .
+  Dois achados que ninguém procurava: a vantagem do colunar tem **pico e declina** (4,02× → 3,17×;
+  2,75× → 1,74×), que é o oposto do esperado e **não está diagnosticado**; e o **Parquet é 40× a 142×
+  mais lento que o heap**, piorando com N — 8,3 s para contar 2M linhas.
+  `wiki/benchmarks/b058-crossover-colunar.md`. (#B-058)
 ## [0.165.0] - 2026-08-21
 
 ### Added
