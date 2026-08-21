@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-93 items — **Open** 16 · **In flight** 12 · **Closed** 65
+93 items — **Open** 15 · **In flight** 13 · **Closed** 65
 
-### Open (16)
+### Open (15)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -89,9 +89,8 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
-| [`B-093`](#b-093--o-ndcg-publicado-do-pilar-lexical-foi-medido-com-agregação-que-trunca-e-o-arnês-já-não-trunca----) | O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca | `triaged` | — |
 
-### In flight (12)
+### In flight (13)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -107,6 +106,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
 | [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `planned` | — |
+| [`B-093`](#b-093--o-ndcg-publicado-do-pilar-lexical-foi-medido-com-agregação-que-trunca-e-o-arnês-já-não-trunca----) | O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca | `planned` | — |
 
 ### Closed (65)
 
@@ -4174,7 +4174,22 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-21. O `m186` publica nDCG@10 de **0,6269** no SciFact e declara tê-lo obtido somando scores por termo do lado de fora. Somar top-k por termo **trunca**: o documento que não entra no top-k de nenhum termo isolado, mas entraria no top-k combinado, é perdido. O adapter atual (`theodb-bench/src/adapters/postgres.py:1590`) já manda `query.text` inteiro numa chamada — o caminho correto existe e está pronto, e foi introduzido depois do m186 (`a8910c0`, 2026-08-17).
 why_now: o `0,6269` é citado como o número do pilar e é um PISO, não a medição. Enquanto não for re-medido, publicamos um número que sabemos estar subestimado e não sabemos por quanto.
-status: triaged
+status: planned
+resultado: 2026-08-21 — **nDCG@10 = 0,6864**, contra os 0,6269 do `m186`: **+9,5% relativo**,
+  determinístico (stdev 0,0 em 3 repetições), recall@10 0,8227, QPS 213,5 (CV 2,1%). Primeiro número
+  lexical deste projeto produzido DENTRO do arnês.
+  .
+  O DoD dizia que registrar o corpus era a maior parte do trabalho, e era — mas o buraco era maior do
+  que o item supunha: a família `retrieval` inteira estava **órfã**. Ela trazia nDCG@10, Recall@k, MRR
+  e quatro pipelines, e nenhum benchmark registrado a alcançava; faltavam os cinco membros do protocolo
+  `Workload` e o `points()`. Entraram também o carregador `bench/beir.py`, o manifesto `beir-scifact`
+  verificado por sha256 e o benchmark `retrieval/scifact/lexical`. `bench.retrieval` saiu do baseline
+  de órfãos.
+  .
+  RESSALVA IMPOSTA, não apenas declarada: só a perna **lexical**. O BEIR publica texto e julgamentos,
+  não embeddings — a CLI RECUSA pipeline não-lexical sobre corpus BEIR, e há teste fixando que os
+  vetores não carregam informação. A perna densa e a híbrida (que o [[B-005]] precisa) exigem fonte de
+  embedding declarada. `wiki/benchmarks/m186-lexical-ndcg-scifact-verdict.md`.
 custo_declarado: **não é um re-run.** Medido em 2026-08-21: `theodb-bench` não tem NENHUMA referência a
   BEIR ou SciFact em `src/`, e não há manifesto em cache. O m186 rodou por script ad-hoc, fora do arnês —
   o que o [[B-069]] já registra como o problema de método. Registrar o corpus (loader, qrels, nDCG@10) é a

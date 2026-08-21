@@ -14,6 +14,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **O nDCG@10 do pilar lexical no SciFact é 0,6864, e não os 0,6269 que publicávamos.** Re-medido
+  DENTRO do arnês, com corpus verificado por sha256 e benchmark registrado: **+9,5% relativo**,
+  determinístico, recall@10 0,8227. O número antigo era um piso, e a razão do piso **não era a que a
+  página dava**: não era normalização, era truncamento — somar top-k por termo perde o documento que
+  não entra no top-k de nenhum termo isolado mas entraria no combinado. É o primeiro número lexical
+  deste projeto produzido dentro do arnês, o que era o pedido do [[B-069]]. (#B-093)
 - **A recall casado o déficit contra o pgvector vai de 3,4% a 19,6%, e é MENOR no alto recall.**
   Fronteira completa em SIFT1M com pgvector 0.8.6 e theodb 1.5.0 no **mesmo PostgreSQL 18.6**, mesma
   máquina, mesmos parâmetros. Dois dos três pontos casam recall diretamente (quarta casa decimal):
