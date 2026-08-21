@@ -87,6 +87,17 @@ def main() -> int:
     p.add_argument("--rev", default="HEAD", help="revisao a inspecionar (padrao: HEAD)")
     args = p.parse_args()
 
+    # Um MERGE COMMIT nao introduz trabalho proprio: ele integra commits que ja passaram por este
+    # portao. `git show --name-only` num merge limpo devolve VAZIO, e tratar isso como "nao pude
+    # inspecionar" fazia o hook bloquear o encerramento logo apos um `git merge origin/develop`.
+    #
+    # A distincao e a mesma que o portao do B-051 faz entre `[]` e `None` nas tags semver — "nao ha
+    # o que perguntar" nao e "perguntei e a resposta e nao". Eu a construi la e nao a apliquei aqui.
+    pais = _git("rev-list", "--parents", "-n", "1", args.rev).split()
+    if len(pais) > 2:
+        print(f"OK: {args.rev} e um merge — integra trabalho ja registrado")
+        return 0
+
     arquivos = [f for f in _git("show", "--name-only", "--format=", args.rev).splitlines() if f]
     if not arquivos:
         print(f"check_changelog_entry: {args.rev} nao lista arquivos", file=sys.stderr)

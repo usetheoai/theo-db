@@ -14,6 +14,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **O portão de CHANGELOG deixou de bloquear depois de um merge limpo.** Um merge não introduz
+  trabalho próprio e não lista arquivos, então o checador saía com "não pude inspecionar" — e o hook
+  tratava qualquer não-zero como violação, colapsando *"não pude perguntar"* com *"perguntei e a
+  resposta é não"*. É a mesma distinção que o portão do registro faz entre lista vazia e ausência de
+  resposta, construída lá e não aplicada aqui. (#B-088)
 - **O portão de sessão passou a saber julgar objetivo expresso em ITENS de backlog.** Ele só sabia o
   par (registro de acceptance + checkbox do ROADMAP), e este ecossistema é backlog-driven desde que o
   `cycle-roadmap` foi aposentado — o descompasso produziu cinco bloqueios seguidos com o trabalho já

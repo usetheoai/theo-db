@@ -154,8 +154,14 @@ if [ -f "CHANGELOG.md" ]; then
   for c in "$ECO/scripts/check_changelog_entry.py" ".claude/scripts/check_changelog_entry.py"; do
     [ -f "$c" ] && { ENTRY_CHECKER="$c"; break; }
   done
-  if [ -n "$CODE_CHANGED" ] && [ -n "$ENTRY_CHECKER" ] && [ -n "$LAST_COMMIT" ] \
-     && ! python3 "$ENTRY_CHECKER" --rev HEAD >/dev/null 2>&1; then
+  # Bloqueia SO em rc=1 (violacao). rc=2 e "nao pude inspecionar" — um merge commit, um repo sem
+  # historico — e tratar os dois iguais colapsa "nao pude perguntar" com "perguntei e a resposta e
+  # nao". Foi o que bloqueou o encerramento desta sessao apos um merge limpo.
+  ENTRY_RC=0
+  if [ -n "$ENTRY_CHECKER" ] && [ -n "$LAST_COMMIT" ]; then
+    python3 "$ENTRY_CHECKER" --rev HEAD >/dev/null 2>&1 || ENTRY_RC=$?
+  fi
+  if [ -n "$CODE_CHANGED" ] && [ "$ENTRY_RC" = "1" ]; then
     msg="CHANGELOG.md foi tocado mas o ultimo commit NAO acrescentou entrada ao [Unreleased], e ele muda codigo de producao (Inquebravel Rule 6; B-088). Tocar o arquivo nao e registrar a mudanca."
     if [ "$WARN_ONLY" = "1" ]; then WARNINGS+=("$msg"); else BLOCKERS+=("$msg"); fi
   elif [ -n "$CODE_CHANGED" ] && ! echo "$ALL_FILES" | grep -qE '^CHANGELOG\.md$'; then
