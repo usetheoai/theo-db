@@ -58,12 +58,41 @@ Em `ef=40` a margem é de 434,34 contra 567,66 — perto o bastante para que mud
 estimativas de linha atravessem o fio. Nove arquivos de teste do `theo-rag` escrevendo em paralelo
 contra um banco só movem exatamente isso. Não é aleatoriedade; é uma comparação apertada.
 
-## O conserto, e o que ele custa
+## O conserto foi MEDIDO, e ele não se paga
 
-Baixar o default para 40 é de uma linha e **troca recall por plano**. `ef_search` é o botão de
-recall/velocidade do scan; 64 foi escolhido para preservar comportamento, não medido contra 40. A
-mudança exige recall@10 medido nos dois valores antes, no arnês — e é isso, não o número em si, que
-decide.
+Baixar o default para 40 é de uma linha. Medido em 2026-08-21 num droplet `g-16vcpu-64gb` (nyc3),
+SIFT1M completo, `theodb_hnsw` m=16, 500 consultas, k=10, 3 repetições, pelo benchmark registrado
+`vector/sift1m/ef-default`:
+
+| `ef_search` | QPS | CV | IC95 | **recall@10** |
+|---|---|---|---|---|
+| **40** (do pgvector) | 901,2 | 1,62% | [884,6, 917,7] | **0,8316** |
+| **64** (nosso) | 654,4 | 0,86% | [648,0, 660,8] | **0,9018** |
+
+**Ganho: 1,377× de QPS** (IC95 [1,355×, 1,402×], p = 0,0003, Welch não-pareado com bootstrap sobre a
+razão). **Custo: 7,02 pontos de recall@10** — queda relativa de 7,8%. O recall é determinístico
+(CV 2e-16): índice fixo, consultas fixas, `ef` fixo dão o mesmo conjunto.
+
+**A decisão é não baixar.** O pilar vetorial alega paridade de recall classe-pgvector; trocar 7 pontos
+de recall por um caso de escolha de plano contradiz a alegação que sustenta o pilar inteiro.
+
+E o argumento que fecha: **o pgvector paga exatamente o mesmo preço.** Em `ef_search = 64` ele também
+larga o índice — medido, plano e custos idênticos aos nossos. O default de 40 dele compra o plano com
+os mesmos 7 pontos de recall. Não são duas escolhas de engenharia diferentes; é **a mesma troca, com
+os dois projetos em lados opostos dela**.
+
+## O que fazer, então
+
+O caminho não é mudar o default, é dar a saída **por consulta**: quando uma junção com filtro seletivo
+precisa do índice, `SET LOCAL theodb_hnsw.ef_search = 40` naquela transação recupera o plano e paga o
+recall só ali. Isso é escopo de sessão, e o [[B-055]] já registra que sob *transaction pooling* o
+`SET LOCAL` é a forma correta de qualquer ajuste de `ef_search`.
+
+Artefato bruto: `benchmarks/artifacts/20260821T093458Z-vector-sift1m-ef-default-theodb-716a5ebd/`.
+**Ressalva declarada:** o veredito do arnês é `EXPLORATORY`, não `release` — faltaram CPU set
+declarado, limite de memória declarado e árvore git limpa (o código foi enviado por tarball). Isso
+**não** enfraquece a decisão, porque quem decide é o recall e o recall é determinístico; o QPS, que a
+instabilidade de ambiente afetaria, tem CV de 1,6% e 0,86%.
 
 ## Nota de superfície, encontrada no caminho
 

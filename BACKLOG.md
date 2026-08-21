@@ -977,6 +977,11 @@ source: discover-live-test
 evidence: suíte de integração do `theo-rag` contra `ghcr.io/usetheoai/theo-db:0.140.0` (2026-08-10): `o planner deveria alcançar o índice HNSW sob enable_seqscan = off`. Plano escolhido: `Limit → Sort → Nested Loop → Index Scan` — **há um `Sort` acima**, então o índice não está servindo a ordenação.
 why_now: a correção do planner de hoje ([m175](wiki/benchmarks/m175-planner-cost-inversion-verdict.md)) resolveu a busca simples e **não cobre o caminho de junção**, que é o que o `theo-rag` usa de verdade. Encontrado pela suíte do produto, não por benchmark — o quarto defeito do dia pelo mesmo mecanismo.
 status: triaged
+status_dod: bullet 2 ENTREGUE (causa determinada: o default, não o modelo de custo). Bullet 3 entregue
+  como benchmark registrado `vector/sift1m/ef-default`, que é regressão melhor que um teste — mede a troca
+  em vez de fixar um plano. Bullet 1 NÃO entregue e não será pelo caminho proposto: o teste do `theo-rag`
+  passaria baixando o default, e a medição mostrou que isso custa 7 pontos de recall. A saída para o
+  consumidor é `SET LOCAL`, e isso é mudança no `theo-rag`, não aqui.
 dod:
   - o teste `ensureHnswIndex` do `theo-rag` passa sem `Sort` acima do `Index Scan`
   - determinado se a causa é o mesmo modelo de custo (m175) num caminho não coberto, ou outra
@@ -1032,8 +1037,29 @@ dod:
 > de linha atravessam o fio — que é a intermitência de 1-em-11 que seis cenários determinísticos não
 > pegaram.
 >
-> **Conserto:** baixar o default para 40 é de uma linha e TROCA RECALL POR PLANO. Exige recall@10 medido
-> nos dois valores no arnês antes — é isso, e não o número, que decide.
+> **MEDIDO em 2026-08-21 no droplet, e o conserto óbvio NÃO se paga.** SIFT1M completo, `theodb_hnsw`
+> m=16, k=10, 500 consultas, 3 repetições, benchmark registrado `vector/sift1m/ef-default`:
+>
+> | `ef_search` | QPS | IC95 | recall@10 |
+> |---|---|---|---|
+> | 40 | 901,2 | [884,6, 917,7] | **0,8316** |
+> | **64 (nosso)** | 654,4 | [648,0, 660,8] | **0,9018** |
+>
+> Baixar compra **1,377× de QPS** (IC95 [1,355×, 1,402×], p = 0,0003) e custa **7,02 pontos de
+> recall@10** — 7,8% relativo. O recall é determinístico (CV 2e-16); só o QPS varia, com CV de 1,6%.
+>
+> **Decisão: o default fica em 64** — [ADR-0066](wiki/decisions/0066-b018-ef-search-default-fica-em-64.md).
+> O pilar sustenta paridade de recall classe-pgvector; sete pontos não são tuning, são a alegação. E o
+> pgvector paga **o mesmo preço**: em `ef=64` ele também larga o índice, e o default de 40 dele compra o
+> plano com os mesmos 7 pontos. Não são duas escolhas diferentes — é a mesma troca com os dois projetos
+> em lados opostos.
+>
+> **A saída é por consulta:** `SET LOCAL theodb_hnsw.ef_search = 40` na transação que precisa do índice
+> numa junção filtrada. Escopo de transação, que é o que o [[B-055]] estabelece sob transaction pooling.
+>
+> Artefato: `benchmarks/artifacts/20260821T093458Z-vector-sift1m-ef-default-theodb-716a5ebd/`. Veredito
+> do arnês `EXPLORATORY` (faltaram CPU set, limite de memória e árvore git limpa) — não enfraquece a
+> decisão, porque quem decide é o recall e o recall é determinístico.
 >
 > **DUAS RETRATAÇÕES, preservadas no conceito da wiki.** (1) O primeiro controle usou pgvector **0.5.1**,
 > cujo modelo de custo é de outra geração — mediu a distância entre duas gerações, não entre duas

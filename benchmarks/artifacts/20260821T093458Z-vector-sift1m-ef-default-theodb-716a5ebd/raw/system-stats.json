@@ -1,0 +1,7 @@
+{
+  "rows": 1000000,
+  "indexes": [
+    "bench_vectors_hnsw_l2_idx"
+  ],
+  "database_size_bytes": 1376261823
+}

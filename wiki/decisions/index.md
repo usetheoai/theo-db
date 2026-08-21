@@ -65,3 +65,4 @@
 - [ADR-0063 — halfvec/sparsevec fora de escopo, e a versão do shim que dizia tê-los](0063-halfvec-fora-de-escopo-e-a-versao-que-mentia.md) — o número de versão de um shim é contrato de capacidade, não número de build
 - [ADR-0064 — `maintenance_work_mem` não é um contrato de memória neste produto](0064-maintenance-work-mem-nao-e-contrato.md) — um componente o ignora, outro o excede em 7×; a regra passa a ser projetar e recusar nomeando o número
 - [ADR-0065 — `unsafe_op_in_unsafe_fn` vira erro no crate, e a marcação é por operação](0065-b032-unsafe-op-marcado-por-operacao.md) — 1.444 e não 2.872 (o número antigo contava duas vezes); o `cargo fix` do rustc envolve o corpo e é teatro
+- [ADR-0066 — o default de `ef_search` fica em 64, e a saída do caso de junção é por consulta](0066-b018-ef-search-default-fica-em-64.md) — baixar compra 1,377× de QPS e custa 7,02 pontos de recall; o pgvector paga o mesmo preço pelo mesmo ganho

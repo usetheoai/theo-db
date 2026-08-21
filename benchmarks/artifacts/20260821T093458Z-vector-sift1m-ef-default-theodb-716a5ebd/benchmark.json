@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "vector/sift1m/ef-default",
+  "version": 1,
+  "workload": {
+    "type": "ann",
+    "loop": "closed",
+    "clients": 1,
+    "arrival_rate_per_second": null,
+    "k": [
+      10
+    ],
+    "operation_count": 500
+  },
+  "quality": {
+    "metric": "recall",
+    "ground_truth": "computed"
+  },
+  "parameters": {
+    "ef_search": [
+      40,
+      64
+    ]
+  },
+  "warmup": {
+    "policy": "fixed_operations",
+    "operations": 50
+  },
+  "repetitions": 3
+}
