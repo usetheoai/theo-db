@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-96 items — **Open** 13 · **In flight** 13 · **Closed** 70
+97 items — **Open** 14 · **In flight** 13 · **Closed** 70
 
-### Open (13)
+### Open (14)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -85,8 +85,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
-| [`B-095`](#b-095--group_by_category-não-usa-o-caminho-colunar-e-o-plano-cai-para-groupaggregate----) | `group_by_category` não usa o caminho colunar, e o plano cai para `GroupAggregate` | `triaged` | — |
+| [`B-095`](#b-095--group-by-por-texto-recusa-o-pushdown-colunar-e-a-guarda-está-certa----) | `GROUP BY` por TEXTO recusa o pushdown colunar, e a guarda está certa | `triaged` | — |
 | [`B-096`](#b-096--read_parquet-devolve-setof-jsonb-e-é-isso-que-custa-142----) | `read_parquet` devolve `SETOF jsonb`, e é isso que custa 142× | `triaged` | — |
+| [`B-097`](#b-097--o-tam-colunar-reporta-zero-linhas-ao-planner-e-o-analyze-não-amostra-nada----) | O TAM colunar reporta ZERO linhas ao planner, e o ANALYZE não amostra nada | `triaged` | — |
 
 ### In flight (13)
 
@@ -4365,24 +4366,25 @@ dod:
 > Registrado 2026-08-21 pelo ciclo do [[B-043]]. É o item mais desconfortável do backlog: o produto
 > que este projeto publica como instrumento de medição não sustenta a carga que se propõe a medir.
 
-## B-095 — `group_by_category` não usa o caminho colunar, e o plano cai para `GroupAggregate`   [ ]
+## B-095 — `GROUP BY` por TEXTO recusa o pushdown colunar, e a guarda está certa   [ ]
 
 domain: colunar
 repo: theo-db
 suggested_mode: review
 source: discover-review
-evidence: `benchmarks/artifacts/20260821T122336Z-analytical-crossover-row-count-theodb-eed87401/result.json` — `status_detail` do ponto `group_by_category via columnar`: *"'theodb_columnar_agg' is absent … Plan: GroupAggregate"*, em **todas as seis escalas** (10k a 2M)
-why_now: o sweep de crossover de 2026-08-21 é a primeira medição que pede prova de caminho de acesso em vez de aceitar residência, e ela reprovou esta consulta nas seis escalas. A consulta **não quebra** — devolve o resultado certo pelo fallback; o que falta é cobertura de pushdown de agregação para `GROUP BY`. Sem isto, o colunar tem um número publicável a menos e a promessa de "aceleração analítica" vale para agregação simples e não para agrupamento, sem que nada diga isso ao usuário.
+evidence: repro isolado em 2026-08-21 (`theo-db:develop`, tabela `USING theodb_columnar`, 200k linhas, `SET theodb.enable_columnar_agg=on`): `GROUP BY <int>` → **`Custom Scan (theodb_columnar_agg)`**; `GROUP BY <text>` → **`GroupAggregate`**, com `THEODB_ADMIT_TRACE=1` dizendo `swap_sorted_text_group_not_resorted` (`theodb_rs/src/am/columnar_agg.rs:2028-2033`)
+why_now: o sweep de crossover de 2026-08-21 reprovou `group_by_category` nas seis escalas, e a leitura fácil — "falta pushdown de GROUP BY" — está **errada**: agrupamento por inteiro faz pushdown limpo, com e sem `ORDER BY`. O bloqueio é só para chave de texto sob `AGG_SORTED`, e a guarda do M153 está **protegendo corretude**: nosso executor emite grupos em ordem byte-wise e o PostgreSQL promete ordem de collation; trocar sem um `Sort` completo acima devolveria a ordem errada. Recusar é o comportamento certo. O que falta é uma das duas saídas — emitir em ordem de collation, ou fazer o planner produzir a forma com `Sort` acima (ver [[B-097]], que é o que impede isso hoje).
 status: triaged
 dod:
-  - medido quais formas de `GROUP BY` o `theodb_columnar_agg` cobre hoje e quais caem para `GroupAggregate`
-  - ou o pushdown passa a cobrir `group_by_category`, ou a lacuna vira limite declarado em `wiki/`
-  - o sweep de crossover volta a reportar um número `measured` para esta consulta, ou um `unsupported` com razão
+  - medido se, com estatística real na tabela colunar ([[B-097]]), o planner escolhe `HashAggregate` + `Sort` acima — a forma que a guarda já admite
+  - se sim, este item fecha por [[B-097]] e o custo é zero; se não, uma das duas saídas é implementada e medida
+  - o limite fica declarado em `wiki/` em qualquer dos casos: hoje não há nada que diga ao usuário que agrupar por texto sai do caminho acelerado
 
-> Registrado em 2026-08-21 ao avaliar um plano de ação externo que tratava isto como "colapso a debugar".
-> **Não é colapso**, e a diferença muda o trabalho: não há crash para caçar, há cobertura de pushdown para
-> estender. O portão `assert_analytical_path` fez exatamente o que existe para fazer — recusou publicar um
-> número "colunar" para uma consulta que não passou pelo colunar.
+> **Reclassificado em 2026-08-21, no próprio DISCOVER.** O item nasceu como "falta cobertura de pushdown
+> para `GROUP BY`". Medido, é falso: `GROUP BY` por inteiro passa. A hipótese de intake não sobreviveu à
+> medição, e o item continua vivo com a razão corrigida em vez de ser fechado — que é o que
+> `cycle-discover § Mode is reclassifiable` manda fazer.
+
 
 ## B-096 — `read_parquet` devolve `SETOF jsonb`, e é isso que custa 142×   [ ]
 
@@ -4401,3 +4403,21 @@ dod:
 > Registrado em 2026-08-21. Relacionado a [[B-008]] (lakehouse nunca medido — agora está) e a [[B-058]].
 > A pergunta aberta que o item **não** resolve: se o caminho Parquet deve sequer ser comparado em QPS por
 > consulta, ou se o uso pretendido é varredura em lote, caso em que a métrica está errada e não o código.
+
+## B-097 — O TAM colunar reporta ZERO linhas ao planner, e o ANALYZE não amostra nada   [ ]
+
+domain: colunar
+repo: theo-db
+suggested_mode: review
+source: discover-review
+evidence: `theodb_rs/src/am/columnar.rs:2225-2244` — `columnar_relation_estimate_size` fixa `*tuples = 0.0` com o comentário *"Phase A: no catalog row-count yet; a real estimate reads columnar.stripe (Phase C ANALYZE)"*; `columnar_scan_analyze_next_block` e `columnar_scan_analyze_next_tuple` devolvem `false`. Medido no mesmo repro: tabela colunar de 200.000 linhas fica com `reltuples=0`, `relpages=1` **depois do `ANALYZE`**, e `pg_stats` tem **zero linhas** para ela; a heap equivalente fica com `reltuples=200000`, `relpages=1280`. O `EXPLAIN` da tabela de 200 mil linhas diz `rows=1`.
+why_now: isto não é um caso de borda de uma consulta — é a entrada de TODA decisão de plano sobre dado colunar. Sem contagem de linhas e sem `pg_stats`, o planner não tem seletividade, `n_distinct` nem histograma: escolhe forma de agregação, ordem de junção e caminho de acesso às cegas, e os custos colapsam a ponto de `enable_sort=off` não mudar o plano (medido). É a causa do [[B-095]]: com 5 grupos em 200 mil linhas o planner escolheria `HashAggregate`, e o `ORDER BY` poria o `Sort` **acima** — exatamente a forma que a guarda do M153 já admite. O estado é conhecido e declarado como incompleto ("Fase A"), e o custo dele nunca foi medido.
+status: triaged
+dod:
+  - `columnar_relation_estimate_size` devolve contagem real lida de `columnar.stripe` (a tabela já existe e já tem o metadado)
+  - `ANALYZE` sobre tabela colunar popula `pg_stats`, ou o limite é declarado com a razão de não popular
+  - medido o efeito no sweep de crossover: quais consultas mudam de plano e quanto muda o QPS — publicado mesmo se o ganho for nulo
+
+> Registrado em 2026-08-21 ao medir o [[B-095]]. O item que virou a investigação era o sintoma; este é a
+> entrada. Relacionado a [[B-006]] (ClickBench completo) e [[B-058]] — qualquer comparação analítica
+> corre hoje com o planner cego do nosso lado.

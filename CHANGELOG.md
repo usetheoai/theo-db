@@ -14,6 +14,18 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **O planner via ZERO linha em toda tabela colunar.** `columnar_relation_estimate_size` devolvia
+  `*tuples = 0.0` fixo, então uma tabela de 200.000 linhas era planejada como se tivesse ~1: forma de
+  agregação, ordem de junção e caminho de acesso escolhidos às cegas. Passa a somar `row_count` de
+  `columnar.stripe`, metadado que já existia. Medido no servidor: `rows=1` → `rows=200000` (B-097)
+- **`GROUP BY` por texto volta a usar o caminho colunar**, com resultado idêntico ao heap. Era sintoma
+  da estimativa degenerada, não lacuna de pushdown como o registro supunha — com contagem real o
+  planner alcança a forma que a guarda do M153 já admitia (B-095)
+- **`SELECT count(*)` em tabela colunar grande virava ERRO, e o defeito era latente.** Com a estimativa
+  zerada o planner nunca cogitava plano paralelo, e a recusa do TAM (`parallel scan is not supported`)
+  ficava inalcançável; com a contagem real, qualquer tabela acima de `min_parallel_table_scan_size`
+  passava a receber `Parallel Seq Scan` e falhava. A estimativa degenerada estava mascarando uma
+  capacidade não implementada (B-097)
 - Correção no registro: o `B-002` estava marcado `shipped` por engano de edição — ele segue aberto e é
   decisão do owner. O `B-007`, que está entregue, estava marcado `raw`. Ambos corrigidos (B-002, B-007)
 
