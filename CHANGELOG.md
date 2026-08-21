@@ -13,6 +13,23 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **A compatibilidade com PgBouncer deixou de ser análise de código e passou a ser medição.** Nos três
+  modos, contra a imagem lançada: sob `session` nada muda; sob `transaction` e `statement` o
+  `SET theodb_hnsw.ef_search` de um cliente **passa a valer para o próximo cliente** que pegar aquela
+  conexão. A hipótese registrada previa *perda* do ajuste — o medido é *contaminação*, que é pior,
+  porque degrada a busca de quem não ajustou nada. Comportamento documentado do PgBouncer; o que é
+  nosso é a consequência, já que aqui o parâmetro que vaza decide recall. Os contadores de
+  `theodb.explain_scan` foram medidos e **não** contaminam — hipótese refutada com o mesmo peso. (#B-055)
+
+### Fixed
+- **O portão de CHANGELOG passou a perguntar se há ENTRADA, não se o arquivo foi tocado.** Medido
+  sobre o próprio trabalho de 2026-08-20: um commit entregou um item, tocou o `CHANGELOG.md` por
+  outras razões, e não acrescentou nenhuma entrada — o portão passou, e a falta só apareceu no corte
+  da release, uma sessão depois e por acaso. Quando há commit na sessão, a pergunta passa a ser
+  sobre a entrada; o checador **espelha** a definição de código de produção que o hook já usava, em
+  vez de inventar uma segunda que divergiria. (#B-088)
+
 ## [0.161.0] - 2026-08-20
 
 ### Added
