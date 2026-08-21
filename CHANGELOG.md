@@ -13,6 +13,19 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **O crossover do colunar foi medido, e a resposta não é um número — são quatro, e duas são gaps.**
+  De 10K a 2M linhas, mesmo dado nos três caminhos, no mesmo binário: `total_rows` ganha **abaixo de
+  10K** (pico 4,02× em 500K); `sum_amount` vira **entre 10K e 50K**; **`filtered_sum` PERDE em toda a
+  faixa e piora com a escala** — 0,42× a 10K e **0,25× a 2M**, ou seja 4× mais lento que o heap na
+  forma mais comum de consulta analítica, com a curva indo na direção errada; e **`group_by_category`
+  foi recusado nos seis pontos** pelo portão de caminho, porque o `GROUP BY` não faz pushdown.
+  .
+  Dois achados que ninguém procurava: a vantagem do colunar tem **pico e declina** (4,02× → 3,17×;
+  2,75× → 1,74×), que é o oposto do esperado e **não está diagnosticado**; e o **Parquet é 40× a 142×
+  mais lento que o heap**, piorando com N — 8,3 s para contar 2M linhas.
+  `wiki/benchmarks/b058-crossover-colunar.md`. (#B-058)
+
 ## [0.165.0] - 2026-08-21
 
 ### Added

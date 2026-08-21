@@ -1,0 +1,38 @@
+{
+  "collectors": [
+    "process",
+    "perf"
+  ],
+  "enabled": [
+    "process"
+  ],
+  "overhead_seconds": 0.000697,
+  "metrics": {
+    "process.rss_bytes": 377589760,
+    "process.peak_rss_bytes": 377589760,
+    "process.cpu_seconds": 23.59,
+    "process.context_switches": 9453.0,
+    "process.minor_faults": 148856.0,
+    "process.major_faults": 0.0,
+    "perf.cycles": {
+      "absent": "not_collected",
+      "detail": "perf collector disabled for this run"
+    },
+    "perf.instructions": {
+      "absent": "not_collected",
+      "detail": "perf collector disabled for this run"
+    },
+    "perf.cache_misses": {
+      "absent": "not_collected",
+      "detail": "perf collector disabled for this run"
+    },
+    "perf.cache_references": {
+      "absent": "not_collected",
+      "detail": "perf collector disabled for this run"
+    },
+    "perf.branch_misses": {
+      "absent": "not_collected",
+      "detail": "perf collector disabled for this run"
+    }
+  }
+}

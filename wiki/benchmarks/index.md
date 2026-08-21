@@ -160,3 +160,4 @@ Cada arquivo é uma medição com método, números e veredito. Subpastas: [arqu
 - [b049 — as diferenças de velocidade contra o rigor que exigimos da qualidade](b049-velocidade-sem-teste.md) — o b035 sobrevive com ±8,2% em vez da precisão que o número sugere; o b047 tem UMA corrida e não é testável
 - [b018 — o planner larga o HNSW na junção filtrada](b018-planner-hnsw-juncao.md) — a causa é o índice ocupar 680 páginas contra 382, não o modelo de custo; inclui a retratação de um controle meu que usava a versão errada do pgvector
 - [b046/b042 — a recall casado o déficit vai de 3,4% a 19,6%](b046-b042-fronteira-pgvector.md) — e é MENOR no alto recall; o build é 1,82× e não 3,6×, e nosso índice é menor que o do pgvector
+- [b058 — o crossover do colunar são quatro respostas, e duas são gaps](b058-crossover-colunar.md) — no agregado filtrado o colunar PERDE em toda a faixa e piora com N; no GROUP BY nem roda; e o Parquet é 142× mais lento que o heap a 2M
