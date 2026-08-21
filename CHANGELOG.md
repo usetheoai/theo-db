@@ -13,6 +13,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **O ferramental sob `.claude/` passou a ter portão.** Existiam **94 arquivos de teste** ali e nenhum
+  workflow os rodava — e o que ficava sem gate não era periférico: são os checadores de plano, o portão
+  do backlog, o gate de CHANGELOG e os scripts de implementação, ou seja, o código que decide se o
+  trabalho deste repositório passa. Custo medido antes de decidir: **45 s** para as 31 slices, contra
+  28–58 min dos workflows pesados. (#B-090)
+
 ### Fixed
 - **Um vetor zero na tabela derrubava a busca por cosseno no índice, no `ef_search` default.**
   `'[0,…,0]' <=> q` é NaN, e o caminho de varredura ordenava com um comparador que devolvia "igual"

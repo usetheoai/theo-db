@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-90 items — **Open** 27 · **In flight** 6 · **Closed** 57
+90 items — **Open** 26 · **In flight** 7 · **Closed** 57
 
-### Open (27)
+### Open (26)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -100,9 +100,8 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala----) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
-| [`B-090`](#b-090--94-arquivos-de-teste-sob-claude-e-nenhum-workflow-os-roda----) | 94 arquivos de teste sob `.claude/` e nenhum workflow os roda | `triaged` | — |
 
-### In flight (6)
+### In flight (7)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -112,6 +111,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-088`](#b-088--o-gate-de-changelog-checa-presença-de-arquivo-não-de-entrada----) | O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA | `planned` | — |
 | [`B-089`](#b-089--um-vetor-zero-na-tabela-derruba-a-busca-por-cosseno-no-índice-hnsw-no-ef_search-default----) | Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default | `planned` | — |
+| [`B-090`](#b-090--94-arquivos-de-teste-sob-claude-e-nenhum-workflow-os-roda----) | 94 arquivos de teste sob `.claude/` e nenhum workflow os roda | `planned` | — |
 
 ### Closed (57)
 
@@ -3857,7 +3857,16 @@ why_now: esta sessão mexeu em oito desses scripts e rodou as suítes **à mão*
 Nada no sistema exigiu isso e nada teria notado a ausência — que é literalmente o texto do [[B-052]] aplicado
 a outro diretório, e o B-052 já foi entregue para o Rust. E o [[B-088]], que acabou de entrar, é o gate de
 CHANGELOG: se ele quebrar, quem descobre é a próxima sessão, pelo silêncio.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — os três bullets fecharam. (1) `.github/workflows/tooling-tests.yml` roda
+  `run_slice_tests.sh` (31 slices, um processo pytest por slice — o script explica no cabeçalho por que
+  um `pytest` largo colide), mais `check_xrefs.py` e o checador do registro. Na forma que o
+  [[B-052]]/ADR-0062 estabeleceu: `pull_request` antes do merge, `push` só em `main`. (2) A decisão de
+  RODAR está escrita no cabeçalho do workflow, com o contra-argumento nomeado: `.claude/` é checkout do
+  kit e dá para sustentar que o dono do teste é o kit — perdeu porque o diretório está versionado AQUI
+  e porque os consertos não vão ao kit por decisão do owner, o que torna este o único lugar onde eles
+  podem ser verificados. (3) Custo MEDIDO: **45 s** para as 31 slices, contra 28–58 min dos workflows
+  pesados. Desprezível — e se custasse como os outros, mereceria o mesmo ADR que o B-052.
 dod:
   - existe workflow que roda as suítes Python de `.claude/` quando elas ou o código que elas cobrem mudam,
     e ele reprova quando um teste falha
