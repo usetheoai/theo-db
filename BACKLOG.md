@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-91 items — **Open** 25 · **In flight** 5 · **Closed** 61
+91 items — **Open** 24 · **In flight** 5 · **Closed** 62
 
-### Open (25)
+### Open (24)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -91,7 +91,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-043`](#b-043--o-qps-lexical-satura-em-20-clientes-numa-máquina-de-16-vcpu-e-não-sobe-mais----) | O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais | `triaged` | — |
 | [`B-046`](#b-046--paridade-de-qps-com-o-pgvector-a-recall-casado-hoje-o-déficit-medido-é-163----) | Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3% | `triaged` | — |
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `triaged` | — |
-| [`B-050`](#b-050--o-conserto-do-cliente-opensearch-é-do-upstream-e-o-fork-tem-saída-declarada----) | O conserto do cliente OpenSearch é do upstream, e o fork tem saída declarada | `triaged` | — |
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela----) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `triaged` | — |
@@ -110,7 +109,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `planned` | — |
 
-### Closed (61)
+### Closed (62)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -146,6 +145,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-045`](#b-045--nenhuma-comparação-que-publicamos-tem-teste-de-significância-e-tínhamos-o-instrumento---x) | Nenhuma comparação que publicamos tem teste de significância, e tínhamos o instrumento | `shipped` | — |
 | [`B-047`](#b-047--rodar-os-motores-concorrentes-nos-benchmarks-oficiais-na-mesma-máquina-como-prática-recorrente---x) | Rodar os motores concorrentes nos benchmarks oficiais, na mesma máquina, como prática recorrente | `shipped` | — |
 | [`B-048`](#b-048--a-superfície-responde-onde-deveria-recusar-três-instâncias-novas-e-a-classe-já-foi-consertada-três-vezes---x) | A superfície responde onde deveria recusar: três instâncias novas, e a classe já foi consertada três vezes | `shipped` | — |
+| [`B-050`](#b-050--o-conserto-do-cliente-opensearch-é-do-upstream-e-o-fork-tem-saída-declarada---x) | O conserto do cliente OpenSearch é do upstream, e o fork tem saída declarada | `killed` | — |
 | [`B-051`](#b-051--nada-compara-o-checkbox-com-o-status-e-a-divergência-sobreviveu-meses---x) | Nada compara o checkbox com o `status`, e a divergência sobreviveu meses | `shipped` | — |
 | [`B-052`](#b-052--workspace-não-tem-portão-73-commits-e-13-arquivos-rust-sem-um-gate-olhar---x) | `workspace` não tem portão: 73 commits e 13 arquivos Rust sem um gate olhar | `shipped` | — |
 | [`B-053`](#b-053--o-núcleo-de-distância-vetorial-é-puro-por-uma-linha-e-é-ela-que-prende-o-micro-bench-na-suíte---x) | O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte | `shipped` | — |
@@ -2107,7 +2107,7 @@ dod:
 > filado** — o que é a mesma falha de registro que o `cycle-maintenance` documenta: mencionar sem filar dá
 > falsa sensação de cobertura. O custo estimado por medição: cada corrida do caso FTS levou ~7 min no droplet
 > depois do dataset em cache, então N=5 por configuração são ~35 min por motor.
-## B-050 — O conserto do cliente OpenSearch é do upstream, e o fork tem saída declarada   [ ]
+## B-050 — O conserto do cliente OpenSearch é do upstream, e o fork tem saída declarada   [x]
 
 domain: metodo
 repo: theo-db
@@ -2115,7 +2115,19 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-13 durante o [[B-047]]. `REPLICA_HEALTH_TIMEOUT: Final[str] = "30m"` (sintaxe de duração do Elasticsearch) era passado como `timeout=` ao transporte do `opensearch-py`, que levanta `ValueError: Timeout value connect was 30m, but it must be an int, float or None` **antes de qualquer requisição sair**. `_update_replicas` chama `_wait_till_green` incondicionalmente de `optimize()`, então **toda** corrida de OpenSearch falhava no passo de otimização — não era caminho lento, era caminho morto. Corrigido no nosso fork (`"30m"` → `1800`), e a corrida passou a completar: NDCG 0,7344 sobre 6.980 consultas.
 why_now: o conserto está no fork `usetheoai/VectorDBBench@theodb` **fora do escopo do nosso cliente**, e a Política de Fork (D3) manda diff mínimo com saída declarada. Enquanto ele viver só aqui, duas coisas ruins acontecem ao mesmo tempo: o fork carrega dívida que não é nossa e fica mais difícil de rebasear; e qualquer pessoa que rode o OpenSearch no VectorDBBench upstream continua batendo num caminho morto que já sabemos consertar. É uma correção de uma linha, com reprodução clara e evidência medida — o formato que um PR upstream aceita bem.
-status: triaged
+status: killed
+kill_reason: 2026-08-20 — decisão do owner: não abrir PR nem issue no `zilliztech/VectorDBBench`.
+  O DoD deste item é, inteiro, uma ação num repositório de TERCEIRO — pública, permanente e atribuída
+  ao owner. Sem essa ação o item não tem como fechar, e mantê-lo `triaged` seria exatamente o item
+  que fica aberto para sempre porque ninguém vai agir nele.
+  **Nada aqui foi refutado.** O defeito É real e foi verificado no upstream em 2026-08-20 por busca
+  de código: `oss_opensearch.py:21` ainda tem `REPLICA_HEALTH_TIMEOUT: Final[str] = "30m"` passado
+  como `timeout=` em `:815`, e `_wait_till_green` é alcançado incondicionalmente por `optimize()`
+  nos dois ramos. O conserto continua no nosso fork, funcionando.
+  O material preparado fica em `.claude/knowledge-base/upstream/b050-vectordbbench-opensearch-timeout.md`
+  — inclusive a sutileza que a análise nova encontrou e que o conserto de uma linha esconde: o erro
+  vem do TRANSPORTE, não da API, e o `opensearch-py` está sem pin no upstream, o que torna o defeito
+  dependente de versão. Se um dia alguém decidir enviar, o trabalho está feito.
 dod:
   - PR aberto no `zilliztech/VectorDBBench` com **só** essa mudança, corpo trazendo a mensagem de erro exata, a versão do `opensearch-py` e do OpenSearch onde foi observado, e por que o caminho é incondicional
   - o PR **não** menciona o TheoDB nem o nosso cliente: é conserto do cliente deles, e misturar as duas coisas transformaria uma correção óbvia numa discussão de escopo
