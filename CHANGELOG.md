@@ -13,6 +13,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.167.0] - 2026-08-21
+
 ### Added
 - Primeira medição do pilar de grafo contra um baseline: travessia de 1, 2 e 3 saltos pelo CSR e por
   `WITH RECURSIVE` indexado no mesmo servidor. **O CSR perde até 2 saltos** (2,17× e 1,90×) e ganha
