@@ -72,6 +72,24 @@ if [ -z "$CONTENT" ]; then
   exit 0
 fi
 
+# B-091 — LINHAS NEGADAS SAO REMOVIDAS ANTES DOS CHECKS.
+#
+# Medido em 2026-08-20 contra o README deste repositorio: o lint avisava de `production-ready` nas
+# QUATRO ocorrencias do arquivo, e as quatro sao negacoes — "Sem afirmacao de production-ready ate
+# haver evidencia", "**Nao e production-ready**", "o gate para sequer comecar a alegar
+# production-ready". Ele avisava exatamente sobre o texto que existe para CUMPRIR a regra, e um
+# aviso assim ensina que o aviso nao vale a pena ler.
+#
+# HEURISTICO, e a limitacao fica dita: a decisao e por LINHA e por marcador de negacao. Uma negacao
+# que atravesse duas linhas passa despercebida, e uma linha que negue um termo e afirme outro perde
+# os dois. Errar para o lado de nao avisar e a escolha certa aqui — o lint e advisory, e um falso
+# positivo custa mais que um falso negativo num aviso que ninguem e obrigado a atender.
+NEGACAO='(nao|não)[[:space:]]+(e|é|somos|estamos)|sem[[:space:]]+(afirma|alega)|ate[[:space:]]+haver|até[[:space:]]+haver|sequer[[:space:]]+come|banned|proibid|nunca[[:space:]]+afirm|evite|deixa[[:space:]]+de[[:space:]]+ser'
+CONTENT=$(printf '%s\n' "$CONTENT" | grep -viE "$NEGACAO" || true)
+if [ -z "$CONTENT" ]; then
+  exit 0
+fi
+
 WARNINGS=()
 
 # --- 1. Pre-release honesty ---
@@ -110,7 +128,11 @@ if echo "$CONTENT" | grep -qiE '\bzero[[:space:]]?-?[[:space:]]?downtime\b'; the
 fi
 
 # --- 4. Lock-in absolutism ---
-if echo "$CONTENT" | grep -qiE '\block[[:space:]]?-?[[:space:]]?in[[:space:]]+(free|proof)\b'; then
+# `sem lock-in` / `livre de lock-in` sao a forma PORTUGUESA do mesmo absolutismo, e o padrao so
+# cobria o ingles — o README deste repositorio dizia "sem lock-in" e passava (B-091). A minha
+# evidencia inicial do item dizia que o lint cobria "3 das 4 familias" do § 6; era FALSO, ele cobre
+# as quatro. O defeito real e mais estreito e so aparece em portugues.
+if echo "$CONTENT" | grep -qiE '\block[[:space:]]?-?[[:space:]]?in[[:space:]]+(free|proof)\b|sem[[:space:]]+lock[[:space:]]?-?[[:space:]]?in|livre[[:space:]]+de[[:space:]]+lock[[:space:]]?-?[[:space:]]?in'; then
   WARNINGS+=("'Lock-in free/proof' in public copy — exaggeration. State the specific exit affordance ('export with <tool>', 'data is yours in standard format X').")
 fi
 

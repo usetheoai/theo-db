@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-91 items — **Open** 27 · **In flight** 3 · **Closed** 61
+91 items — **Open** 26 · **In flight** 4 · **Closed** 61
 
-### Open (27)
+### Open (26)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -100,15 +100,15 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala----) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
-| [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `triaged` | — |
 
-### In flight (3)
+### In flight (4)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
+| [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `planned` | — |
 
 ### Closed (61)
 
@@ -3905,7 +3905,17 @@ falta `lock-in`, `<competidor> killer`, `drop-in replacement` e `zero downtime`.
 why_now: um lint com as duas falhas ao mesmo tempo é pior que nenhum: ele treina o leitor a ignorar o aviso
 (porque o aviso que ele dá é sobre o texto certo) enquanto deixa passar o que deveria pegar. A frase da linha
 10 foi corrigida na mesma sessão, mas por leitura humana — o portão não a teria pego.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — os três bullets fecharam, e **duas correções de rota ficam registradas**.
+  (1) A evidência original dizia "3 das 4 famílias"; era falsa — o lint cobre as quatro, e o defeito real era
+  só a forma portuguesa. (2) O filtro de negação que escrevi derruba a LINHA inteira, então uma linha que
+  negue um termo e afirme outro perde os dois — encontrei isso no próprio README, onde `sem lock-in` passava
+  por causa de um `nunca afirmações` na mesma linha. A frase foi reescrita para não depender dessa sorte, e a
+  limitação está **fixada em teste** em vez de descoberta depois: se alguém tornar o filtro mais preciso, o
+  teste falha e diz para removê-lo.
+  Achado colateral consertado no caminho: `run_slice_tests.sh` só varria `skills/*/tests`, então
+  `scripts/tests/` — onde vivem os 7 testes do [[B-088]], escritos nesta mesma sessão — **nunca rodava**.
+  Agora varre `scripts/tests` e `hooks/tests`.
 dod:
   - o lint não avisa quando o termo aparece negado (`não é X`, `sem afirmação de X`) — provado por teste
     contra o `README.md` atual, que hoje dispara quatro avisos e deveria disparar zero

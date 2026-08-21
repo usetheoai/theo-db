@@ -19,8 +19,8 @@ e com saída declarada: os dados saem por `pg_dump` e por Parquet, e a extensão
 
 A missão do TheoDB é **igualar ou superar o AlloyDB** para quem roda OSS, on-premises e na borda —
 entregando as mesmas capacidades (busca vetorial/IA, analytics, operação) com **superioridade estrutural**
-em abertura, custo, portabilidade e **independência de modelo** (qualquer modelo local ou remoto, sem
-lock-in). Metas de performance são **metas comprovadas por benchmark reproduzível** em `wiki/benchmarks/` —
+em abertura, custo, portabilidade e **independência de modelo** (qualquer modelo local ou remoto,
+trocável sem migração de dados). Metas de performance são **metas comprovadas por benchmark reproduzível** em `wiki/benchmarks/` —
 nunca afirmações sem evidência. Estratégia completa: [`wiki/decisions/0002-north-star-equal-or-superior-to-alloydb.md`](./wiki/decisions/0002-north-star-equal-or-superior-to-alloydb.md).
 
 > **Estado medido FINAL do pilar vetorial (honesto — M73/M74, `wiki/decisions/0035`, `wiki/decisions/0036`).** Depois de
