@@ -14,6 +14,9 @@
 # é own-code do TheoDB e NÃO o pgvector. A versão declara o CONTRATO DE FEATURES compatível que o tooling
 # inspeciona (tipo vector + operadores + AM hnsw + opclasses), não uma alegação de ser o pgvector.
 comment = 'pgvector compatibility shim — the vector type/operators/opclasses are provided by TheoDB own-code (theodb_rs), NOT by pgvector'
-default_version = '0.7.0'
+# 0.6.0 e nao 0.7.0 por DECISAO (B-038 / ADR-0063): a superficie entregue e a do pgvector 0.6.x, e
+# a 0.7.0 e a versao que introduziu `halfvec`/`sparsevec`, que este shim nao tem. Declarar 0.7.0
+# fazia `extversion >= '0.7.0'` responder SIM e a app quebrar depois.
+default_version = '0.6.0'
 requires = 'theodb_rs'
 relocatable = false

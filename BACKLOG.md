@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-91 items — **Open** 24 · **In flight** 5 · **Closed** 62
+91 items — **Open** 23 · **In flight** 6 · **Closed** 62
 
-### Open (24)
+### Open (23)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -86,7 +86,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
 | [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off----) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `triaged` | — |
 | [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `triaged` | — |
-| [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta----) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `triaged` | — |
 | [`B-042`](#b-042--o-build-do-hnsw-é-36-mais-lento-que-o-do-pgvector-usando-8-mais-threads-e-o-grafo-sai-pior----) | O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior | `triaged` | — |
 | [`B-043`](#b-043--o-qps-lexical-satura-em-20-clientes-numa-máquina-de-16-vcpu-e-não-sobe-mais----) | O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais | `triaged` | — |
 | [`B-046`](#b-046--paridade-de-qps-com-o-pgvector-a-recall-casado-hoje-o-déficit-medido-é-163----) | Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3% | `triaged` | — |
@@ -99,10 +98,11 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 
-### In flight (5)
+### In flight (6)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
+| [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta----) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `planned` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
@@ -1675,7 +1675,19 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-12 contra `theodb:b034`. `SELECT typname FROM pg_type WHERE typname IN ('vector','halfvec','sparsevec')` devolve **só `vector`**. O `pgvector-python 0.5.0` trata a ausência sem erro — `register_vector` só registra os dois se `TypeInfo.fetch` os encontrar (verificado na fonte do pacote) —, então nada quebra no cliente; o que quebra é qualquer DDL ou consulta de app que os use, e todos os casos de quantização do VectorDBBench, que assumem `halfvec` e `bit` como tipo de coluna.
 why_now: é a lacuna de drop-in mais funda das três encontradas neste ciclo e, honestamente, **a menos urgente** — as outras duas são rotulagem ou parâmetro sobre capacidade que já existe; esta pede tipos novos com I/O binário, operadores, opclasses e cast. Fica registrada porque foi medida, e porque uma decisão de NÃO fazer também precisa estar escrita: se o posicionamento é "compatível com pgvector", um `ERROR: type "halfvec" does not exist` é uma resposta que o produto dá hoje e ninguém decidiu dar.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — os três bullets fecharam com a saída "fora de escopo", registrada em
+  `wiki/decisions/0063-halfvec-fora-de-escopo-e-a-versao-que-mentia.md`.
+  **A medição encontrou algo que o item não procurava, e mais urgente que ele**: o shim declarava
+  `vector 0.7.0`, que é a versão em que o pgvector introduziu `halfvec`. Medido contra a imagem
+  lançada — `extversion >= '0.7.0'` devolvia `t` e `CREATE TABLE h (e halfvec(3))` falhava. A app
+  recebia SIM e quebrava depois, que é exatamente o que o cabeçalho do próprio shim diz existir para
+  impedir. A causa era de numeração: os arquivos seguiam a ordem em que NÓS construímos (o alias
+  `ivfflat` estava na "0.7.0", quando no pgvector real ele existe desde a 0.1.0).
+  Corrigido para `0.6.0`, que é a superfície de fato entregue. Verificado por execução:
+  `extversion >= '0.7.0'` agora devolve `f`, a superfície continua inteira (dois AMs, seis
+  opclasses), e `ALTER EXTENSION vector UPDATE TO '0.6.0'` corrige uma instalação já feita sem
+  recriá-la — testado contra o servidor.
 dod:
   - uma DECISÃO registrada em ADR sobre implementar ou declarar fora de escopo — as duas saídas são aceitáveis, o silêncio não é
   - se implementar: `halfvec(N)` com o MESMO formato de fio do pgvector (o `vector` já tem — provado pelo `COPY FORMAT BINARY` do B-035), operadores de distância, opclasses nos AMs, e cast `vector <-> halfvec`
