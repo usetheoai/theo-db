@@ -1,0 +1,17 @@
+# Dependencias externas das suites de teste do ferramental sob `.claude/`.
+#
+# POR QUE ESTE ARQUIVO EXISTE (B-090). O portao `tooling-tests` reprovou na PRIMEIRA corrida com
+# `ModuleNotFoundError: No module named 'yaml'` em 20 testes de 6 slices. As suites passavam na
+# maquina de desenvolvimento por ACIDENTE do ambiente — as dependencias nunca haviam sido
+# declaradas em lugar nenhum, e ninguem podia saber quais eram sem tentar.
+#
+# E a mesma classe do resto desta sessao: algo que funcionava por um estado que ninguem registrou.
+# O portao encontrou no primeiro uso, que e para o que ele serve.
+#
+# Levantadas por medicao, nao por memoria: varri os `import` de `skills/*/scripts`, `skills/*/tests`
+# e `scripts/`, e separei o que resolve em `site-packages` do que resolve por `sys.path` local.
+pytest>=7.4
+pyyaml>=6.0
+jsonschema>=4.0
+hypothesis>=6.0
+requests>=2.31

@@ -14,6 +14,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **As dependências das suítes do ferramental passaram a ser declaradas.** O portão novo reprovou na
+  **primeira corrida** com `ModuleNotFoundError: No module named 'yaml'` em 20 testes de 6 slices: elas
+  passavam na máquina de desenvolvimento por acidente do ambiente, e ninguém podia saber quais eram as
+  dependências sem tentar. Levantadas por varredura dos `import`, não por memória. (#B-090)
+- **O checador de caminhos de workflow deixou de acusar arquivo que existe.** Ele extraía o caminho a
+  partir de `scripts/`, descartando um prefixo `.claude/` à esquerda, e reportava `AUSENTE` para um
+  arquivo presente. A própria mensagem dele diz que "um job que falha por arquivo ausente é
+  indistinguível de uma regressão real" — e isso vale nos dois sentidos. (#B-090)
 - **O ferramental sob `.claude/` passou a ter portão.** Existiam **94 arquivos de teste** ali e nenhum
   workflow os rodava — e o que ficava sem gate não era periférico: são os checadores de plano, o portão
   do backlog, o gate de CHANGELOG e os scripts de implementação, ou seja, o código que decide se o

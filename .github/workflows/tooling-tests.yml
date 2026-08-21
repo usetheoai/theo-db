@@ -59,8 +59,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Instalar pytest
-        run: python -m pip install --quiet --upgrade pip pytest
+      # De um arquivo declarado e nao de uma lista inline: a primeira corrida deste portao reprovou
+      # com `ModuleNotFoundError: No module named 'yaml'` em 20 testes, porque as suites passavam na
+      # maquina de desenvolvimento por acidente do ambiente. Uma lista aqui divergiria do que alguem
+      # instala localmente — que e como o piso do `ruff` no arnes custou uma corrida vermelha hoje.
+      - name: Instalar as dependencias declaradas
+        run: |
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet -r .claude/requirements-dev.txt
 
       # `run_slice_tests.sh` roda UM processo pytest por slice, de proposito: as 31 slices sao
       # import-isoladas e varias trazem modulos com o MESMO basename e conteudo diferente. Um
