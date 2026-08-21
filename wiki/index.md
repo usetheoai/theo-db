@@ -54,3 +54,4 @@ Cento e sessenta e nove medições, com método, números, vereditos e limites d
 # Proveniência
 
 * [log.md](log.md) — histórico de mudanças deste bundle, incluindo o que ficou de fora e por quê
+- [O droplet de medição — o que já existiu, o que custa, e como subir um](runbooks/droplet-de-medicao.md) — a prática é efêmero `g-16vcpu-64gb`; três armadilhas que só um host limpo revela
