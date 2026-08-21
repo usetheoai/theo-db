@@ -1,0 +1,5748 @@
+{
+  "schema_version": 1,
+  "run_id": "20260821T212045Z-analytical-crossover-row-count-theodb-5a158dde",
+  "points": [
+    {
+      "label": "total_rows via row @ 10000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "row",
+        "row_count": 10000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0005415599998741527,
+          "throughput_per_second": 1846.51746848434,
+          "latency_ms": {
+            "p50": 0.5499569997482467,
+            "p95": 0.6322664998151595,
+            "p99": 0.6395828998211073,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.5776429998149979,
+            "stdev": 0.05538493859523543,
+            "min": 0.5415599998741527,
+            "max": 0.6414119998225942,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.00047563899988745106,
+          "throughput_per_second": 2102.4348302738563,
+          "latency_ms": {
+            "p50": 0.5054430002928711,
+            "p95": 0.5959757997516135,
+            "p99": 0.6040231597035017,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.5290389999572653,
+            "stdev": 0.06832538028686148,
+            "min": 0.47563899988745106,
+            "max": 0.6060349996914738,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0005212470005062642,
+          "throughput_per_second": 1918.4762675444545,
+          "latency_ms": {
+            "p50": 0.5933290003667935,
+            "p95": 0.6406014993444842,
+            "p99": 0.6448034992536122,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.5868100000346507,
+            "stdev": 0.06255876482786285,
+            "min": 0.5212470005062642,
+            "max": 0.6458539992308943,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via row @ 10000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "row",
+        "row_count": 10000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0006673469997622306,
+          "throughput_per_second": 1498.4708110717372,
+          "latency_ms": {
+            "p50": 0.6841820004410692,
+            "p95": 0.7885964004344714,
+            "p99": 0.797877680433885,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.7172423335456793,
+            "stdev": 0.07233316192173599,
+            "min": 0.6673469997622306,
+            "max": 0.8001980004337383,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0005987769991406822,
+          "throughput_per_second": 1670.0708301005577,
+          "latency_ms": {
+            "p50": 0.698653999279486,
+            "p95": 0.8009506999769656,
+            "p99": 0.8100437400389637,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.7032493328248771,
+            "stdev": 0.10684414263477178,
+            "min": 0.5987769991406822,
+            "max": 0.8123170000544633,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0007061639998937608,
+          "throughput_per_second": 1416.1016423245103,
+          "latency_ms": {
+            "p50": 0.7264279993250966,
+            "p95": 0.7356214999163058,
+            "p99": 0.7364386999688577,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.723078333066951,
+            "stdev": 0.015513141513741665,
+            "min": 0.7061639998937608,
+            "max": 0.7366429999819957,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via row @ 10000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "row",
+        "row_count": 10000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0016671200000928366,
+          "throughput_per_second": 599.8368443449261,
+          "latency_ms": {
+            "p50": 1.7803580003601382,
+            "p95": 1.8303367997759779,
+            "p99": 1.8347793597240525,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1.7611226667213487,
+            "stdev": 0.08601352648235851,
+            "min": 1.6671200000928366,
+            "max": 1.8358899997110711,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0016166619998330134,
+          "throughput_per_second": 618.5584866244712,
+          "latency_ms": {
+            "p50": 1.6808940008559148,
+            "p95": 1.8101367006238434,
+            "p99": 1.8216249406032148,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1.7073510004289953,
+            "stdev": 0.10641346956827867,
+            "min": 1.6166619998330134,
+            "max": 1.8244970005980576,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0017536249997647246,
+          "throughput_per_second": 570.2473448623082,
+          "latency_ms": {
+            "p50": 1.76121399999829,
+            "p95": 1.8675831997825298,
+            "p99": 1.8770382397633512,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1.798080333173857,
+            "stdev": 0.0705287765612096,
+            "min": 1.7536249997647246,
+            "max": 1.8794019997585565,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via row @ 10000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "row",
+        "row_count": 10000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0008263079998869216,
+          "throughput_per_second": 1210.2024912464212,
+          "latency_ms": {
+            "p50": 0.898223999683978,
+            "p95": 0.9795515999030613,
+            "p99": 0.9867807199225354,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.9043733331661011,
+            "stdev": 0.08131457636851158,
+            "min": 0.8263079998869216,
+            "max": 0.9885879999274039,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0008357279994015698,
+          "throughput_per_second": 1196.561561555983,
+          "latency_ms": {
+            "p50": 0.8449879996987875,
+            "p95": 0.9252905005268985,
+            "p99": 0.9324285006005084,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.8716429999064227,
+            "stdev": 0.054384654483104825,
+            "min": 0.8357279994015698,
+            "max": 0.9342130006189109,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0008568129997001961,
+          "throughput_per_second": 1167.1158121432634,
+          "latency_ms": {
+            "p50": 0.8594379996793577,
+            "p95": 0.8846154998536804,
+            "p99": 0.8868534998691757,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.8678879997508678,
+            "stdev": 0.016960008211998247,
+            "min": 0.8568129997001961,
+            "max": 0.8874129998730496,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via columnar @ 10000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "columnar",
+        "row_count": 10000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0006990739993852912,
+          "throughput_per_second": 1430.4637289890893,
+          "latency_ms": {
+            "p50": 0.7007650001469301,
+            "p95": 0.8171233002940426,
+            "p99": 0.8274662603071192,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.7432969999475366,
+            "stdev": 0.075136791499656,
+            "min": 0.6990739993852912,
+            "max": 0.8300520003103884,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0007169749997046893,
+          "throughput_per_second": 1394.7487714521208,
+          "latency_ms": {
+            "p50": 0.7839250001779874,
+            "p95": 0.9129463006502192,
+            "p99": 0.9244148606921954,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.809394000195122,
+            "stdev": 0.10744189657018258,
+            "min": 0.7169749997046893,
+            "max": 0.9272820007026894,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0007361609996223706,
+          "throughput_per_second": 1358.3985031983102,
+          "latency_ms": {
+            "p50": 0.7477650005967007,
+            "p95": 0.8920682998905249,
+            "p99": 0.9048952598277538,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.7973426666770441,
+            "stdev": 0.09609571071092768,
+            "min": 0.7361609996223706,
+            "max": 0.908101999812061,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via columnar @ 10000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "columnar",
+        "row_count": 10000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0008104640000965446,
+          "throughput_per_second": 1233.8610967061798,
+          "latency_ms": {
+            "p50": 0.8324540003741276,
+            "p95": 0.8349767002982844,
+            "p99": 0.8352009402915428,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.8260583335868432,
+            "stdev": 0.01357761502941078,
+            "min": 0.8104640000965446,
+            "max": 0.8352570002898574,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0008346929998879205,
+          "throughput_per_second": 1198.0452694994165,
+          "latency_ms": {
+            "p50": 0.8425309997619479,
+            "p95": 1.009157900352875,
+            "p99": 1.0239691804054019,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.9016320000228006,
+            "stdev": 0.10922417239477523,
+            "min": 0.8346929998879205,
+            "max": 1.0276720004185336,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0008151949996317853,
+          "throughput_per_second": 1226.7003605906427,
+          "latency_ms": {
+            "p50": 0.8733019994906499,
+            "p95": 0.8879081001396116,
+            "p99": 0.8892064201972971,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 0.8593426664447179,
+            "stdev": 0.039084619479667355,
+            "min": 0.8151949996317853,
+            "max": 0.8895310002117185,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via columnar @ 10000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "columnar",
+        "row_count": 10000
+      },
+      "status": "failed",
+      "status_detail": "columnar declara o caminho e a prova falhou para 'group_by_category': bench_analytical_columnar is stored in the columnar path and the plan for query 'group_by_category' did not use it: 'theodb_columnar_agg' is absent. Residency is necessary and not sufficient, and pushdown coverage varies by query shape \u2014 measured, the same table is 13x slower on a query whose plan falls back. Plan: GroupAggregate [phase=measurement system=theodb]",
+      "repetitions": []
+    },
+    {
+      "label": "filtered_sum via columnar @ 10000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "columnar",
+        "row_count": 10000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0019825470008072443,
+          "throughput_per_second": 504.4016608901704,
+          "latency_ms": {
+            "p50": 2.1097650005685864,
+            "p95": 2.159515199946327,
+            "p99": 2.163937439891015,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 2.0857850004176726,
+            "stdev": 0.09358139625247369,
+            "min": 1.9825470008072443,
+            "max": 2.165042999877187,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.002278402000229107,
+          "throughput_per_second": 438.9041090639158,
+          "latency_ms": {
+            "p50": 2.2847170002933126,
+            "p95": 2.3405296002238174,
+            "p99": 2.34549072021764,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 2.3032833335795053,
+            "stdev": 0.03775903346983282,
+            "min": 2.278402000229107,
+            "max": 2.3467310002160957,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0021236449993011774,
+          "throughput_per_second": 470.8884961135536,
+          "latency_ms": {
+            "p50": 2.1323880000636564,
+            "p95": 2.157565500237979,
+            "p99": 2.1598035002534743,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 2.1387986665407275,
+            "stdev": 0.01918007773875069,
+            "min": 2.1236449993011774,
+            "max": 2.160363000257348,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via parquet @ 10000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "parquet",
+        "row_count": 10000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.027004289000615245,
+          "throughput_per_second": 37.03115456871376,
+          "latency_ms": {
+            "p50": 27.52562899968325,
+            "p95": 28.07223050012908,
+            "p99": 28.12081730016871,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 27.554294000159036,
+            "stdev": 0.5648832404568687,
+            "min": 27.004289000615245,
+            "max": 28.132964000178617,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.026656593999177858,
+          "throughput_per_second": 37.51417004103532,
+          "latency_ms": {
+            "p50": 26.793506000103662,
+            "p95": 27.377131700268365,
+            "p99": 27.429009540283005,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 26.964026333189395,
+            "stdev": 0.4195417595286817,
+            "min": 26.656593999177858,
+            "max": 27.441979000286665,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.026913474000139104,
+          "throughput_per_second": 37.156109983974254,
+          "latency_ms": {
+            "p50": 27.07424300024286,
+            "p95": 27.172469899778662,
+            "p99": 27.1812011797374,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 27.057033666703017,
+            "stdev": 0.13577545006392025,
+            "min": 26.913474000139104,
+            "max": 27.183383999727084,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via parquet @ 10000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "parquet",
+        "row_count": 10000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.030049074000089604,
+          "throughput_per_second": 33.27889571562232,
+          "latency_ms": {
+            "p50": 30.058901000302285,
+            "p95": 30.71168359965668,
+            "p99": 30.769708719599294,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 30.297396666658944,
+            "stdev": 0.4216256745478547,
+            "min": 30.049074000089604,
+            "max": 30.784214999584947,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.029336419999708596,
+          "throughput_per_second": 34.08732217530064,
+          "latency_ms": {
+            "p50": 29.402123000181746,
+            "p95": 29.587873099899298,
+            "p99": 29.60438421987419,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 29.449018333252752,
+            "stdev": 0.14197849603216373,
+            "min": 29.336419999708596,
+            "max": 29.608511999867915,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.029764685000372992,
+          "throughput_per_second": 33.596861515163646,
+          "latency_ms": {
+            "p50": 30.195545999958995,
+            "p95": 30.591897899739706,
+            "p99": 30.627129179720214,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 30.198722666682443,
+            "stdev": 0.4356346864037732,
+            "min": 29.764685000372992,
+            "max": 30.63593699971534,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via parquet @ 10000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "parquet",
+        "row_count": 10000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.03253500200025883,
+          "throughput_per_second": 30.736128431528748,
+          "latency_ms": {
+            "p50": 32.824309999341494,
+            "p95": 36.57844129938894,
+            "p99": 36.91214185939316,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 34.118292999664845,
+            "stdev": 2.4959875864519603,
+            "min": 32.53500200025883,
+            "max": 36.995566999394214,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.031472395000491815,
+          "throughput_per_second": 31.773876757214477,
+          "latency_ms": {
+            "p50": 31.530926000414183,
+            "p95": 31.73445919992446,
+            "p99": 31.752551039880927,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 31.586798333592014,
+            "stdev": 0.1503390214907574,
+            "min": 31.472395000491815,
+            "max": 31.757073999870045,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.03175390599972161,
+          "throughput_per_second": 31.492188709280903,
+          "latency_ms": {
+            "p50": 32.24249699997017,
+            "p95": 32.379055799719936,
+            "p99": 32.39119435969769,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 32.1302106664613,
+            "stdev": 0.33460357378913425,
+            "min": 31.75390599972161,
+            "max": 32.39422899969213,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via parquet @ 10000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "parquet",
+        "row_count": 10000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.029138535999663873,
+          "throughput_per_second": 34.31881409592903,
+          "latency_ms": {
+            "p50": 29.475368000021263,
+            "p95": 29.57355889993778,
+            "p99": 29.58228697993036,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 29.39945766653788,
+            "stdev": 0.2324561124780819,
+            "min": 29.138535999663873,
+            "max": 29.584468999928504,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.029187092000029224,
+          "throughput_per_second": 34.261720900424024,
+          "latency_ms": {
+            "p50": 29.677962000278058,
+            "p95": 29.739854999752424,
+            "p99": 29.7453565997057,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 29.537262000000435,
+            "stdev": 0.30519927893885274,
+            "min": 29.187092000029224,
+            "max": 29.74673199969402,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.02923649199965439,
+          "throughput_per_second": 34.20382992637493,
+          "latency_ms": {
+            "p50": 29.289991000041482,
+            "p95": 32.06486289991517,
+            "p99": 32.31151817990394,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 30.299888333199004,
+            "stdev": 1.7957242291206588,
+            "min": 29.23649199965439,
+            "max": 32.373181999901135,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via row @ 50000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "row",
+        "row_count": 50000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0024651020003148005,
+          "throughput_per_second": 405.66272708889824,
+          "latency_ms": {
+            "p50": 2.5064259998544003,
+            "p95": 2.6071620998664002,
+            "p99": 2.616116419867467,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 2.5299610000123116,
+            "stdev": 0.07929087363825349,
+            "min": 2.4651020003148005,
+            "max": 2.6183549998677336,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0024763419996816083,
+          "throughput_per_second": 403.8214431320768,
+          "latency_ms": {
+            "p50": 2.552619999732997,
+            "p95": 2.642545300295751,
+            "p99": 2.6505386603457737,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 2.5604996665909616,
+            "stdev": 0.0883613967081067,
+            "min": 2.4763419996816083,
+            "max": 2.6525370003582793,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0025721309993969044,
+          "throughput_per_second": 388.78268650954135,
+          "latency_ms": {
+            "p50": 2.7030760002162424,
+            "p95": 2.782828599902132,
+            "p99": 2.789917719874211,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 2.688965666493459,
+            "stdev": 0.11045752491436887,
+            "min": 2.5721309993969044,
+            "max": 2.7916899998672307,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via row @ 50000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "row",
+        "row_count": 50000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.005878043999473448,
+          "throughput_per_second": 170.12461970165236,
+          "latency_ms": {
+            "p50": 6.014959000822273,
+            "p95": 6.575131599765882,
+            "p99": 6.624924719671981,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6.1767919999814085,
+            "stdev": 0.40470677328078375,
+            "min": 5.878043999473448,
+            "max": 6.637372999648505,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0029119289993104758,
+          "throughput_per_second": 343.41496658633946,
+          "latency_ms": {
+            "p50": 3.0312799999592244,
+            "p95": 3.1313536996094626,
+            "p99": 3.1402491395783727,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3.0285606662801,
+            "stdev": 0.1152960541203769,
+            "min": 2.9119289993104758,
+            "max": 3.1424729995706002,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.003114300000561343,
+          "throughput_per_second": 321.0994444400838,
+          "latency_ms": {
+            "p50": 3.1558789996779524,
+            "p95": 3.157120100058819,
+            "p99": 3.1572304200926737,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3.1424790001134775,
+            "stdev": 0.024413468052720138,
+            "min": 3.114300000561343,
+            "max": 3.1572580001011374,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via row @ 50000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "row",
+        "row_count": 50000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.008068589000686188,
+          "throughput_per_second": 123.9374071371036,
+          "latency_ms": {
+            "p50": 8.813508999992337,
+            "p95": 11.640814899510588,
+            "p99": 11.892130979467765,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 9.612352666711862,
+            "stdev": 2.0626641238736005,
+            "min": 8.068589000686188,
+            "max": 11.95495999945706,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.007473114999811514,
+          "throughput_per_second": 133.8130083673571,
+          "latency_ms": {
+            "p50": 7.480307000150788,
+            "p95": 7.491039500018815,
+            "p99": 7.491993500007084,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 7.481884666655485,
+            "stdev": 0.009655656258968028,
+            "min": 7.473114999811514,
+            "max": 7.492232000004151,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.00777229699997406,
+          "throughput_per_second": 128.66209307278626,
+          "latency_ms": {
+            "p50": 7.803780999893206,
+            "p95": 7.832421700277337,
+            "p99": 7.834967540311482,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 7.803894000062428,
+            "stdev": 0.031653651447810294,
+            "min": 7.77229699997406,
+            "max": 7.835604000320018,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via row @ 50000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "row",
+        "row_count": 50000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0036966520001442404,
+          "throughput_per_second": 270.5150498237272,
+          "latency_ms": {
+            "p50": 3.7513079996642773,
+            "p95": 3.819704399938928,
+            "p99": 3.8257840799633414,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3.758421333259321,
+            "stdev": 0.06561582050623976,
+            "min": 3.6966520001442404,
+            "max": 3.8273039999694447,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0035977980005554855,
+          "throughput_per_second": 277.9477891325761,
+          "latency_ms": {
+            "p50": 3.612938000514987,
+            "p95": 3.757958599999256,
+            "p99": 3.770849319953413,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3.6616026670041415,
+            "stdev": 0.09769502565791433,
+            "min": 3.5977980005554855,
+            "max": 3.7740719999419525,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.003582100999665272,
+          "throughput_per_second": 279.1657745254655,
+          "latency_ms": {
+            "p50": 3.6280820004321868,
+            "p95": 3.635333299462218,
+            "p99": 3.6359778593759984,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3.6154406664839676,
+            "stdev": 0.029152681619270097,
+            "min": 3.582100999665272,
+            "max": 3.6361389993544435,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via columnar @ 50000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "columnar",
+        "row_count": 50000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0009378370004924363,
+          "throughput_per_second": 1066.2833727768507,
+          "latency_ms": {
+            "p50": 1.0358359995734645,
+            "p95": 1.131347599584842,
+            "p99": 1.1398375195858534,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1.0385443332173356,
+            "stdev": 0.10208844691292687,
+            "min": 0.9378370004924363,
+            "max": 1.1419599995861063,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0009906170007525361,
+          "throughput_per_second": 1009.4718738325064,
+          "latency_ms": {
+            "p50": 0.9932040002240683,
+            "p95": 1.0688723997191119,
+            "p99": 1.0755984796742268,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1.0203670002132033,
+            "stdev": 0.0493050734848486,
+            "min": 0.9906170007525361,
+            "max": 1.0772799996630056,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0009686079993116437,
+          "throughput_per_second": 1032.4093964851268,
+          "latency_ms": {
+            "p50": 1.016093999169243,
+            "p95": 1.168918500025029,
+            "p99": 1.182502900101099,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1.0568669995336677,
+            "stdev": 0.11423954187200225,
+            "min": 0.9686079993116437,
+            "max": 1.1858990001201164,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via columnar @ 50000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "columnar",
+        "row_count": 50000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0015214940003716038,
+          "throughput_per_second": 657.2487303635531,
+          "latency_ms": {
+            "p50": 1.5712559998064535,
+            "p95": 1.6186185002879938,
+            "p99": 1.6228285003307974,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1.5722103335065185,
+            "stdev": 0.05120017095007697,
+            "min": 1.5214940003716038,
+            "max": 1.6238810003414983,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0014764210000066669,
+          "throughput_per_second": 677.3135846723153,
+          "latency_ms": {
+            "p50": 1.543241999570455,
+            "p95": 1.580750399898534,
+            "p99": 1.5840844799276965,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1.534860333170703,
+            "stdev": 0.05473197417496496,
+            "min": 1.4764210000066669,
+            "max": 1.5849179999349872,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0014864069999021012,
+          "throughput_per_second": 672.7632472572201,
+          "latency_ms": {
+            "p50": 1.5156389999901876,
+            "p95": 1.5330278998590074,
+            "p99": 1.534573579847347,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1.5123353332455736,
+            "stdev": 0.024444510862759995,
+            "min": 1.4864069999021012,
+            "max": 1.5349599998444319,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via columnar @ 50000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "columnar",
+        "row_count": 50000
+      },
+      "status": "failed",
+      "status_detail": "columnar declara o caminho e a prova falhou para 'group_by_category': bench_analytical_columnar is stored in the columnar path and the plan for query 'group_by_category' did not use it: 'theodb_columnar_agg' is absent. Residency is necessary and not sufficient, and pushdown coverage varies by query shape \u2014 measured, the same table is 13x slower on a query whose plan falls back. Plan: GroupAggregate [phase=measurement system=theodb]",
+      "repetitions": []
+    },
+    {
+      "label": "filtered_sum via columnar @ 50000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "columnar",
+        "row_count": 50000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.006540480000694515,
+          "throughput_per_second": 152.89397718421475,
+          "latency_ms": {
+            "p50": 6.543547999172006,
+            "p95": 6.672081499891647,
+            "p99": 6.683506699955615,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6.590130333279376,
+            "stdev": 0.08335405063755431,
+            "min": 6.540480000694515,
+            "max": 6.686362999971607,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.006519141000353557,
+          "throughput_per_second": 153.39444260306172,
+          "latency_ms": {
+            "p50": 6.596745000024384,
+            "p95": 6.739188900155568,
+            "p99": 6.751850580167229,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6.623634000182695,
+            "stdev": 0.12021446515188608,
+            "min": 6.519141000353557,
+            "max": 6.755016000170144,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.006643941999755043,
+          "throughput_per_second": 150.51305385219635,
+          "latency_ms": {
+            "p50": 6.655284999396827,
+            "p95": 6.6589290997399075,
+            "p99": 6.659253019770404,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6.652853666309966,
+            "stdev": 0.007978844002193392,
+            "min": 6.643941999755043,
+            "max": 6.659333999778028,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via parquet @ 50000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "parquet",
+        "row_count": 50000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.15015924299950711,
+          "throughput_per_second": 6.6595967056339145,
+          "latency_ms": {
+            "p50": 152.6552459999948,
+            "p95": 152.67250709957807,
+            "p99": 152.67404141954103,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 151.82963799967789,
+            "stdev": 1.446636288412698,
+            "min": 150.15924299950711,
+            "max": 152.67442499953177,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.14922136399945884,
+          "throughput_per_second": 6.701453285225476,
+          "latency_ms": {
+            "p50": 150.48603800005367,
+            "p95": 150.60137119999126,
+            "p99": 150.61162303998572,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 150.10719599983227,
+            "stdev": 0.7698241533855373,
+            "min": 149.22136399945884,
+            "max": 150.61418599998433,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.1496248759995069,
+          "throughput_per_second": 6.683380643224697,
+          "latency_ms": {
+            "p50": 149.79443900028855,
+            "p95": 151.20212449992323,
+            "p99": 151.32725209989076,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 150.2592829998927,
+            "stdev": 0.9557470761360867,
+            "min": 149.6248759995069,
+            "max": 151.35853399988264,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via parquet @ 50000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "parquet",
+        "row_count": 50000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.16444430600040505,
+          "throughput_per_second": 6.081086200683269,
+          "latency_ms": {
+            "p50": 165.4853340005502,
+            "p95": 170.10133409967239,
+            "p99": 170.51164521959436,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 166.84795433351005,
+            "stdev": 3.3029561869646074,
+            "min": 164.44430600040505,
+            "max": 170.61422299957485,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.16258114699940052,
+          "throughput_per_second": 6.150774665181119,
+          "latency_ms": {
+            "p50": 162.84694200021477,
+            "p95": 166.3667142005579,
+            "p99": 166.6795828405884,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 164.06196300007045,
+            "stdev": 2.338442771518386,
+            "min": 162.58114699940052,
+            "max": 166.75780000059603,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.162350217000494,
+          "throughput_per_second": 6.159523642625973,
+          "latency_ms": {
+            "p50": 166.69030800039764,
+            "p95": 166.73553569971773,
+            "p99": 166.7395559396573,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 165.26036200017793,
+            "stdev": 2.5203847484803408,
+            "min": 162.350217000494,
+            "max": 166.74056099964218,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via parquet @ 50000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "parquet",
+        "row_count": 50000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.17464279100022395,
+          "throughput_per_second": 5.7259735387458255,
+          "latency_ms": {
+            "p50": 177.587126000617,
+            "p95": 179.19338660021822,
+            "p99": 179.33616532018277,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 177.2005923336716,
+            "stdev": 2.3881121431653085,
+            "min": 174.64279100022395,
+            "max": 179.3718600001739,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.17221669199989265,
+          "throughput_per_second": 5.80663806967459,
+          "latency_ms": {
+            "p50": 173.54646300009335,
+            "p95": 174.7434855003121,
+            "p99": 174.84988750033153,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 173.54654766677413,
+            "stdev": 1.3298980022432076,
+            "min": 172.21669199989265,
+            "max": 174.8764880003364,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.173881949999668,
+          "throughput_per_second": 5.751028211967426,
+          "latency_ms": {
+            "p50": 173.99073700016743,
+            "p95": 174.6102735999557,
+            "p99": 174.66534351993687,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 174.1839326665892,
+            "stdev": 0.43227287588820035,
+            "min": 173.881949999668,
+            "max": 174.67911099993216,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via parquet @ 50000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "parquet",
+        "row_count": 50000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.15984044699962396,
+          "throughput_per_second": 6.256238760408075,
+          "latency_ms": {
+            "p50": 161.00654500041855,
+            "p95": 161.41614580046735,
+            "p99": 161.45255476047168,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 160.76954966683843,
+            "stdev": 0.8361851217386685,
+            "min": 159.84044699962396,
+            "max": 161.46165700047277,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.16026476099978026,
+          "throughput_per_second": 6.239674859037609,
+          "latency_ms": {
+            "p50": 160.67109499999788,
+            "p95": 162.77437700009614,
+            "p99": 162.96133540010487,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 161.3146436666284,
+            "stdev": 1.4805603975652892,
+            "min": 160.26476099978026,
+            "max": 163.00807500010706,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.1599872820006567,
+          "throughput_per_second": 6.2504968363416245,
+          "latency_ms": {
+            "p50": 160.70633700019243,
+            "p95": 161.10848760044973,
+            "p99": 161.1442343204726,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 160.61559666710914,
+            "stdev": 0.5882173458954707,
+            "min": 159.9872820006567,
+            "max": 161.15317100047832,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via row @ 100000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "row",
+        "row_count": 100000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.00499300100000255,
+          "throughput_per_second": 200.2803524372395,
+          "latency_ms": {
+            "p50": 5.107592000058503,
+            "p95": 5.229614000472793,
+            "p99": 5.240460400509619,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 5.114588333526626,
+            "stdev": 0.12523215995233172,
+            "min": 4.99300100000255,
+            "max": 5.243172000518825,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.004487597000661481,
+          "throughput_per_second": 222.83640885146283,
+          "latency_ms": {
+            "p50": 4.679148999457539,
+            "p95": 5.159833600009733,
+            "p99": 5.202561120058817,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 4.793329666730036,
+            "stdev": 0.37605644217176576,
+            "min": 4.487597000661481,
+            "max": 5.213243000071088,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.004607326999575889,
+          "throughput_per_second": 217.0455884924277,
+          "latency_ms": {
+            "p50": 4.7665929996583145,
+            "p95": 5.165293000391102,
+            "p99": 5.200733000456239,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 4.861170999902242,
+            "stdev": 0.3120734409664036,
+            "min": 4.607326999575889,
+            "max": 5.209593000472523,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via row @ 100000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "row",
+        "row_count": 100000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.006127358999947319,
+          "throughput_per_second": 163.20244986601858,
+          "latency_ms": {
+            "p50": 6.361500999446434,
+            "p95": 6.411981099699915,
+            "p99": 6.4164682197224465,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6.302149999707278,
+            "stdev": 0.15394938839100017,
+            "min": 6.127358999947319,
+            "max": 6.417589999728079,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.005957256999863603,
+          "throughput_per_second": 167.8624910798537,
+          "latency_ms": {
+            "p50": 5.97934699999314,
+            "p95": 6.017478200283222,
+            "p99": 6.020867640309007,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 5.986106333390732,
+            "stdev": 0.03275629552540289,
+            "min": 5.957256999863603,
+            "max": 6.021715000315453,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.006112497999311017,
+          "throughput_per_second": 163.59923555193262,
+          "latency_ms": {
+            "p50": 6.169931999465916,
+            "p95": 6.176127600247128,
+            "p99": 6.176678320316569,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6.153081999703621,
+            "stdev": 0.03531491445392205,
+            "min": 6.112497999311017,
+            "max": 6.176816000333929,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via row @ 100000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "row",
+        "row_count": 100000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.01539811299971916,
+          "throughput_per_second": 64.94302256505317,
+          "latency_ms": {
+            "p50": 15.52649899986136,
+            "p95": 15.615737599910062,
+            "p99": 15.623669919914391,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 15.516754999831997,
+            "stdev": 0.11408252309080362,
+            "min": 15.39811299971916,
+            "max": 15.625652999915474,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.014728125999681652,
+          "throughput_per_second": 67.89730071711872,
+          "latency_ms": {
+            "p50": 14.811557000030007,
+            "p95": 14.992950200394262,
+            "p99": 15.00907404042664,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 14.850929333382132,
+            "stdev": 0.146512433577323,
+            "min": 14.728125999681652,
+            "max": 15.013105000434734,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.01495720499951858,
+          "throughput_per_second": 66.85741086200171,
+          "latency_ms": {
+            "p50": 14.988650999839592,
+            "p95": 15.15296129955459,
+            "p99": 15.167566659529257,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 15.039024666293699,
+            "stdev": 0.11555743483972326,
+            "min": 14.95720499951858,
+            "max": 15.171217999522923,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via row @ 100000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "row",
+        "row_count": 100000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.007518823999816959,
+          "throughput_per_second": 132.9995222689538,
+          "latency_ms": {
+            "p50": 7.645117000720347,
+            "p95": 7.697976699546416,
+            "p99": 7.702675339442067,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 7.622596999984428,
+            "stdev": 0.09454637992415929,
+            "min": 7.518823999816959,
+            "max": 7.703849999415979,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.007290718999684032,
+          "throughput_per_second": 137.16068333498225,
+          "latency_ms": {
+            "p50": 7.429372999467887,
+            "p95": 7.496702899970842,
+            "p99": 7.502687780015549,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 7.4080919997262145,
+            "stdev": 0.10831199058890197,
+            "min": 7.290718999684032,
+            "max": 7.504184000026726,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.007187977000285173,
+          "throughput_per_second": 139.12120196827652,
+          "latency_ms": {
+            "p50": 7.407883999803744,
+            "p95": 7.793508799659321,
+            "p99": 7.8277865596464835,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 7.477405666577397,
+            "stdev": 0.3297328893443803,
+            "min": 7.187977000285173,
+            "max": 7.836355999643274,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via columnar @ 100000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "columnar",
+        "row_count": 100000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0012968529999852763,
+          "throughput_per_second": 771.0974181432695,
+          "latency_ms": {
+            "p50": 1.4059330005693482,
+            "p95": 1.4076646002649795,
+            "p99": 1.4078185202379245,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1.3702143335952617,
+            "stdev": 0.06354006134283595,
+            "min": 1.2968529999852763,
+            "max": 1.4078570002311608,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0011705239994626027,
+          "throughput_per_second": 854.3182373527654,
+          "latency_ms": {
+            "p50": 1.1795909995271359,
+            "p95": 1.4844651000203157,
+            "p99": 1.511565020064154,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1.289484999688284,
+            "stdev": 0.19824608703347554,
+            "min": 1.1705239994626027,
+            "max": 1.5183400000751135,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0011810200003310456,
+          "throughput_per_second": 846.7257114356194,
+          "latency_ms": {
+            "p50": 1.2507540004662587,
+            "p95": 1.4914796999619284,
+            "p99": 1.512877539917099,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1.3166670002343988,
+            "stdev": 0.17800430555015706,
+            "min": 1.1810200003310456,
+            "max": 1.5182269999058917,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via columnar @ 100000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "columnar",
+        "row_count": 100000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.002315159999852767,
+          "throughput_per_second": 431.93558979232324,
+          "latency_ms": {
+            "p50": 2.422557000500092,
+            "p95": 2.47797090014501,
+            "p99": 2.4828965801134473,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 2.407281666819472,
+            "stdev": 0.08551343836875797,
+            "min": 2.315159999852767,
+            "max": 2.4841280001055566,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0021486599998752354,
+          "throughput_per_second": 465.4063463079623,
+          "latency_ms": {
+            "p50": 2.3274609993677586,
+            "p95": 2.411243800634111,
+            "p99": 2.4186911607466755,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 2.29889133333927,
+            "stdev": 0.13817966690971376,
+            "min": 2.1486599998752354,
+            "max": 2.4205530007748166,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0022417869995479123,
+          "throughput_per_second": 446.0727090493718,
+          "latency_ms": {
+            "p50": 2.3406390000673127,
+            "p95": 2.365115399879869,
+            "p99": 2.3672910798632074,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 2.3167536664914223,
+            "stdev": 0.06633179076153688,
+            "min": 2.2417869995479123,
+            "max": 2.367834999859042,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via columnar @ 100000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "columnar",
+        "row_count": 100000
+      },
+      "status": "failed",
+      "status_detail": "columnar declara o caminho e a prova falhou para 'group_by_category': bench_analytical_columnar is stored in the columnar path and the plan for query 'group_by_category' did not use it: 'theodb_columnar_agg' is absent. Residency is necessary and not sufficient, and pushdown coverage varies by query shape \u2014 measured, the same table is 13x slower on a query whose plan falls back. Plan: GroupAggregate [phase=measurement system=theodb]",
+      "repetitions": []
+    },
+    {
+      "label": "filtered_sum via columnar @ 100000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "columnar",
+        "row_count": 100000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.01210029400044732,
+          "throughput_per_second": 82.64262008534935,
+          "latency_ms": {
+            "p50": 12.23309800025163,
+            "p95": 12.305472400203143,
+            "p99": 12.311905680198834,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 12.215635333632235,
+            "stdev": 0.10767729852428992,
+            "min": 12.10029400044732,
+            "max": 12.313514000197756,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.012337046000538976,
+          "throughput_per_second": 81.05668082588915,
+          "latency_ms": {
+            "p50": 12.489433000155259,
+            "p95": 12.526574199455354,
+            "p99": 12.52987563939314,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 12.452393333357273,
+            "stdev": 0.10200253590560816,
+            "min": 12.337046000538976,
+            "max": 12.530700999377586,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.012261185999705049,
+          "throughput_per_second": 81.55817879478019,
+          "latency_ms": {
+            "p50": 12.276933000066492,
+            "p95": 12.605294399781997,
+            "p99": 12.634482079756708,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 12.393299333173976,
+            "stdev": 0.21533369576436212,
+            "min": 12.261185999705049,
+            "max": 12.641778999750386,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via parquet @ 100000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "parquet",
+        "row_count": 100000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.3044126470003903,
+          "throughput_per_second": 3.2850146334383994,
+          "latency_ms": {
+            "p50": 306.28435899961914,
+            "p95": 306.7387852003776,
+            "p99": 306.779178640445,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 305.8287610001571,
+            "stdev": 1.2521061025909286,
+            "min": 304.4126470003903,
+            "max": 306.7892770004619,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.26891341999998986,
+          "throughput_per_second": 3.718669005065042,
+          "latency_ms": {
+            "p50": 273.31878099994356,
+            "p95": 278.56965550035966,
+            "p99": 279.03639990039665,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 273.7950956667798,
+            "stdev": 5.1364235316415945,
+            "min": 268.91341999998986,
+            "max": 279.1530860004059,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.26794979399983276,
+          "throughput_per_second": 3.7320424288164378,
+          "latency_ms": {
+            "p50": 268.35347399992315,
+            "p95": 272.7619520999724,
+            "p99": 273.1538168199768,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 269.8516836665779,
+            "stdev": 2.9514819994975934,
+            "min": 267.94979399983276,
+            "max": 273.2517829999779,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via parquet @ 100000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "parquet",
+        "row_count": 100000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.29423347400006605,
+          "throughput_per_second": 3.3986615676494223,
+          "latency_ms": {
+            "p50": 296.2459390000731,
+            "p95": 303.8152872995852,
+            "p99": 304.4881182595418,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 298.37857966655673,
+            "stdev": 5.529021442347831,
+            "min": 294.23347400006605,
+            "max": 304.65632599953096,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.2976205140003003,
+          "throughput_per_second": 3.359983445223776,
+          "latency_ms": {
+            "p50": 298.33078399951773,
+            "p95": 303.2829206000315,
+            "p99": 303.72311052007717,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 299.92815199996886,
+            "stdev": 3.4004300851032454,
+            "min": 297.6205140003003,
+            "max": 303.8331580000886,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.2958304820003832,
+          "throughput_per_second": 3.3803142706528284,
+          "latency_ms": {
+            "p50": 297.1875180001007,
+            "p95": 298.02494190025755,
+            "p99": 298.0993795802715,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 297.0453296669196,
+            "stdev": 1.1503630775577223,
+            "min": 295.8304820003832,
+            "max": 298.117989000275,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via parquet @ 100000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "parquet",
+        "row_count": 100000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.3152334489996065,
+          "throughput_per_second": 3.172252193330056,
+          "latency_ms": {
+            "p50": 316.43202299983386,
+            "p95": 318.8179500001752,
+            "p99": 319.0300324002055,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 316.9161749998845,
+            "stdev": 1.9699403822797306,
+            "min": 315.2334489996065,
+            "max": 319.0830530002131,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.313724609000019,
+          "throughput_per_second": 3.1875089531147984,
+          "latency_ms": {
+            "p50": 314.11990100059484,
+            "p95": 315.6499757000347,
+            "p99": 315.7859823399849,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 314.55483133352874,
+            "stdev": 1.1133384002570974,
+            "min": 313.724609000019,
+            "max": 315.81998399997246,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.31352781999976287,
+          "throughput_per_second": 3.1895096262933107,
+          "latency_ms": {
+            "p50": 316.49416199979896,
+            "p95": 318.8861855995128,
+            "p99": 319.0988099194874,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 316.39131599968096,
+            "stdev": 2.8134831670620795,
+            "min": 313.52781999976287,
+            "max": 319.15196599948104,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via parquet @ 100000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "parquet",
+        "row_count": 100000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.2863324090003516,
+          "throughput_per_second": 3.492444335907403,
+          "latency_ms": {
+            "p50": 288.4705619999295,
+            "p95": 289.45999679972374,
+            "p99": 289.54794655970545,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 288.12430166666064,
+            "stdev": 1.646303190226344,
+            "min": 286.3324090003516,
+            "max": 289.5699339997009,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.28736825400028465,
+          "throughput_per_second": 3.479855502755045,
+          "latency_ms": {
+            "p50": 291.3079750005636,
+            "p95": 294.7058853996168,
+            "p99": 295.00792187953266,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 291.25322000011994,
+            "stdev": 3.857879937855169,
+            "min": 287.36825400028465,
+            "max": 295.0834309995116,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.2870158129999254,
+          "throughput_per_second": 3.484128590504733,
+          "latency_ms": {
+            "p50": 288.97889200015925,
+            "p95": 290.1161986003899,
+            "p99": 290.2172925204104,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 288.74575700016675,
+            "stdev": 1.6259605400221604,
+            "min": 287.0158129999254,
+            "max": 290.24256600041554,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via row @ 500000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "row",
+        "row_count": 500000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.020217117999891343,
+          "throughput_per_second": 49.46303424678901,
+          "latency_ms": {
+            "p50": 23.838665999392106,
+            "p95": 24.073904400029278,
+            "p99": 24.094814480085915,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 22.718608666461176,
+            "stdev": 2.1702928419083234,
+            "min": 20.217117999891343,
+            "max": 24.100042000100075,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.020099948999813932,
+          "throughput_per_second": 49.75137001637452,
+          "latency_ms": {
+            "p50": 20.1384189995224,
+            "p95": 20.329740100078197,
+            "p99": 20.3467464201276,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 20.196455333158763,
+            "stdev": 0.1352130251034892,
+            "min": 20.099948999813932,
+            "max": 20.350998000139953,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.01660626400007459,
+          "throughput_per_second": 60.21824053836001,
+          "latency_ms": {
+            "p50": 17.167869000331848,
+            "p95": 17.186678099915298,
+            "p99": 17.18835001987827,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 16.987633666758484,
+            "stdev": 0.330441082562917,
+            "min": 16.60626400007459,
+            "max": 17.188767999869015,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via row @ 500000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "row",
+        "row_count": 500000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.020539873000416264,
+          "throughput_per_second": 48.685792749533256,
+          "latency_ms": {
+            "p50": 20.61043300000165,
+            "p95": 26.608929399935732,
+            "p99": 27.142129079929873,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 22.808578333448775,
+            "stdev": 3.8685670261554908,
+            "min": 20.539873000416264,
+            "max": 27.27542899992841,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.024649437999869406,
+          "throughput_per_second": 40.568876256136065,
+          "latency_ms": {
+            "p50": 28.60030200008623,
+            "p95": 28.73026380002557,
+            "p99": 28.741815960020176,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 27.33148133332482,
+            "stdev": 2.323839563372569,
+            "min": 24.649437999869406,
+            "max": 28.744704000018828,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.019145745000059833,
+          "throughput_per_second": 52.23092650596124,
+          "latency_ms": {
+            "p50": 19.44450000064535,
+            "p95": 19.641011399926356,
+            "p99": 19.658479079862445,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 19.417697000183882,
+            "stdev": 0.2595903727421095,
+            "min": 19.145745000059833,
+            "max": 19.662845999846468,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via row @ 500000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "row",
+        "row_count": 500000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.03824493599950074,
+          "throughput_per_second": 26.147252541174453,
+          "latency_ms": {
+            "p50": 40.32775999985461,
+            "p95": 53.82587630001581,
+            "p99": 55.025708860030136,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 44.632787666463024,
+            "stdev": 9.31867964283782,
+            "min": 38.24493599950074,
+            "max": 55.32566700003372,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.03907889000038267,
+          "throughput_per_second": 25.58926315435796,
+          "latency_ms": {
+            "p50": 39.94709300059185,
+            "p95": 52.425323000079516,
+            "p99": 53.534499000033975,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 44.279258666999034,
+            "stdev": 8.266822377437274,
+            "min": 39.07889000038267,
+            "max": 53.81179300002259,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.03742721900016477,
+          "throughput_per_second": 26.718522687875836,
+          "latency_ms": {
+            "p50": 37.8953850004109,
+            "p95": 38.16026940021402,
+            "p99": 38.18381468019652,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 37.83743500025594,
+            "stdev": 0.3845300404128482,
+            "min": 37.42721900016477,
+            "max": 38.189701000192144,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via row @ 500000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "row",
+        "row_count": 500000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.024086657000225387,
+          "throughput_per_second": 41.516761748657885,
+          "latency_ms": {
+            "p50": 30.704943000273488,
+            "p95": 31.26911880026455,
+            "p99": 31.319267760263756,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 28.707801666920812,
+            "stdev": 4.014283561814431,
+            "min": 24.086657000225387,
+            "max": 31.331805000263557,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.02483596599995508,
+          "throughput_per_second": 40.26418783154272,
+          "latency_ms": {
+            "p50": 26.678725999772723,
+            "p95": 27.610712900150247,
+            "p99": 27.693556180183805,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 26.409652999973332,
+            "stdev": 1.4578938134882382,
+            "min": 24.83596599995508,
+            "max": 27.714267000192194,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.02318341199952556,
+          "throughput_per_second": 43.13428929358908,
+          "latency_ms": {
+            "p50": 23.288019000574423,
+            "p95": 23.59038210061044,
+            "p99": 23.617258820613642,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 23.365136333571474,
+            "stdev": 0.23018451862646197,
+            "min": 23.18341199952556,
+            "max": 23.623978000614443,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via columnar @ 500000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "columnar",
+        "row_count": 500000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.003896071000781376,
+          "throughput_per_second": 256.6688337557106,
+          "latency_ms": {
+            "p50": 3.8986740000837017,
+            "p95": 3.9927212996190065,
+            "p99": 4.0010810595777,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3.932638666810817,
+            "stdev": 0.061096656000170696,
+            "min": 3.896071000781376,
+            "max": 4.003170999567374,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0035631289993034443,
+          "throughput_per_second": 280.6522020941397,
+          "latency_ms": {
+            "p50": 3.7410270006148494,
+            "p95": 4.132618800394994,
+            "p99": 4.167426960375451,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3.826761666762953,
+            "stdev": 0.31536498705740573,
+            "min": 3.5631289993034443,
+            "max": 4.176129000370565,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0033905089994732407,
+          "throughput_per_second": 294.940966136755,
+          "latency_ms": {
+            "p50": 3.5015070006920723,
+            "p95": 3.8117883004815667,
+            "p99": 3.839368860462855,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3.5794266668744967,
+            "stdev": 0.23765891738830294,
+            "min": 3.3905089994732407,
+            "max": 3.846264000458177,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via columnar @ 500000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "columnar",
+        "row_count": 500000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.008630729999822506,
+          "throughput_per_second": 115.86505429095399,
+          "latency_ms": {
+            "p50": 8.657575999677647,
+            "p95": 8.734471099705843,
+            "p99": 8.741306219708349,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 8.677106999736376,
+            "stdev": 0.05863510273161185,
+            "min": 8.630729999822506,
+            "max": 8.743014999708976,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.008649934999994002,
+          "throughput_per_second": 115.60780514543674,
+          "latency_ms": {
+            "p50": 8.815519000563654,
+            "p95": 8.818614999745478,
+            "p99": 8.818890199672751,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 8.761471000070742,
+            "stdev": 0.09660832201873301,
+            "min": 8.649934999994002,
+            "max": 8.81895899965457,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.008002366999789956,
+          "throughput_per_second": 124.96302656779523,
+          "latency_ms": {
+            "p50": 8.174534999852767,
+            "p95": 8.470893300363969,
+            "p99": 8.497236260409409,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 8.226908000021163,
+            "stdev": 0.2547969343897043,
+            "min": 8.002366999789956,
+            "max": 8.503822000420769,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via columnar @ 500000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "columnar",
+        "row_count": 500000
+      },
+      "status": "failed",
+      "status_detail": "columnar declara o caminho e a prova falhou para 'group_by_category': bench_analytical_columnar is stored in the columnar path and the plan for query 'group_by_category' did not use it: 'theodb_columnar_agg' is absent. Residency is necessary and not sufficient, and pushdown coverage varies by query shape \u2014 measured, the same table is 13x slower on a query whose plan falls back. Plan: GroupAggregate [phase=measurement system=theodb]",
+      "repetitions": []
+    },
+    {
+      "label": "filtered_sum via columnar @ 500000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "columnar",
+        "row_count": 500000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.05832213800022146,
+          "throughput_per_second": 17.146147831483866,
+          "latency_ms": {
+            "p50": 59.17663799937145,
+            "p95": 60.01912709998578,
+            "p99": 60.09401502004039,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 59.203837666548985,
+            "stdev": 0.8956093238523634,
+            "min": 58.32213800022146,
+            "max": 60.11273700005404,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.05840699600048538,
+          "throughput_per_second": 17.12123664075601,
+          "latency_ms": {
+            "p50": 58.47293500028172,
+            "p95": 59.90208460007125,
+            "p99": 60.02912012005254,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 58.98027000027165,
+            "stdev": 0.9364154236884062,
+            "min": 58.40699600048538,
+            "max": 60.06087900004786,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.057104380000055244,
+          "throughput_per_second": 17.51179156483325,
+          "latency_ms": {
+            "p50": 57.89621400072065,
+            "p95": 60.52072290030992,
+            "p99": 60.75401258027341,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 58.60430966701339,
+            "stdev": 1.9527627032900667,
+            "min": 57.104380000055244,
+            "max": 60.812335000264284,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via parquet @ 500000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "parquet",
+        "row_count": 500000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 1.497651938000672,
+          "throughput_per_second": 0.6677118859372458,
+          "latency_ms": {
+            "p50": 1507.8995819994816,
+            "p95": 1510.0644221993207,
+            "p99": 1510.2568524393064,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1505.285493333152,
+            "stdev": 6.719362774179723,
+            "min": 1497.651938000672,
+            "max": 1510.3049599993028,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 1.5034768200002873,
+          "throughput_per_second": 0.6651249867622229,
+          "latency_ms": {
+            "p50": 1508.7915309995878,
+            "p95": 1513.0913898999097,
+            "p99": 1513.4735995799383,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1508.6125009999403,
+            "stdev": 5.0485473260544556,
+            "min": 1503.4768200002873,
+            "max": 1513.5691519999455,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 1.5178897980003967,
+          "throughput_per_second": 0.6588093558026132,
+          "latency_ms": {
+            "p50": 1520.631362000131,
+            "p95": 1523.0792900004417,
+            "p99": 1523.2968836004693,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1520.624147333668,
+            "stdev": 2.73074914800687,
+            "min": 1517.8897980003967,
+            "max": 1523.3512820004762,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via parquet @ 500000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "parquet",
+        "row_count": 500000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 1.6396123260001332,
+          "throughput_per_second": 0.6099002698031185,
+          "latency_ms": {
+            "p50": 1644.2823209999915,
+            "p95": 1656.0214899002858,
+            "p99": 1657.064971580312,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1647.073496333481,
+            "stdev": 9.18069480371262,
+            "min": 1639.6123260001332,
+            "max": 1657.3258420003185,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 1.6459981789994345,
+          "throughput_per_second": 0.6075340864641039,
+          "latency_ms": {
+            "p50": 1650.8653370001412,
+            "p95": 1658.620407500075,
+            "p99": 1659.3097471000692,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1652.1151993332144,
+            "stdev": 6.828288725687311,
+            "min": 1645.9981789994345,
+            "max": 1659.4820820000677,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 1.6484582269995371,
+          "throughput_per_second": 0.6066274435234935,
+          "latency_ms": {
+            "p50": 1668.0497509996712,
+            "p95": 1670.604011299747,
+            "p99": 1670.8310566597538,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1662.4652653329879,
+            "stdev": 12.213169049444629,
+            "min": 1648.4582269995371,
+            "max": 1670.8878179997555,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via parquet @ 500000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "parquet",
+        "row_count": 500000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 1.7360457980003048,
+          "throughput_per_second": 0.5760216701378891,
+          "latency_ms": {
+            "p50": 1741.4767189993654,
+            "p95": 1755.1742114000263,
+            "p99": 1756.391766280085,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1744.7395573332567,
+            "stdev": 10.70485387801146,
+            "min": 1736.0457980003048,
+            "max": 1756.6961550000997,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 1.7453216049998446,
+          "throughput_per_second": 0.5729603055020276,
+          "latency_ms": {
+            "p50": 1749.9267190005412,
+            "p95": 1761.7267422998339,
+            "p99": 1762.775633259771,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1752.762060000047,
+            "stdev": 9.192157326251992,
+            "min": 1745.3216049998446,
+            "max": 1763.0378559997553,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 1.7571114590000434,
+          "throughput_per_second": 0.5691158605095497,
+          "latency_ms": {
+            "p50": 1757.2786230002748,
+            "p95": 1757.906675400045,
+            "p99": 1757.9625022800246,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1757.4555136667793,
+            "stdev": 0.4588289233602915,
+            "min": 1757.1114590000434,
+            "max": 1757.9764590000195,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via parquet @ 500000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "parquet",
+        "row_count": 500000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 1.6020543719996567,
+          "throughput_per_second": 0.6241985399982506,
+          "latency_ms": {
+            "p50": 1602.3311169992667,
+            "p95": 1610.0010078996092,
+            "p99": 1610.6827759796397,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1605.0795689995236,
+            "stdev": 5.002040986554859,
+            "min": 1602.0543719996567,
+            "max": 1610.8532179996473,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 1.6123630470001444,
+          "throughput_per_second": 0.620207714298919,
+          "latency_ms": {
+            "p50": 1617.782158999944,
+            "p95": 1619.586117200197,
+            "p99": 1619.7464690402194,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1616.6439210001045,
+            "stdev": 3.8404185303861063,
+            "min": 1612.3630470001444,
+            "max": 1619.786557000225,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 1.6060505510004077,
+          "throughput_per_second": 0.6226454076287329,
+          "latency_ms": {
+            "p50": 1608.0895639997834,
+            "p95": 1622.6428996998038,
+            "p99": 1623.9365295398056,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 1612.8000173333323,
+            "stdev": 9.976808736987413,
+            "min": 1606.0505510004077,
+            "max": 1624.259936999806,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via row @ 1000000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "row",
+        "row_count": 1000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.029501236000214703,
+          "throughput_per_second": 33.896884862475666,
+          "latency_ms": {
+            "p50": 30.601357999330503,
+            "p95": 31.167529099911917,
+            "p99": 31.2178554199636,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 30.44434366650724,
+            "stdev": 0.8752280559535701,
+            "min": 29.501236000214703,
+            "max": 31.23043699997652,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.027775902000030328,
+          "throughput_per_second": 36.00243117213289,
+          "latency_ms": {
+            "p50": 31.85845900043205,
+            "p95": 34.79436340030588,
+            "p99": 35.05533268029467,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 31.58497866691808,
+            "stdev": 3.6799658951961614,
+            "min": 27.775902000030328,
+            "max": 35.120575000291865,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.02420409499973175,
+          "throughput_per_second": 41.315322882804864,
+          "latency_ms": {
+            "p50": 25.346931999592925,
+            "p95": 26.419952499873034,
+            "p99": 26.515332099897932,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 25.36340133307628,
+            "stdev": 1.1676281154936834,
+            "min": 24.20409499973175,
+            "max": 26.539176999904157,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via row @ 1000000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "row",
+        "row_count": 1000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.033203744999809714,
+          "throughput_per_second": 30.11708468444541,
+          "latency_ms": {
+            "p50": 33.45876000003045,
+            "p95": 34.2842337005095,
+            "p99": 34.357609140552086,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 33.6794860001343,
+            "stdev": 0.6164883410079455,
+            "min": 33.203744999809714,
+            "max": 34.37595300056273,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.03183040099975187,
+          "throughput_per_second": 31.416506502943374,
+          "latency_ms": {
+            "p50": 32.83985199959716,
+            "p95": 40.02248110018627,
+            "p99": 40.660937020238634,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 35.163601333200255,
+            "stdev": 4.924993145369594,
+            "min": 31.830400999751873,
+            "max": 40.820551000251726,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.03215050699964195,
+          "throughput_per_second": 31.103708567057332,
+          "latency_ms": {
+            "p50": 33.042676000150095,
+            "p95": 33.30522400010523,
+            "p99": 33.32856160010124,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 32.84252633329743,
+            "stdev": 0.6168007848628758,
+            "min": 32.15050699964195,
+            "max": 33.33439600010024,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via row @ 1000000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "row",
+        "row_count": 1000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.06534701800046605,
+          "throughput_per_second": 15.302917112344256,
+          "latency_ms": {
+            "p50": 66.86896399969555,
+            "p95": 67.80816799946479,
+            "p99": 67.89165279944427,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 66.70950199986692,
+            "stdev": 1.2901652431893151,
+            "min": 65.34701800046605,
+            "max": 67.91252399943914,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.06356511099966156,
+          "throughput_per_second": 15.731900476116913,
+          "latency_ms": {
+            "p50": 65.59560700043221,
+            "p95": 66.074232399842,
+            "p99": 66.11677687978954,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 65.0960436666234,
+            "stdev": 1.352227986810211,
+            "min": 63.565110999661556,
+            "max": 66.12741299977642,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.06400623799981986,
+          "throughput_per_second": 15.623477199250711,
+          "latency_ms": {
+            "p50": 64.5954530000381,
+            "p95": 64.8500756003159,
+            "p99": 64.8727087203406,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 64.4933526667349,
+            "stdev": 0.4449388799998093,
+            "min": 64.00623799981986,
+            "max": 64.87836700034677,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via row @ 1000000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "row",
+        "row_count": 1000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.03848718499921233,
+          "throughput_per_second": 25.982674493353198,
+          "latency_ms": {
+            "p50": 38.673033000122814,
+            "p95": 39.56612550009595,
+            "p99": 39.64551150009356,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 38.94185866647604,
+            "stdev": 0.6334219242879978,
+            "min": 38.48718499921233,
+            "max": 39.665358000092965,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.03776976400058629,
+          "throughput_per_second": 26.476204616594302,
+          "latency_ms": {
+            "p50": 38.4211000000505,
+            "p95": 38.96080120020997,
+            "p99": 39.008774640224146,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 38.403877333621494,
+            "stdev": 0.6256798038604788,
+            "min": 37.76976400058629,
+            "max": 39.02076800022769,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.03631166899958771,
+          "throughput_per_second": 27.53935656362571,
+          "latency_ms": {
+            "p50": 37.85772100036411,
+            "p95": 38.529499899777875,
+            "p99": 38.589213579725765,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 37.591177333221516,
+            "stdev": 1.169248587318337,
+            "min": 36.31166899958771,
+            "max": 38.60414199971274,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via columnar @ 1000000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "columnar",
+        "row_count": 1000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.005944262999946659,
+          "throughput_per_second": 168.22943399526125,
+          "latency_ms": {
+            "p50": 6.159155999739596,
+            "p95": 6.59815079998225,
+            "p99": 6.637172560003819,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6.250115666565155,
+            "stdev": 0.36005523370725945,
+            "min": 5.944262999946659,
+            "max": 6.646928000009211,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.006144364999272511,
+          "throughput_per_second": 162.75074806239527,
+          "latency_ms": {
+            "p50": 6.470610000178567,
+            "p95": 6.686816999899747,
+            "p99": 6.706035399874963,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6.441938333106616,
+            "stdev": 0.2843238117791855,
+            "min": 6.144364999272511,
+            "max": 6.710839999868767,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.006189156999425904,
+          "throughput_per_second": 161.5728927368878,
+          "latency_ms": {
+            "p50": 6.249322000257962,
+            "p95": 6.695649099492584,
+            "p99": 6.735322619424551,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6.394573333030469,
+            "stdev": 0.3051734195716215,
+            "min": 6.189156999425904,
+            "max": 6.745240999407542,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via columnar @ 1000000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "columnar",
+        "row_count": 1000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.01563494099991658,
+          "throughput_per_second": 63.95930755385233,
+          "latency_ms": {
+            "p50": 15.650510000341455,
+            "p95": 15.774975499880384,
+            "p99": 15.7860390998394,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 15.69141866669573,
+            "stdev": 0.08469753157228432,
+            "min": 15.63494099991658,
+            "max": 15.788804999829154,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0167293829999835,
+          "throughput_per_second": 59.77506761612106,
+          "latency_ms": {
+            "p50": 16.990502000226115,
+            "p95": 17.43699650014605,
+            "p99": 17.476684900138935,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 17.068830666782258,
+            "stdev": 0.3846408475520031,
+            "min": 16.7293829999835,
+            "max": 17.486607000137155,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.015581657000439009,
+          "throughput_per_second": 64.17802676389458,
+          "latency_ms": {
+            "p50": 15.735312000288104,
+            "p95": 15.975498600164428,
+            "p99": 15.996848520153435,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 15.773051666959267,
+            "stdev": 0.2127895009862186,
+            "min": 15.581657000439009,
+            "max": 16.002186000150687,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via columnar @ 1000000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "columnar",
+        "row_count": 1000000
+      },
+      "status": "failed",
+      "status_detail": "columnar declara o caminho e a prova falhou para 'group_by_category': bench_analytical_columnar is stored in the columnar path and the plan for query 'group_by_category' did not use it: 'theodb_columnar_agg' is absent. Residency is necessary and not sufficient, and pushdown coverage varies by query shape \u2014 measured, the same table is 13x slower on a query whose plan falls back. Plan: GroupAggregate [phase=measurement system=theodb]",
+      "repetitions": []
+    },
+    {
+      "label": "filtered_sum via columnar @ 1000000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "columnar",
+        "row_count": 1000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.11435725699993782,
+          "throughput_per_second": 8.744525937698416,
+          "latency_ms": {
+            "p50": 115.03819199970167,
+            "p95": 115.58749530022396,
+            "p99": 115.63632226027039,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 115.01465933330716,
+            "stdev": 0.6459575717560254,
+            "min": 114.35725699993782,
+            "max": 115.648529000282,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.11528885699954117,
+          "throughput_per_second": 8.673865159440169,
+          "latency_ms": {
+            "p50": 115.4271190007421,
+            "p95": 117.00777640016895,
+            "p99": 117.148279280118,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 115.96646033346285,
+            "stdev": 1.0561698899779817,
+            "min": 115.28885699954117,
+            "max": 117.18340500010527,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.11402429600002506,
+          "throughput_per_second": 8.770060724600134,
+          "latency_ms": {
+            "p50": 114.6793420002723,
+            "p95": 116.04713679980705,
+            "p99": 116.1687185597657,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 114.96758400001757,
+            "stdev": 1.1156930226547912,
+            "min": 114.02429600002506,
+            "max": 116.19911399975535,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via parquet @ 1000000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "parquet",
+        "row_count": 1000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 3.0326506290002726,
+          "throughput_per_second": 0.32974454440525336,
+          "latency_ms": {
+            "p50": 3038.056274000155,
+            "p95": 3047.8316465002536,
+            "p99": 3048.7005685002623,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3039.8749006668972,
+            "stdev": 8.284670009535606,
+            "min": 3032.6506290002726,
+            "max": 3048.9177990002645,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 3.045806002000063,
+          "throughput_per_second": 0.32832031959466185,
+          "latency_ms": {
+            "p50": 3072.8682360004314,
+            "p95": 3084.1479927003093,
+            "p99": 3085.1506377402984,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3068.0251790002635,
+            "stdev": 20.23705232894148,
+            "min": 3045.806002000063,
+            "max": 3085.4012990002957,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 3.0504036360007376,
+          "throughput_per_second": 0.3278254681439667,
+          "latency_ms": {
+            "p50": 3074.9915110000074,
+            "p95": 3095.087392300593,
+            "p99": 3096.873692860645,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3074.2384716671345,
+            "stdev": 23.46737928980627,
+            "min": 3050.4036360007376,
+            "max": 3097.320268000658,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via parquet @ 1000000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "parquet",
+        "row_count": 1000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 3.329302432000077,
+          "throughput_per_second": 0.30036322035161295,
+          "latency_ms": {
+            "p50": 3359.1906290002953,
+            "p95": 3380.69014040002,
+            "p99": 3382.6012080799956,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3357.1906786667873,
+            "stdev": 26.943997388244707,
+            "min": 3329.302432000077,
+            "max": 3383.0789749999894,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 3.3329785010000705,
+          "throughput_per_second": 0.30003193830981717,
+          "latency_ms": {
+            "p50": 3334.9487690002206,
+            "p95": 3358.9779913997518,
+            "p99": 3361.11392227971,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3343.191724999997,
+            "stdev": 16.01385100886648,
+            "min": 3332.9785010000705,
+            "max": 3361.6479049996997,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 3.3320047349998276,
+          "throughput_per_second": 0.30011962152870464,
+          "latency_ms": {
+            "p50": 3362.757005000276,
+            "p95": 3403.0181152994373,
+            "p99": 3406.596880659363,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3367.4177706664827,
+            "stdev": 37.95863133062574,
+            "min": 3332.0047349998276,
+            "max": 3407.491571999344,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via parquet @ 1000000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "parquet",
+        "row_count": 1000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 3.520094987000448,
+          "throughput_per_second": 0.28408324312069844,
+          "latency_ms": {
+            "p50": 3528.4582310005135,
+            "p95": 3546.013981100168,
+            "p99": 3547.5744922201375,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3532.1726126670305,
+            "stdev": 14.301279112640856,
+            "min": 3520.094987000448,
+            "max": 3547.96462000013,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 3.5028470639999796,
+          "throughput_per_second": 0.28548206122881015,
+          "latency_ms": {
+            "p50": 3535.200459999942,
+            "p95": 3539.463447700564,
+            "p99": 3539.842379940619,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3525.994879000185,
+            "stdev": 20.18600938459687,
+            "min": 3502.8470639999796,
+            "max": 3539.937113000633,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 3.5528426680002667,
+          "throughput_per_second": 0.28146475750440547,
+          "latency_ms": {
+            "p50": 3573.43088899961,
+            "p95": 3580.0902122005937,
+            "p99": 3580.682152040681,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3569.0345646668598,
+            "stdev": 14.502425865752363,
+            "min": 3552.8426680002667,
+            "max": 3580.830137000703,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via parquet @ 1000000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "parquet",
+        "row_count": 1000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 3.2573483409996697,
+          "throughput_per_second": 0.3069981762199566,
+          "latency_ms": {
+            "p50": 3266.7723040003693,
+            "p95": 3270.176526999785,
+            "p99": 3270.479124599733,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3264.891806333253,
+            "stdev": 6.80107871982282,
+            "min": 3257.3483409996697,
+            "max": 3270.55477399972,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 3.247676414000125,
+          "throughput_per_second": 0.30791244955599245,
+          "latency_ms": {
+            "p50": 3266.304816000229,
+            "p95": 3277.431471900127,
+            "p99": 3278.4205079801177,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3264.21633233349,
+            "stdev": 15.600875398905663,
+            "min": 3247.676414000125,
+            "max": 3278.6677670001154,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 3.2684229419992334,
+          "throughput_per_second": 0.3059579551807694,
+          "latency_ms": {
+            "p50": 3275.038138000127,
+            "p95": 3284.326464699825,
+            "p99": 3285.152093739798,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 3276.273193666384,
+            "stdev": 8.535063651749175,
+            "min": 3268.4229419992334,
+            "max": 3285.3585009997914,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via row @ 2000000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "row",
+        "row_count": 2000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.04850644700036355,
+          "throughput_per_second": 20.615816285049803,
+          "latency_ms": {
+            "p50": 48.7700980002046,
+            "p95": 49.89458860009108,
+            "p99": 49.99454332008099,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 49.098692333548875,
+            "stdev": 0.808292787930247,
+            "min": 48.50644700036355,
+            "max": 50.01953200007847,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.03869164300067496,
+          "throughput_per_second": 25.845374412830065,
+          "latency_ms": {
+            "p50": 39.01522199976171,
+            "p95": 39.03058320020136,
+            "p99": 39.031948640240444,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 38.913051666895626,
+            "stdev": 0.19193534658415679,
+            "min": 38.69164300067496,
+            "max": 39.032290000250214,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.03900255000007746,
+          "throughput_per_second": 25.639349221987125,
+          "latency_ms": {
+            "p50": 39.22109100039961,
+            "p95": 48.915279900393216,
+            "p99": 49.77698558039265,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 42.73868433362319,
+            "stdev": 6.282862710575999,
+            "min": 39.00255000007746,
+            "max": 49.992412000392505,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via row @ 2000000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "row",
+        "row_count": 2000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.05861699199977011,
+          "throughput_per_second": 17.05989962780625,
+          "latency_ms": {
+            "p50": 58.99571600002673,
+            "p95": 60.05240600070465,
+            "p99": 60.14633400076491,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 59.260841333525605,
+            "stdev": 0.8096506508212287,
+            "min": 58.61699199977011,
+            "max": 60.169816000779974,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0493696909998107,
+          "throughput_per_second": 20.25534249351154,
+          "latency_ms": {
+            "p50": 49.708819999978004,
+            "p95": 50.177586800509744,
+            "p99": 50.21925496055701,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 49.76939433345251,
+            "stdev": 0.43317867886490813,
+            "min": 49.3696909998107,
+            "max": 50.229672000568826,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.0501986429999306,
+          "throughput_per_second": 19.92085722319989,
+          "latency_ms": {
+            "p50": 51.558145999479166,
+            "p95": 51.78183740026725,
+            "p99": 51.8017210803373,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 51.187826999921526,
+            "stdev": 0.8656255067963043,
+            "min": 50.1986429999306,
+            "max": 51.806692000354815,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via row @ 2000000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "row",
+        "row_count": 2000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.12262587699933647,
+          "throughput_per_second": 8.154885611993715,
+          "latency_ms": {
+            "p50": 123.01467599991156,
+            "p95": 123.69649890033543,
+            "p99": 123.7571053803731,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 123.13760333321018,
+            "stdev": 0.5829923873032317,
+            "min": 122.62587699933647,
+            "max": 123.77225700038252,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.11570976999973936,
+          "throughput_per_second": 8.642312572242192,
+          "latency_ms": {
+            "p50": 116.4499070000602,
+            "p95": 116.89884680072282,
+            "p99": 116.93875256078172,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 116.36946866686533,
+            "stdev": 0.6233839873308156,
+            "min": 115.70976999973936,
+            "max": 116.94872900079645,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.1144076929995208,
+          "throughput_per_second": 8.740670961734963,
+          "latency_ms": {
+            "p50": 115.28901200017572,
+            "p95": 128.73837890019786,
+            "p99": 129.93387818019983,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 119.97648599996562,
+            "stdev": 8.893111962654379,
+            "min": 114.4076929995208,
+            "max": 130.23275300020032,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via row @ 2000000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "row",
+        "row_count": 2000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.07008019600016269,
+          "throughput_per_second": 14.26936648404463,
+          "latency_ms": {
+            "p50": 70.86337800046749,
+            "p95": 71.81582550056191,
+            "p99": 71.9004875005703,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 70.95507566706753,
+            "stdev": 0.9241468052395183,
+            "min": 70.08019600016269,
+            "max": 71.9216530005724,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.06184466800004884,
+          "throughput_per_second": 16.169542700095185,
+          "latency_ms": {
+            "p50": 63.735007000104815,
+            "p95": 64.48804960000416,
+            "p99": 64.55498671999521,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 63.38379866671554,
+            "stdev": 1.3970379329880878,
+            "min": 61.84466800004884,
+            "max": 64.57172099999298,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.06342831199981447,
+          "throughput_per_second": 15.765830249477947,
+          "latency_ms": {
+            "p50": 63.77829400025803,
+            "p95": 63.83222289923651,
+            "p99": 63.83701657914571,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 63.681606999731834,
+            "stdev": 0.22139647527365638,
+            "min": 63.42831199981447,
+            "max": 63.83821499912301,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via columnar @ 2000000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "columnar",
+        "row_count": 2000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.012741210000058345,
+          "throughput_per_second": 78.48548136287062,
+          "latency_ms": {
+            "p50": 12.85883000036847,
+            "p95": 13.086566000129096,
+            "p99": 13.106809200107818,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 12.903970000176438,
+            "stdev": 0.18940808745980342,
+            "min": 12.741210000058345,
+            "max": 13.111870000102499,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.012331167999946047,
+          "throughput_per_second": 81.0953187892968,
+          "latency_ms": {
+            "p50": 12.797740999303642,
+            "p95": 101.79952400021646,
+            "p99": 109.71079360029762,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 45.60583999985587,
+            "stdev": 57.22983391479974,
+            "min": 12.331167999946047,
+            "max": 111.6886110003179,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.012537386999611044,
+          "throughput_per_second": 79.761436735663,
+          "latency_ms": {
+            "p50": 12.660652999329614,
+            "p95": 114.0322061003644,
+            "p99": 123.0430108204564,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 50.16458399980669,
+            "stdev": 65.0654946543617,
+            "min": 12.537386999611044,
+            "max": 125.2957120004794,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via columnar @ 2000000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "columnar",
+        "row_count": 2000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.031553632999930414,
+          "throughput_per_second": 31.692071718087274,
+          "latency_ms": {
+            "p50": 31.754433999594767,
+            "p95": 32.28906280019146,
+            "p99": 32.3365853602445,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 31.885510999927646,
+            "stdev": 0.41331073009848324,
+            "min": 31.553632999930414,
+            "max": 32.34846600025776,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.03217105200019432,
+          "throughput_per_second": 31.083845190824338,
+          "latency_ms": {
+            "p50": 32.43801099961274,
+            "p95": 32.62909360064441,
+            "p99": 32.646078720736114,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 32.419796000188704,
+            "stdev": 0.24015514135781107,
+            "min": 32.17105200019432,
+            "max": 32.65032500075904,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.03122675499980687,
+          "throughput_per_second": 32.0238205989122,
+          "latency_ms": {
+            "p50": 31.99796199987759,
+            "p95": 32.244179499411985,
+            "p99": 32.2660654993706,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 31.832084666348237,
+            "stdev": 0.5417830045154565,
+            "min": 31.22675499980687,
+            "max": 32.27153699936025,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via columnar @ 2000000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "columnar",
+        "row_count": 2000000
+      },
+      "status": "failed",
+      "status_detail": "columnar declara o caminho e a prova falhou para 'group_by_category': bench_analytical_columnar is stored in the columnar path and the plan for query 'group_by_category' did not use it: 'theodb_columnar_agg' is absent. Residency is necessary and not sufficient, and pushdown coverage varies by query shape \u2014 measured, the same table is 13x slower on a query whose plan falls back. Plan: GroupAggregate [phase=measurement system=theodb]",
+      "repetitions": []
+    },
+    {
+      "label": "filtered_sum via columnar @ 2000000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "columnar",
+        "row_count": 2000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.2232295920002798,
+          "throughput_per_second": 4.479692817781733,
+          "latency_ms": {
+            "p50": 228.34737500033953,
+            "p95": 230.43181459997868,
+            "p99": 230.6170981199466,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 227.41346200018597,
+            "stdev": 3.8038915710237866,
+            "min": 223.2295920002798,
+            "max": 230.66341899993859,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.22454864500014082,
+          "throughput_per_second": 4.453378019713158,
+          "latency_ms": {
+            "p50": 229.02298899953166,
+            "p95": 231.20389330015314,
+            "p99": 231.39775146020838,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 228.33928333329823,
+            "stdev": 3.499244418988285,
+            "min": 224.54864500014082,
+            "max": 231.4462160002222,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 0.2232523909997326,
+          "throughput_per_second": 4.479235342214981,
+          "latency_ms": {
+            "p50": 225.1564509997479,
+            "p95": 227.31905380032913,
+            "p99": 227.5112851603808,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 225.3227283332914,
+            "stdev": 2.158285198424305,
+            "min": 223.2523909997326,
+            "max": 227.5593430003937,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via parquet @ 2000000 linhas",
+      "parameters": {
+        "query": "total_rows",
+        "path": "parquet",
+        "row_count": 2000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 5.632849833000364,
+          "throughput_per_second": 0.17753003002875106,
+          "latency_ms": {
+            "p50": 5663.282056999378,
+            "p95": 5670.450866600004,
+            "p99": 5671.088094120059,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 5655.793096999939,
+            "stdev": 20.26466625626933,
+            "min": 5632.849833000364,
+            "max": 5671.247401000073,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 5.571158161000312,
+          "throughput_per_second": 0.1794958913570761,
+          "latency_ms": {
+            "p50": 5571.746096000425,
+            "p95": 5635.782913100229,
+            "p99": 5641.475074620212,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 5595.267457333648,
+            "stdev": 41.250407018632075,
+            "min": 5571.158161000312,
+            "max": 5642.898115000207,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 5.586837095000192,
+          "throughput_per_second": 0.1789921529831121,
+          "latency_ms": {
+            "p50": 5594.1315420004685,
+            "p95": 5614.285102500071,
+            "p99": 5616.076530100036,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 5599.164341333562,
+            "stdev": 15.470314425255205,
+            "min": 5586.837095000192,
+            "max": 5616.524387000027,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via parquet @ 2000000 linhas",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "parquet",
+        "row_count": 2000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 6.179397054999754,
+          "throughput_per_second": 0.16182808631643106,
+          "latency_ms": {
+            "p50": 6190.276962999633,
+            "p95": 6307.230504100335,
+            "p99": 6317.626374420397,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6229.966453333266,
+            "stdev": 78.35555715514168,
+            "min": 6179.397054999754,
+            "max": 6320.225342000413,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 6.157267088000481,
+          "throughput_per_second": 0.162409716146444,
+          "latency_ms": {
+            "p50": 6169.675893000203,
+            "p95": 6194.956914599788,
+            "p99": 6197.204116519752,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6174.902966000142,
+            "stdev": 20.749229062494706,
+            "min": 6157.267088000481,
+            "max": 6197.765916999742,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 6.167989152999326,
+          "throughput_per_second": 0.16212739276847254,
+          "latency_ms": {
+            "p50": 6181.560635000096,
+            "p95": 6256.732254800409,
+            "p99": 6263.414176560436,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6204.878148333289,
+            "stdev": 52.58007270193204,
+            "min": 6167.989152999326,
+            "max": 6265.084657000443,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via parquet @ 2000000 linhas",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "parquet",
+        "row_count": 2000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 6.513391922000665,
+          "throughput_per_second": 0.15352983698435857,
+          "latency_ms": {
+            "p50": 6546.282815999803,
+            "p95": 6552.45866009991,
+            "p99": 6553.00762401992,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6537.606534333463,
+            "stdev": 21.249294504542856,
+            "min": 6513.391922000665,
+            "max": 6553.144864999922,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 6.5028980039996895,
+          "throughput_per_second": 0.1537775926033189,
+          "latency_ms": {
+            "p50": 6594.302654000785,
+            "p95": 6736.717249999856,
+            "p99": 6749.376325199773,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6616.580584000076,
+            "stdev": 126.30379139196454,
+            "min": 6502.8980039996895,
+            "max": 6752.541093999753,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 6.521243542000775,
+          "throughput_per_second": 0.1533449860535635,
+          "latency_ms": {
+            "p50": 6607.526183000118,
+            "p95": 6759.1513718003625,
+            "p99": 6772.629166360384,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6634.922780000427,
+            "stdev": 129.5683871558096,
+            "min": 6521.243542000775,
+            "max": 6775.99861500039,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via parquet @ 2000000 linhas",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "parquet",
+        "row_count": 2000000
+      },
+      "status": "measured",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 5.979491022999355,
+          "throughput_per_second": 0.1672383144574725,
+          "latency_ms": {
+            "p50": 5993.692514999566,
+            "p95": 6108.250179599963,
+            "p99": 6118.433083119999,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6031.387448999642,
+            "stdev": 77.91263975629522,
+            "min": 5979.491022999355,
+            "max": 6120.9788090000075,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 2,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 5.992187718999958,
+          "throughput_per_second": 0.16688395739492803,
+          "latency_ms": {
+            "p50": 6021.249077999528,
+            "p95": 6047.732703900056,
+            "p99": 6050.086803980103,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6021.370708666534,
+            "stdev": 29.24399470655421,
+            "min": 5992.187718999958,
+            "max": 6050.675329000114,
+            "sample_count": 3
+          },
+          "resources": {}
+        },
+        {
+          "repetition": 3,
+          "operations": {
+            "success": 1,
+            "error": 0,
+            "timeout": 0
+          },
+          "duration_seconds": 5.974193664999802,
+          "throughput_per_second": 0.1673866058039873,
+          "latency_ms": {
+            "p50": 6009.787985000003,
+            "p95": 6278.3211865998965,
+            "p99": 6302.190804519887,
+            "p999": {
+              "absent": "unavailable",
+              "detail": "p99.9 needs >= 1000 samples, got 3"
+            },
+            "mean": 6097.379952999897,
+            "stdev": 183.40486309219435,
+            "min": 5974.193664999802,
+            "max": 6308.158208999885,
+            "sample_count": 3
+          },
+          "resources": {}
+        }
+      ]
+    }
+  ]
+}

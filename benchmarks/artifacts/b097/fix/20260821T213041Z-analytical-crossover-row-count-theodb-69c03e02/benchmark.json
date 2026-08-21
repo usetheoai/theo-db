@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "analytical/crossover/row-count",
+  "version": 1,
+  "workload": {
+    "type": "analytical",
+    "loop": "closed",
+    "operation_count": 72
+  },
+  "quality": {
+    "metric": "exact_match",
+    "ground_truth": "computed"
+  },
+  "parameters": {
+    "paths": [
+      "row",
+      "columnar",
+      "parquet"
+    ],
+    "row_count": [
+      10000,
+      50000,
+      100000,
+      500000,
+      1000000,
+      2000000
+    ]
+  },
+  "warmup": {
+    "policy": "fixed_operations",
+    "operations": 1
+  },
+  "repetitions": 3
+}

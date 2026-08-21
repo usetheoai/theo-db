@@ -4395,6 +4395,18 @@ suggested_mode: review
 source: discover-review
 evidence: repro isolado em 2026-08-21 (`theo-db:develop`, tabela `USING theodb_columnar`, 200k linhas, `SET theodb.enable_columnar_agg=on`): `GROUP BY <int>` → **`Custom Scan (theodb_columnar_agg)`**; `GROUP BY <text>` → **`GroupAggregate`**, com `THEODB_ADMIT_TRACE=1` dizendo `swap_sorted_text_group_not_resorted` (`theodb_rs/src/am/columnar_agg.rs:2028-2033`)
 why_now: o sweep de crossover de 2026-08-21 reprovou `group_by_category` nas seis escalas, e a leitura fácil — "falta pushdown de GROUP BY" — está **errada**: agrupamento por inteiro faz pushdown limpo, com e sem `ORDER BY`. O bloqueio é só para chave de texto sob `AGG_SORTED`, e a guarda do M153 está **protegendo corretude**: nosso executor emite grupos em ordem byte-wise e o PostgreSQL promete ordem de collation; trocar sem um `Sort` completo acima devolveria a ordem errada. Recusar é o comportamento certo. O que falta é uma das duas saídas — emitir em ordem de collation, ou fazer o planner produzir a forma com `Sort` acima (ver [[B-097]], que é o que impede isso hoje).
+
+> **MEDIDO em 2026-08-21, e refuta a saída nº 2 deste próprio item.** O [[B-097]] foi entregue: o
+> planner passou a ver a contagem real e **produz a forma com `Sort` acima** — medido nos seis pontos
+> do sweep, `GroupAggregate` virou `Sort` → `HashAggregate` → `Seq Scan`. **E o `theodb_columnar_agg`
+> continua ausente**, com o portão de caminho reprovando nas seis escalas exatamente como antes.
+>
+> Ou seja: a forma do plano não era o bloqueio, ou não era o único. A saída que resta explorada é a
+> nº 1 — emitir em ordem de collation. Este item **não é fechado** pelo B-097, ao contrário do que o
+> `CHANGELOG` de v0.168.0 afirmou antes de medir (retratado na mesma seção).
+>
+> Evidência: [[b058-crossover-colunar]] § Re-medido em 2026-08-21.
+
 status: triaged
 dod:
   - medido se, com estatística real na tabela colunar ([[B-097]]), o planner escolhe `HashAggregate` + `Sort` acima — a forma que a guarda já admite
@@ -4425,7 +4437,7 @@ dod:
 > A pergunta aberta que o item **não** resolve: se o caminho Parquet deve sequer ser comparado em QPS por
 > consulta, ou se o uso pretendido é varredura em lote, caso em que a métrica está errada e não o código.
 
-## B-097 — O TAM colunar reporta ZERO linhas ao planner, e o ANALYZE não amostra nada   [ ]
+## B-097 — O TAM colunar reporta ZERO linhas ao planner, e o ANALYZE não amostra nada   [x]
 
 domain: colunar
 repo: theo-db
@@ -4433,7 +4445,8 @@ suggested_mode: review
 source: discover-review
 evidence: `theodb_rs/src/am/columnar.rs:2225-2244` — `columnar_relation_estimate_size` fixa `*tuples = 0.0` com o comentário *"Phase A: no catalog row-count yet; a real estimate reads columnar.stripe (Phase C ANALYZE)"*; `columnar_scan_analyze_next_block` e `columnar_scan_analyze_next_tuple` devolvem `false`. Medido no mesmo repro: tabela colunar de 200.000 linhas fica com `reltuples=0`, `relpages=1` **depois do `ANALYZE`**, e `pg_stats` tem **zero linhas** para ela; a heap equivalente fica com `reltuples=200000`, `relpages=1280`. O `EXPLAIN` da tabela de 200 mil linhas diz `rows=1`.
 why_now: isto não é um caso de borda de uma consulta — é a entrada de TODA decisão de plano sobre dado colunar. Sem contagem de linhas e sem `pg_stats`, o planner não tem seletividade, `n_distinct` nem histograma: escolhe forma de agregação, ordem de junção e caminho de acesso às cegas, e os custos colapsam a ponto de `enable_sort=off` não mudar o plano (medido). É a causa do [[B-095]]: com 5 grupos em 200 mil linhas o planner escolheria `HashAggregate`, e o `ORDER BY` poria o `Sort` **acima** — exatamente a forma que a guarda do M153 já admite. O estado é conhecido e declarado como incompleto ("Fase A"), e o custo dele nunca foi medido.
-status: triaged
+status: shipped
+evidence_final: medido em 2026-08-21 em droplet `g-16vcpu-64gb` (nyc1), PostgreSQL 18.6, `theodb_rs 1.5.0` lidos DO SERVIDOR. Benchmark registrado `analytical/crossover/row-count`, duas imagens construídas de `HEAD~1` e `HEAD` no mesmo host, no mesmo dia. **`rows=1` → `rows=200000`**; forma do plano do `GROUP BY` mudou de `GroupAggregate` para `Sort`+`HashAggregate` nos seis pontos; **QPS inalterado (0,90×–1,02×, ruído), publicado como nulo**; `count(*)` roda a 2M (a correção do plano paralelo segurou). Veredito do arnês `EXPLORATORY` nas duas corridas — tarball, então `clean_source_tree` fica `UNAVAILABLE`. Registrado em [[b058-crossover-colunar]].
 dod:
   - `columnar_relation_estimate_size` devolve contagem real lida de `columnar.stripe` (a tabela já existe e já tem o metadado)
   - `ANALYZE` sobre tabela colunar popula `pg_stats`, ou o limite é declarado com a razão de não popular

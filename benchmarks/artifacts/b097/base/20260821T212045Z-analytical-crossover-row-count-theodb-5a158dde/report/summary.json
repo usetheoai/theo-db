@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "run_id": "20260821T212045Z-analytical-crossover-row-count-theodb-5a158dde",
+  "status": "EXPLORATORY",
+  "profile": "research",
+  "publishable": false,
+  "benchmark": {
+    "id": "analytical/crossover/row-count",
+    "version": 1,
+    "commit": null
+  },
+  "system": {
+    "id": "theodb",
+    "version": null
+  },
+  "environment_digest": "sha256:18c0b475a2350d15ed06170484775a6f",
+  "headline": {
+    "configuration": "total_rows via row @ 10000 linhas",
+    "throughput_per_second": 1918.4762675444545,
+    "latency_p50_ms": 0.5499569997482467,
+    "latency_p95_ms": 0.6322664998151595,
+    "latency_p99_ms": 0.6395828998211073
+  },
+  "limitations": [
+    "profile 'research' is not publishable",
+    "run status is EXPLORATORY",
+    "total_rows via row @ 10000 linhas: unstable (latency_p50_ms cv=0.080; throughput_per_second cv=0.067)",
+    "sum_amount via row @ 10000 linhas: unstable (latency_p99_ms cv=0.050; throughput_per_second cv=0.085)",
+    "filtered_sum via row @ 10000 linhas: unstable (latency_p95_ms cv=0.051; latency_p99_ms cv=0.053)",
+    "total_rows via columnar @ 10000 linhas: unstable (latency_p50_ms cv=0.056; latency_p95_ms cv=0.058; latency_p99_ms cv=0.058)",
+    "sum_amount via columnar @ 10000 linhas: unstable (latency_p95_ms cv=0.098; latency_p99_ms cv=0.106)",
+    "filtered_sum via columnar @ 10000 linhas: unstable (throughput_per_second cv=0.069)",
+    "group_by_category via parquet @ 10000 linhas: unstable (latency_p95_ms cv=0.078; latency_p99_ms cv=0.083)",
+    "filtered_sum via parquet @ 10000 linhas: unstable (latency_p99_ms cv=0.050)",
+    "sum_amount via row @ 50000 linhas: unstable (latency_p50_ms cv=0.415; latency_p95_ms cv=0.462; latency_p99_ms cv=0.466; throughput_per_second cv=0.339)",
+    "group_by_category via row @ 50000 linhas: unstable (latency_p50_ms cv=0.087; latency_p95_ms cv=0.256; latency_p99_ms cv=0.270)",
+    "total_rows via row @ 100000 linhas: unstable (throughput_per_second cv=0.055)",
+    "total_rows via columnar @ 100000 linhas: unstable (latency_p50_ms cv=0.091; throughput_per_second cv=0.056)",
+    "total_rows via parquet @ 100000 linhas: unstable (latency_p50_ms cv=0.073; latency_p95_ms cv=0.064; latency_p99_ms cv=0.063; throughput_per_second cv=0.071)",
+    "total_rows via row @ 500000 linhas: unstable (latency_p50_ms cv=0.164; latency_p95_ms cv=0.168; latency_p99_ms cv=0.168; throughput_per_second cv=0.115)",
+    "sum_amount via row @ 500000 linhas: unstable (latency_p50_ms cv=0.218; latency_p95_ms cv=0.190; latency_p99_ms cv=0.193; throughput_per_second cv=0.127)",
+    "group_by_category via row @ 500000 linhas: unstable (latency_p95_ms cv=0.180; latency_p99_ms cv=0.191)",
+    "filtered_sum via row @ 500000 linhas: unstable (latency_p50_ms cv=0.138; latency_p95_ms cv=0.140; latency_p99_ms cv=0.140)",
+    "total_rows via columnar @ 500000 linhas: unstable (latency_p50_ms cv=0.054; throughput_per_second cv=0.070)",
+    "total_rows via row @ 1000000 linhas: unstable (latency_p50_ms cv=0.118; latency_p95_ms cv=0.136; latency_p99_ms cv=0.138; throughput_per_second cv=0.103)",
+    "sum_amount via row @ 1000000 linhas: unstable (latency_p95_ms cv=0.101; latency_p99_ms cv=0.110)",
+    "sum_amount via columnar @ 1000000 linhas: unstable (latency_p95_ms cv=0.055; latency_p99_ms cv=0.056)",
+    "total_rows via row @ 2000000 linhas: unstable (latency_p50_ms cv=0.132; latency_p95_ms cv=0.131; latency_p99_ms cv=0.135; throughput_per_second cv=0.123)",
+    "sum_amount via row @ 2000000 linhas: unstable (latency_p50_ms cv=0.092; latency_p95_ms cv=0.098; latency_p99_ms cv=0.099; throughput_per_second cv=0.092)",
+    "group_by_category via row @ 2000000 linhas: unstable (latency_p99_ms cv=0.053)",
+    "filtered_sum via row @ 2000000 linhas: unstable (latency_p50_ms cv=0.062; latency_p95_ms cv=0.066; latency_p99_ms cv=0.067; throughput_per_second cv=0.065)",
+    "total_rows via columnar @ 2000000 linhas: unstable (latency_p95_ms cv=0.722; latency_p99_ms cv=0.732)"
+  ]
+}

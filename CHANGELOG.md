@@ -18,9 +18,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   `*tuples = 0.0` fixo, então uma tabela de 200.000 linhas era planejada como se tivesse ~1: forma de
   agregação, ordem de junção e caminho de acesso escolhidos às cegas. Passa a somar `row_count` de
   `columnar.stripe`, metadado que já existia. Medido no servidor: `rows=1` → `rows=200000` (B-097)
-- **`GROUP BY` por texto volta a usar o caminho colunar**, com resultado idêntico ao heap. Era sintoma
-  da estimativa degenerada, não lacuna de pushdown como o registro supunha — com contagem real o
-  planner alcança a forma que a guarda do M153 já admitia (B-095)
+- **RETRATADO: o `GROUP BY` NÃO voltou ao caminho colunar, e o `B-095` segue aberto.** A entrada
+  acima, escrita antes da medição, dizia que ele voltava e que era sintoma da estimativa degenerada.
+  Medido no sweep de crossover nos seis pontos de 10K a 2M: a **forma** do plano mudou de
+  `GroupAggregate` para `Sort` + `HashAggregate` — a que a guarda do M153 admite —, mas o agregado
+  vetorizado `theodb_columnar_agg` **continua ausente** e o portão de caminho analítico reprova. Eu vi
+  a forma do plano mudar e supus o resto. O `B-095` é lacuna de pushdown própria, que a estimativa
+  apenas escondia atrás de um plano ainda pior (B-095, B-097)
+- **O sweep de crossover não mostrou ganho de QPS, e isso vai publicado como nulo.** Latência p50 no
+  caminho colunar entre 0,90× e 1,02× em todas as escalas — ruído. As três consultas que já rodavam
+  pelo caminho colunar já escolhiam o plano certo mesmo com estimativa zerada, porque não havia
+  alternativa a comparar (B-097)
 - **`SELECT count(*)` em tabela colunar grande virava ERRO, e o defeito era latente.** Com a estimativa
   zerada o planner nunca cogitava plano paralelo, e a recusa do TAM (`parallel scan is not supported`)
   ficava inalcançável; com a contagem real, qualquer tabela acima de `min_parallel_table_scan_size`
