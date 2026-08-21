@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-91 items — **Open** 26 · **In flight** 4 · **Closed** 61
+91 items — **Open** 25 · **In flight** 5 · **Closed** 61
 
-### Open (26)
+### Open (25)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -92,7 +92,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-046`](#b-046--paridade-de-qps-com-o-pgvector-a-recall-casado-hoje-o-déficit-medido-é-163----) | Paridade de QPS com o pgvector a recall casado: hoje o déficit medido é 16,3% | `triaged` | — |
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `triaged` | — |
 | [`B-050`](#b-050--o-conserto-do-cliente-opensearch-é-do-upstream-e-o-fork-tem-saída-declarada----) | O conserto do cliente OpenSearch é do upstream, e o fork tem saída declarada | `triaged` | — |
-| [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `triaged` | — |
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela----) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `triaged` | — |
@@ -101,10 +100,11 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `triaged` | — |
 
-### In flight (4)
+### In flight (5)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
+| [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
@@ -2392,7 +2392,23 @@ performance de completude, exatamente a classe que o [[B-048]] persegue no produ
 recusou as três. E há um agravante de método: o `cycle-acceptance.md` já estabelece que **o veredito é
 computado por script a partir de artefato em disco, nunca asserido pelo agente** — o gate do `/goal` faz o
 oposto, julgando por leitura de prosa.
-status: triaged
+status: planned
+status_nota: 2026-08-20 — os quatro bullets fecharam, dois deles já estavam. **Bullet 1 já estava**:
+  `check_goal_met.py` lê o SISTEMA DE ARQUIVOS, e o docstring dele contrasta isso explicitamente com o
+  `/goal` embutido, que "julga o transcript com um modelo pequeno". O defeito descrito no item é do
+  embutido; este script é a substituição. **Bullet 3 já estava**: `max_blocks` mais o teto do próprio
+  CLI (9 bloqueios consecutivos), com a nota honesta de que o teto real é o do CLI e um `max_blocks`
+  grande é teatro. **Bullet 2 entrou agora**: `evaluate_backlog_items` — o par (registro de acceptance
+  + checkbox do ROADMAP) não tem como julgar objetivo expresso em ITENS, e este ecossistema é
+  backlog-driven desde que o `cycle-roadmap` foi aposentado. Foi esse descompasso que produziu os cinco
+  bloqueios. `killed` conta como fechado de propósito: matar um item é desfecho de sucesso, e exigir
+  `shipped` criaria o incentivo de enviar hipótese fraca em vez de matá-la. **Bullet 4 é parcial e
+  digo por quê**: o número histórico está PERDIDO — nem o registro de manutenção de 2026-08-13 nem
+  nenhum outro artefato capturou contagem ou tempo, e reconstruí-lo seria invenção. O estado passou a
+  gravar `first_block_at`/`last_block_at`, então da próxima vez o custo é calculável em vez de
+  lembrado. Corrigi também o texto do bloqueio, que dizia "o critério é a corrida de acceptance" — falso
+  para objetivo em itens, e um gate que descreve errado a própria condição é um gate que ninguém
+  consegue satisfazer de propósito.
 dod:
   - o gate lê **estado do repositório** (commits, artefatos em `knowledge-base/`, status no `BACKLOG.md`) e não
     a janela de conversa — provado por um caso em que o trabalho está commitado e a sessão encerra
