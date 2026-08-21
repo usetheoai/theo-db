@@ -159,3 +159,4 @@ Cada arquivo é uma medição com método, números e veredito. Subpastas: [arqu
 - [b055 — PgBouncer nos três modos](b055-pgbouncer-compat.md) — sob transaction e statement pooling o `ef_search` de um cliente aplica-se às buscas de outro; os contadores de `explain_scan`, medidos, **não** contaminam
 - [b049 — as diferenças de velocidade contra o rigor que exigimos da qualidade](b049-velocidade-sem-teste.md) — o b035 sobrevive com ±8,2% em vez da precisão que o número sugere; o b047 tem UMA corrida e não é testável
 - [b018 — o planner larga o HNSW na junção filtrada](b018-planner-hnsw-juncao.md) — a causa é o índice ocupar 680 páginas contra 382, não o modelo de custo; inclui a retratação de um controle meu que usava a versão errada do pgvector
+- [b046/b042 — a recall casado o déficit vai de 3,4% a 19,6%](b046-b042-fronteira-pgvector.md) — e é MENOR no alto recall; o build é 1,82× e não 3,6×, e nosso índice é menor que o do pgvector

@@ -13,6 +13,19 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **A recall casado o déficit contra o pgvector vai de 3,4% a 19,6%, e é MENOR no alto recall.**
+  Fronteira completa em SIFT1M com pgvector 0.8.6 e theodb 1.5.0 no **mesmo PostgreSQL 18.6**, mesma
+  máquina, mesmos parâmetros. Dois dos três pontos casam recall diretamente (quarta casa decimal):
+  em 0,9574 o déficit é **19,6%**, em **0,9890 é 3,4%**. O "16,3%" que registrávamos descreve um ponto
+  num corpus de 1536d/cosseno — aqui, em 128d/L2, o déficit **fecha conforme o recall sobe**, e o alto
+  recall é o regime que um RAG de produção usa. Nenhum ponto é paridade; o que muda é a magnitude e a
+  direção em que ela se move. (#B-046)
+- **O build do HNSW é 1,82× mais lento, não 3,6× — e a diferença era paridade de workers.** Com
+  `max_parallel_maintenance_workers=8` declarado nos dois lados (a medição original comparou contra o
+  default de 2 do pgvector): **142,0 s** contra **78,0 s**. E um eixo nunca medido corta a nosso favor:
+  nosso índice é **7,4% menor**, 724,1 MB contra 782,4 MB. (#B-042)
+
 ## [0.164.0] - 2026-08-21
 
 ### Added

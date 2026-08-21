@@ -1954,6 +1954,11 @@ source: discover-evolve
 evidence: medido em 2026-08-12 no droplet `g-16vcpu-64gb`, corpus `Performance1536D50K` (50.000 × 1536d, COSINE), decompondo `load_duration` do JSON do VectorDBBench. **A inserção está em paridade** — pgvector 18,80 s contra TheoDB 19,66 s (4%). **A construção do índice não:** pgvector **35,09 s**, TheoDB **125,09 s** e 122,85 s numa segunda corrida independente (1,8% entre elas). O caminho paralelo do TheoDB **foi usado** — o limiar é 4.096 nós (`ann/hnsw_parallel.rs:18`) e o corpus tem 50.000, com `available_parallelism()` = 16 threads no droplet. O pgvector usou **2** workers de manutenção (`max_parallel_maintenance_workers=2`, lido do log da corrida). Em segundos-de-thread para o mesmo grafo, a razão é **28,5×**.
 why_now: o que torna isto um achado e não uma escolha de projeto é a **ausência de troca**: o grafo mais barato do pgvector é também o **melhor**. No mesmo `ef_search=64` o pgvector entrega recall **0,9835** e o TheoDB **0,9600** — para casar recall o TheoDB precisa de `ef=128`, e é daí que sai o déficit de 16% de QPS já publicado. Ou seja, o custo aparece duas vezes: uma no tempo de build, outra na varredura. Enquanto for assim, "paridade de recall" é verdade apenas com o dobro de trabalho por consulta, e isso não está dito em lugar nenhum. O eixo para investigar está bloqueado pelo [[B-036]] — sem `m`/`ef_construction` ajustáveis, não é possível separar qualidade-de-grafo de eficiência-de-varredura por experimento.
 status: triaged
+medido_2026_08_21: **1,82× e não 3,6× — e a diferença é paridade de workers.** SIFT1M, ambos com
+  `max_parallel_maintenance_workers=8` DECLARADO (a evidência original mediu o pgvector com 2, o
+  default): theodb **142,0 s**, pgvector **78,0 s**. Sob a mesma contagem de workers a razão cai pela
+  metade. E um eixo que nunca tinha sido medido corta a nosso favor: **nosso índice é 7,4% MENOR** —
+  724,1 MB contra 782,4 MB para o mesmo corpus. `wiki/benchmarks/b046-b042-fronteira-pgvector.md`.
 dod:
   - o tempo de build é **decomposto por fase** com profiling real (seleção de vizinhos, descida, escrita de página) — não estimado —, e a fase dominante é nomeada com percentual
   - está medido se as 16 threads produzem trabalho útil ou contenção: build sequencial forçado (`THEODB_HNSW_PARALLEL_THRESHOLD` alto) contra paralelo, no mesmo corpus, com o speedup real reportado
@@ -2077,6 +2082,21 @@ source: human
 evidence: medido em 2026-08-12 no droplet `g-16vcpu-64gb`, `Performance1536D50K` (50.000 × 1536d, COSINE), publicado em `wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md`. A recall casado — **0,9829 do TheoDB contra 0,9835 do pgvector** — o pgvector faz **3.590,6 QPS** e o TheoDB **3.086,1**: déficit de **16,3%**. A origem é a mesma do [[B-042]] vista pelo outro lado: no mesmo `ef_search=64` o TheoDB entrega recall 0,9600 contra 0,9835, e precisa de `ef=128` para empatar — ou seja, **o dobro de candidatos por consulta**. Reprodutibilidade das duas corridas independentes em `ef=64`: 1,3% de QPS, 0,06% de recall.
 why_now: alvo declarado pelo owner em 2026-08-13 — **paridade com o pgvector**. Este é o número que a comparação pública mostra, e é distinto do [[B-042]]: aquele é o custo de **construir**, este é o custo de **consultar**. Podem ter a mesma causa (grafo pior exige mais varredura) ou causas independentes (varredura menos eficiente por candidato), e **a medição atual não separa as duas** — é exatamente o que o [[B-036]] destrava ao tornar `m`/`ef_construction` ajustáveis. Enquanto não separar, qualquer otimização é palpite.
 status: triaged
+medido_2026_08_21: **o déficit NÃO é constante, e é MENOR no alto recall.** Fronteira completa em
+  SIFT1M (1M × 128d, L2), pgvector 0.8.6 e theodb 1.5.0 no MESMO PostgreSQL 18.6, mesma máquina,
+  mesmos parâmetros, pelo benchmark registrado `vector/sift1m/frontier`:
+  .
+  | recall casado | theodb | pgvector | déficit |
+  |---|---|---|---|
+  | 0,9188 | ~585 QPS (interpolado) | 628,3 QPS | 7,4% |
+  | **0,9574** | 411,2 QPS (`ef=128`) | 491,7 QPS (`ef=64`) | **19,6%** |
+  | **0,9890** | 261,6 QPS (`ef=256`) | 270,4 QPS (`ef=128`) | **3,4%** |
+  .
+  Dois dos três casam DIRETAMENTE (quarta casa decimal), sem interpolação. O "16,3%" registrado
+  descreve um ponto num corpus de 1536d/cosseno; aqui, em 128d/L2, o déficit varia de 19,6% a **3,4%**
+  — e o alto recall, onde ele é menor, é o regime que um RAG de produção usa. Nenhum ponto é paridade:
+  o pgvector é mais rápido a recall casado em toda a faixa. O que muda é a magnitude, e ela FECHA
+  conforme o recall sobe. `wiki/benchmarks/b046-b042-fronteira-pgvector.md`.
 blocked_by: (nenhum — B-036 shipped em 2026-08-13, `cecd388`)
 dod:
   - o déficit é **decomposto**: quanto vem de qualidade de grafo (recall menor no mesmo `ef`) e quanto de eficiência de varredura (custo por candidato). Medido por experimento, não inferido
