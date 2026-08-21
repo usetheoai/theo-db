@@ -4113,10 +4113,15 @@ repo: theodb-bench
 suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-21. O `m186` publica nDCG@10 de **0,6269** no SciFact e declara tê-lo obtido somando scores por termo do lado de fora. Somar top-k por termo **trunca**: o documento que não entra no top-k de nenhum termo isolado, mas entraria no top-k combinado, é perdido. O adapter atual (`theodb-bench/src/adapters/postgres.py:1590`) já manda `query.text` inteiro numa chamada — o caminho correto existe e está pronto, e foi introduzido depois do m186 (`a8910c0`, 2026-08-17).
-why_now: o `0,6269` é citado como o número do pilar e é um PISO, não a medição. A correção não exige código novo — só re-rodar os dois corpora do m186 pelo adapter que já existe. Enquanto não for re-medido, publicamos um número que sabemos estar subestimado e não sabemos por quanto.
+why_now: o `0,6269` é citado como o número do pilar e é um PISO, não a medição. Enquanto não for re-medido, publicamos um número que sabemos estar subestimado e não sabemos por quanto.
 status: triaged
+custo_declarado: **não é um re-run.** Medido em 2026-08-21: `theodb-bench` não tem NENHUMA referência a
+  BEIR ou SciFact em `src/`, e não há manifesto em cache. O m186 rodou por script ad-hoc, fora do arnês —
+  o que o [[B-069]] já registra como o problema de método. Registrar o corpus (loader, qrels, nDCG@10) é a
+  maior parte do trabalho deste item; o adapter mandar a consulta inteira é a parte que já está pronta.
 dod:
-  - nDCG@10 re-medido nos dois corpora do m186 pelo adapter atual, com N corridas e IC (a ferramenta do [[B-049]])
+  - o corpus do BEIR (SciFact + o segundo do m186) registrado no arnês, com qrels e nDCG@10 — hoje não existe
+  - nDCG@10 re-medido pelo adapter atual, com N corridas e IC (a ferramenta do [[B-049]])
   - o conceito do m186 atualizado por acréscimo com o número novo e a diferença medida
   - se a diferença for nula, isso também é registrado — significa que o truncamento não mordia nesses corpora
 
