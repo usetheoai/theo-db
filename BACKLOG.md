@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-93 items — **Open** 17 · **In flight** 11 · **Closed** 65
+93 items — **Open** 16 · **In flight** 12 · **Closed** 65
 
-### Open (17)
+### Open (16)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -80,7 +80,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-006`](#b-006--colunar-43-queries-do-clickbench-medidas-a-suíte-completa-nunca----) | Colunar: 43 queries do ClickBench medidas, a suíte completa nunca | `raw` | — |
 | [`B-007`](#b-007--grafo-23-funções-expostas-e-nenhuma-medição-contra-peer-algum----) | Grafo: 23 funções expostas e nenhuma medição contra peer algum | `raw` | — |
 | [`B-008`](#b-008--lakehouse-4-funções-expostas-escala-e-formatos-nunca-medidos----) | Lakehouse: 4 funções expostas, escala e formatos nunca medidos | `raw` | — |
-| [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada----) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `raw` | — |
 | [`B-010`](#b-010--maturidade-zero-uso-real-e-é-o-gargalo-de-todos-os-pilares----) | Maturidade: zero uso real, e é o gargalo de todos os pilares | `raw` | — |
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
 | [`B-018`](#b-018--o-planner-não-alcança-o-hnsw-no-caminho-de-junção-mesmo-com-enable_seqscan--off----) | O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off` | `triaged` | — |
@@ -92,10 +91,11 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-093`](#b-093--o-ndcg-publicado-do-pilar-lexical-foi-medido-com-agregação-que-trunca-e-o-arnês-já-não-trunca----) | O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca | `triaged` | — |
 
-### In flight (11)
+### In flight (12)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
+| [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada----) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `planned` | — |
 | [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `planned` | — |
 | [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta----) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `planned` | — |
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `planned` | — |
@@ -559,9 +559,23 @@ domain: ai-surface
 repo: theo-db
 suggested_mode: review
 source: human
-evidence: none-yet
+evidence: 2026-08-21 — remedido, e METADE da premissa envelheceu. `rerank.rs` tem hoje **6** testes (todos de erro tipado sobre um `parse_*` puro) e `egress.rs` tem **5** (SSRF/allowlist). O buraco real era só `embed.rs`: **1** teste em 236 linhas, e seis caminhos de erro tipado inalcançáveis porque viviam depois do `post_json`.
 why_now: o M184 contou **1** teste em `embed.rs` e **1** em `rerank.rs` — os dois extremos inferiores do crate inteiro. É a superfície que faz egress HTTP para provedor externo, ou seja, a que mais tem modo de falha que teste unitário pega: timeout, 5xx, resposta malformada, credencial ausente. O M177 mediu a performance desse caminho; a robustez dele não.
-status: raw
+status: planned
+resultado: 2026-08-21 — `parse_embedding_data` extraído como função PURA (molde do `parse_rerank_results` do
+  irmão `rerank.rs`, que já resolvera o mesmo problema no mesmo crate), e os seis caminhos de erro tipado
+  passaram a ter teste que assere a MENSAGEM INTEIRA: `data` ausente, tamanho divergente (N-entra/N-sai),
+  índice fora de faixa, índice duplicado, vetor ausente, elemento não-numérico. Mais o caminho de entrada
+  (`validate_inputs` com NULL) e — o que mais importa e nenhum erro sinaliza — **resposta fora de ordem
+  mapeada por `index` e não por posição**, que sem teste sairia trocada em silêncio. Extração pura, sem
+  mudança de comportamento: **496 testes verdes**, `fmt` e `clippy` limpos.
+  RESSALVA DECLARADA: timeout, 5xx e credencial ausente NÃO estão cobertos — eles moram no `post_json`
+  (`http.rs`), não em `embed.rs`, e cobri-los exige um servidor HTTP de teste. O bullet 1 do DoD está
+  parcialmente entregue, e dizer o contrário seria a alegação de cobertura sem execução que este projeto
+  documenta como classe de defeito.
+  ACHADO DE PLATAFORMA: `#[pg_test]` gera símbolo ACHATADO por nome de teste, então nomes colidem entre
+  módulos — três dos meus batiam com os do `rerank.rs` e o link falhava com `symbol ... is already defined`.
+  Daí o prefixo `b009_embed_`.
 dod:
   - cada modo de falha do egress (timeout, 5xx, corpo malformado, credencial ausente) tem teste que assere o erro **tipado**, não apenas que lança
   - nenhum segredo aparece em log ou mensagem de erro — verificado por teste

@@ -13,6 +13,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Os seis caminhos de erro do `theodb.embed_batch` passaram a ter teste.** O mapeamento
+  resposta→saída vivia depois da chamada HTTP, o que tornava resposta malformada — `data` ausente,
+  tamanho divergente, índice fora de faixa, índice duplicado, vetor ausente, elemento não-numérico —
+  inalcançável por teste unitário: exercitá-la exigiria um provedor devolvendo cada forma. O parse foi
+  extraído como função pura (mesmo molde do `parse_rerank_results` do irmão `rerank.rs`) e cada caminho
+  assere a **mensagem inteira**, não apenas que lança. Entra também o caso que mais importa e que nenhum
+  erro sinaliza: resposta **fora de ordem** é mapeada por `index` e não por posição — com mapeamento por
+  posição os vetores sairiam trocados em silêncio. Extração pura, sem mudança de comportamento; 496
+  testes verdes. (#B-009)
+
 ### Fixed
 - **O planner larga o HNSW numa junção com filtro seletivo, e a causa é o nosso default de
   `ef_search`.** Reproduzido deterministicamente: com `WHERE d.tenant = 't1'` a ordem de junção inverte,
