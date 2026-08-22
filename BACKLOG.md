@@ -3100,7 +3100,7 @@ dod:
   - a superfície de compatibilidade (`USING hnsw` via shim `vector`) fica declarada como eixo **separado** e não
     medida por default: ela é a mesma engine pelo mesmo handler, então medi-la como se fosse a nativa não
     acrescenta informação e esconde qual superfície a corrida exercitou
-## B-065 — O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela   [ ]
+## B-065 — O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela   [x]
 
 domain: colunar
 repo: theodb-bench
@@ -3117,7 +3117,14 @@ why_now: o [[B-061]] entregou a suíte analítica e o portão de residência sob
 primeiro bullet do seu DoD (shape TPC-H) ficou **declarado e não feito** por esta razão. Sem isto, os números
 do concorrente para Q1/Q5/Q6/Q18 não têm onde ser respondidos com o mesmo shape — e responder com shape nosso
 mede outra coisa e chama de comparação.
-status: planned
+status: shipped
+verificacao_2026_08_21: os quatro bullets conferidos NO CÓDIGO do arnês, não na nota. (1)
+  `AnalyticalSchema` (`src/bench/tpch.py:46`) declara várias tabelas e as `ForeignKey` entre elas —
+  o sucessor do `AnalyticalTable` de tabela única — e `expected_tpch_answer` calcula a resposta da
+  junção em Python, sem consultar nenhum dos caminhos medidos. (2) `theodb-bench tpch` existe como
+  comando, com `--scale-factor` e `--seed`. (3) **Q5 fora de escopo com a razão no próprio código**
+  (`tpch.py:115`), nomeando as seis tabelas — declarada, não omitida. (4) gerador semeado
+  (`generate_tpch(scale_factor, seed)`), com validação de fator positivo. 22 testes passando.
 status_nota: 2026-08-21 — os quatro bullets fecharam no `theodb-bench` (workspace), aguardando release.
   Esquema multi-tabela com chaves, gerador semeado, **oráculo da junção calculado em Python**, SQL
   construído a partir do esquema, e o comando `theodb-bench tpch`. **Verificado contra um PostgreSQL
@@ -3131,7 +3138,7 @@ dod:
   - Q1, Q6 e Q18 do TPC-H registradas como suíte, com o mesmo shape que o concorrente publicou
   - Q5 registrada ou explicitamente declarada fora de escopo com a razão — seis junções não são um detalhe
   - o gerador de dados é semeado e reprodutível, e o fator de escala aparece no rótulo do bundle
-## B-066 — A contenção escrita×scan não é medível: não existe arnês concorrente   [ ]
+## B-066 — A contenção escrita×scan não é medível: não existe arnês concorrente   [x]
 
 domain: colunar
 repo: theodb-bench
@@ -3146,7 +3153,15 @@ em disco), porque foi exatamente aí que a avaliação independente mediu uma **
 **piorou** a contenção a SF100 (29% contra 16% do row store), contra empate a SF10 (13,5% ≈ 13,6%). É o único
 número do artigo em que o colunar do concorrente sai **pior**, e é portanto o mais interessante de responder —
 e o que não temos instrumento para medir. Ficou declarado e não feito no B-061.
-status: planned
+status: shipped
+verificacao_2026_08_21: os quatro bullets conferidos no código, não na nota. (1) `theodb-bench
+  contention` com `--readers`/`--writers` e p95/p99 por lado. (2) `p95_ratio`/`p99_ratio` — e aqui o
+  código **supera a DoD**: mantém o absoluto junto, de propósito, porque *"uma degradação de 1,8× sobre
+  2 ms não é a mesma notícia que sobre"* um valor grande. A razão sozinha esconde a escala. (3)
+  `--regime {memory-resident,exceeds-cache}` distingue os dois regimes no artefato. (4) o bullet pedia
+  que o arnês **recusasse** comparar contra baseline de outra sessão; o código resolve por
+  **construção** — os dois isolados são medidos primeiro e o concorrente depois, na mesma corrida, em
+  ordem declarada como deliberada. Impossível é mais forte que recusado. 10 testes passando.
 status_nota: 2026-08-21 — os quatro bullets fecharam no `theodb-bench` (workspace), aguardando release.
   **A premissa do item envelheceu e foi re-medida antes de construir**: quando ele foi registrado
   (2026-08-17) não havia executor concorrente nenhum; hoje existe (`load.run_load`, ThreadPoolExecutor)
