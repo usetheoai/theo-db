@@ -234,7 +234,7 @@ parser lia como 48 GB (base 1000). O mesmo texto ia para os dois lugares signifi
 diferentes, o cgroup ficava mais frouxo que a declaração, e o portão reprovava — com razão. O parser
 passou a seguir systemd e docker no sufixo simples.
 
-# As oito armadilhas — e a regra que torna a lista obsoleta
+# As nove armadilhas — e a regra que torna a lista obsoleta
 
 Medidas em 2026-08-21, provisionando do zero pela primeira vez em muito tempo. **Todas só aparecem em
 host limpo** — é por isso que passaram despercebidas: toda corrida anterior herdou estado.
@@ -331,6 +331,38 @@ host limpo** — é por isso que passaram despercebidas: toda corrida anterior h
    Da mesma família, no mesmo dia: `[ "$tam" -lt 33554432 ]` com `$tam` **vazio** é falso, então a
    guarda que recusava um regime de cache falso passava calada. **Uma guarda que não trata o caso
    degenerado não é guarda** — ela é uma linha que parece proteger.
+
+## 9. "Está pronto" lido do lugar errado responde sobre um servidor que vai ser jogado fora
+
+*Acrescentada em 2026-08-22, medida contra `google/alloydbomni:latest`.*
+
+O entrypoint da imagem oficial do PostgreSQL — e das que descendem dela — sobe um servidor
+**temporário** para rodar o init (criar o cluster, aplicar `CREATE EXTENSION`, os scripts de
+`docker-entrypoint-initdb.d`). Esse servidor **escuta só no socket unix**. Só depois ele é derrubado e o
+servidor real sobe, aí sim publicando o porto TCP.
+
+`docker exec <nome> pg_isready` fala pelo socket. Portanto ele responde **"accepting" durante o init**.
+Amostrado a cada 3 s:
+
+| t | `docker exec pg_isready` | TCP de fora | o que estava de pé |
+|---|---|---|---|
+| 18 s | **SIM** | não | o servidor **temporário** do init |
+| 21 s | não | não | o init derrubou o temporário |
+| 27 s | SIM | **SIM** | o servidor real |
+
+Um script que avança aos 18 s conversa com um servidor **que será descartado**. Um `ALTER SYSTEM`
+aplicado ali some junto com ele, sem erro e sem aviso — e a corrida seguinte mede a configuração
+default achando que mediu a configurada. Foi assim que o primeiro teste da função que liga o engine
+colunar do Omni falhou, e o erro estava escondido atrás de um `2>/dev/null`.
+
+**A forma:** o predicado respondia uma pergunta parecida com a que se quis fazer. "Há um postgres
+aceitando conexões?" tinha resposta SIM e era verdade. A pergunta era outra — "o servidor que vai
+receber meu trabalho está de pé?" — e essa só o TCP responde, porque só o servidor real publica o porto.
+
+**Achado colateral, e vale para escolher a máquina:** o Omni traz um watchdog de memória
+(`g_term_it.cc`) que **mata backends do próprio init** quando a memória aperta. Numa máquina de 15 GB
+com 5 disponíveis ele derrubou o init **2 segundos depois** de anunciar `database system is ready to
+accept connections`. No `g-16vcpu-64gb` não ocorre. O Omni não roda em máquina de desenvolvimento.
 
 # A regra, que vale mais que a lista
 
