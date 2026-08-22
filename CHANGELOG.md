@@ -14,6 +14,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Conceito de medição novo tem de declarar de onde o número veio (B-069).** O gate de bundles cobria
+  *"quem cita, cita algo que resolve"* e não cobria o caso de publicar um número **sem citação nenhuma** —
+  medido contra o próprio trabalho: o conceito `b102` publicou *911 ms contra 74 ms* obtidos com `psql` à mão,
+  sem bundle, e nada detectou. Exigir bundle de todo documento já havia sido recusado com razão (reprovaria 168
+  de 171, e gate que nunca passa alguém desliga); a catraca é a terceira via — o campo `procedencia:` passa a
+  ser obrigatório **só nos conceitos novos** (`generated.at >= 2026-08-22`), com dois valores: `arnes`, que
+  obriga a citar um bundle que resolve, ou `fora-do-arnes`, que é resposta **válida** — o que ela impede é a
+  fraqueza da medição ficar invisível para quem lê. Nada do acervo anterior é reprovado.
+
 - **`read_parquet` passa a ter teste de arquivo truncado, corrompido e vazio.** O `CLAUDE.md` trata
   crash de backend como severidade máxima, e esta função lê arquivo do sistema de arquivos do
   servidor — um arquivo pode chegar truncado por transferência interrompida, corrompido por disco, ou
