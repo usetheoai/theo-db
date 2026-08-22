@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-97 items — **Open** 14 · **In flight** 13 · **Closed** 70
+98 items — **Open** 13 · **In flight** 8 · **Closed** 77
 
-### Open (14)
+### Open (13)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -87,27 +87,21 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-095`](#b-095--group-by-por-texto-recusa-o-pushdown-colunar-e-a-guarda-está-certa----) | `GROUP BY` por TEXTO recusa o pushdown colunar, e a guarda está certa | `triaged` | — |
 | [`B-096`](#b-096--read_parquet-devolve-setof-jsonb-e-é-isso-que-custa-142----) | `read_parquet` devolve `SETOF jsonb`, e é isso que custa 142× | `triaged` | — |
-| [`B-097`](#b-097--o-tam-colunar-reporta-zero-linhas-ao-planner-e-o-analyze-não-amostra-nada----) | O TAM colunar reporta ZERO linhas ao planner, e o ANALYZE não amostra nada | `triaged` | — |
 
-### In flight (13)
+### In flight (8)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada----) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `planned` | — |
-| [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara----) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `planned` | — |
 | [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta----) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `planned` | — |
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `planned` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
-| [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela----) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `planned` | — |
-| [`B-066`](#b-066--a-contenção-escritascan-não-é-medível-não-existe-arnês-concorrente----) | A contenção escrita×scan não é medível: não existe arnês concorrente | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
-| [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo----) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `planned` | — |
-| [`B-093`](#b-093--o-ndcg-publicado-do-pilar-lexical-foi-medido-com-agregação-que-trunca-e-o-arnês-já-não-trunca----) | O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca | `planned` | — |
 
-### Closed (70)
+### Closed (77)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -134,6 +128,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-029`](#b-029--a-esteira-invoca-arquivos-que-não-existem-mais-e-o-produto-ficou-sem-nenhum-portão-de-verificação---x) | A esteira invoca arquivos que não existem mais, e o produto ficou sem nenhum portão de verificação | `shipped` | — |
 | [`B-030`](#b-030--um-produto-três-extensões-o-umbrella-theodb-é-resíduo-de-uma-migração-que-terminou---x) | Um produto, três extensões: o umbrella `theodb` é resíduo de uma migração que terminou | `shipped` | — |
 | [`B-031`](#b-031--10283-linhas-de-cadeia-de-upgrade-duplicada-para-um-gate-que-não-roda-mais-e-instalações-que-não-existem---x) | 10.283 linhas de cadeia de upgrade duplicada, para um gate que não roda mais e instalações que não existem | `shipped` | — |
+| [`B-032`](#b-032--2872-operações-inseguras-sem-bloco-explícito-concentradas-na-área-que-o-projeto-chama-de-mais-cara---x) | 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara | `shipped` | — |
 | [`B-033`](#b-033--o-tipo-vector-own-code-não-tem--e-cinco-padrões-de-app-pgvector-quebram---x) | O tipo `vector` own-code não tem `=`, e cinco padrões de app pgvector quebram | `shipped` | — |
 | [`B-034`](#b-034--set-hnswef_search-é-aceito-em-silêncio-e-não-faz-nada-meia-compatibilidade-que-produz-medição-plana---x) | `SET hnsw.ef_search` é aceito em silêncio e não faz nada: meia compatibilidade que produz medição plana | `shipped` | — |
 | [`B-035`](#b-035--cliente-theodb-no-vectordbbench-em-fork-para-medir-contra-pgvector-e-alloydb-no-mesmo-arnês---x) | Cliente `theodb` no VectorDBBench, em fork, para medir contra pgvector e AlloyDB no mesmo arnês | `shipped` | — |
@@ -159,6 +154,8 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default---x) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `shipped` | — |
 | [`B-063`](#b-063--o-assert_index_used-que-o-b-060-citou-como-o-padrão-certo-é-código-morto-e-está-quebrado---x) | O `assert_index_used` que o B-060 citou como o padrão certo é código morto, e está quebrado | `shipped` | — |
 | [`B-064`](#b-064--o-eixo-theodb-do-próprio-arnês-não-constrói-índice-ele-emite-a-sintaxe-do-pgvector-contra-os-ams-do-theodb---x) | O eixo `theodb` do próprio arnês não constrói índice: ele emite a sintaxe do pgvector contra os AMs do TheoDB | `shipped` | — |
+| [`B-065`](#b-065--o-contrato-analítico-é-de-uma-tabela-só-e-a-comparação-que-o-sota-publicou-é-tpc-h-multi-tabela---x) | O contrato analítico é de uma tabela só, e a comparação que o SOTA publicou é TPC-H multi-tabela | `shipped` | — |
+| [`B-066`](#b-066--a-contenção-escritascan-não-é-medível-não-existe-arnês-concorrente---x) | A contenção escrita×scan não é medível: não existe arnês concorrente | `shipped` | — |
 | [`B-067`](#b-067--o-orquestrador-de-11-fases-só-sabe-rodar-workload-vetorial-então-nenhuma-suíte-analítica-pode-ser-registrada---x) | O orquestrador de 11 fases só sabe rodar workload vetorial, então nenhuma suíte analítica pode ser registrada | `shipped` | — |
 | [`B-068`](#b-068--a-carga-de-dataset-do-arnês-é-linha-a-linha-e-é-o-gargalo-de-toda-medição-em-escala---x) | A carga de dataset do arnês é linha-a-linha, e é o gargalo de toda medição em escala | `shipped` | — |
 | [`B-070`](#b-070--carga-de-1m-por-executemany-domina-o-tempo-de-toda-corrida-em-escala---x) | Carga de 1M por `executemany` domina o tempo de toda corrida em escala | `shipped` | — |
@@ -179,8 +176,12 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-088`](#b-088--o-gate-de-changelog-checa-presença-de-arquivo-não-de-entrada---x) | O gate de CHANGELOG checa presença de ARQUIVO, não de ENTRADA | `shipped` | — |
 | [`B-089`](#b-089--um-vetor-zero-na-tabela-derruba-a-busca-por-cosseno-no-índice-hnsw-no-ef_search-default---x) | Um vetor zero na tabela derruba a busca por cosseno no índice HNSW, no `ef_search` default | `shipped` | — |
 | [`B-090`](#b-090--94-arquivos-de-teste-sob-claude-e-nenhum-workflow-os-roda---x) | 94 arquivos de teste sob `.claude/` e nenhum workflow os roda | `shipped` | — |
+| [`B-091`](#b-091--o-lint-de-copy-pública-tem-falso-positivo-e-falso-negativo-medidos-no-mesmo-arquivo---x) | O lint de copy pública tem falso positivo e falso negativo, medidos no mesmo arquivo | `shipped` | — |
 | [`B-092`](#b-092--o-índice-hnsw-ocupa-178-o-disco-do-pgvector-e-é-isso-que-tira-o-índice-do-plano---x) | O índice HNSW ocupa 1,78× o disco do pgvector, e é isso que tira o índice do plano | `killed` | — |
+| [`B-093`](#b-093--o-ndcg-publicado-do-pilar-lexical-foi-medido-com-agregação-que-trunca-e-o-arnês-já-não-trunca---x) | O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca | `shipped` | — |
 | [`B-094`](#b-094--o-arnês-é-65-mais-lento-que-o-pgbench-sob-carga-e-é-ele-que-publicamos---x) | O arnês é 6,5× mais lento que o `pgbench` sob carga, e é ele que publicamos | `killed` | — |
+| [`B-098`](#b-098--provisionar-um-host-de-bench-leva-20-min-e-falha-por-capacidade-ausente-uma-por-vez---x) | Provisionar um host de bench leva 20 min e falha por capacidade ausente, uma por vez | `shipped` | — |
+| [`B-097`](#b-097--o-tam-colunar-reporta-zero-linhas-ao-planner-e-o-analyze-não-amostra-nada---x) | O TAM colunar reporta ZERO linhas ao planner, e o ANALYZE não amostra nada | `shipped` | — |
 
 <!-- BACKLOG-INDEX:END -->
 
@@ -1597,7 +1598,7 @@ dod:
 > não há instalação em campo.
 
 > **2026-08-12 — implementado, não shipped.** Ciclo completo executado (DISCOVER→PLAN→IMPLEMENT→CODE-QUALITY→REVIEW→RELEASE). Review `READY_TO_MERGE`; release `PR_OPEN_AWAITING_APPROVAL` — o merge espera aprovação humana (PR #228 → #227), por diretiva do owner de um merge só quando o banco estiver SOTA level. **`shipped` só depois do merge**, e é por isso que este bloco não diz `shipped`.
-## B-032 — 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara   [ ]
+## B-032 — 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1605,7 +1606,18 @@ suggested_mode: review
 source: human
 evidence: medido em 2026-08-12 na saída de `cargo pgrx test pg18` (suíte completa, 446 testes). O build emite **1.460 avisos**, e o lint dominante é `unsafe_op_in_unsafe_fn` (E0133) com **2.872 ocorrências**: 1.874 chamadas a função `unsafe`, 932 desreferências de ponteiro cru, 54 usos de `static` mutável e 4 acessos a campo de `union`. A concentração é o que assusta — `src/am/columnar_agg.rs` (1.236), `src/am/page/mod.rs` (354), `src/am/columnar.rs` (286), `src/am/customscan.rs` (140), `src/am/build_stream.rs` (140), `src/am/page/ivf.rs` (138). Para contraste medido na mesma saída: código morto (`never used/read/constructed`) aparece **10** vezes. O eixo de risco deste repositório não é código morto.
 why_now: o `CLAUDE.md` do projeto declara que `unsafe`/FFI/pgrx é "a classe de defeito mais cara já encontrada em review — panic atravessando C, `TopMemoryContext`, MVCC do SPI", e manda abrir o acervo de pgrx antes de tocar em qualquer bloco `unsafe`. O que o lint diz é exatamente sobre enxergar esses blocos: dentro de uma `unsafe fn`, sem `unsafe {}` explícito, **o corpo inteiro é implicitamente inseguro** — some a capacidade de apontar QUAIS linhas são as perigosas. Num banco onde um panic atravessando a fronteira C derruba o backend do usuário, essa visibilidade é a diferença entre revisar 12 linhas marcadas e reler 1.236. O sinal já é emitido pelo compilador a cada build e ninguém o consome; ele não foi descoberto por ferramenta nova, foi descoberto por alguém ter lido a saída.
-status: planned
+status: shipped
+verificacao_2026_08_21: os quatro bullets conferidos EXECUTANDO. (1) ADR-0065 existe
+  (`wiki/decisions/0065-b032-unsafe-op-marcado-por-operacao.md`). (2) os dois arquivos densos foram
+  tratados — 795 de 1.444. (3) **o gate é o próprio compilador**: `#![deny(unsafe_op_in_unsafe_fn)]`
+  está em `lib.rs:38` e o `cargo check` passa com **zero** ocorrências do lint; o número não pode
+  crescer em silêncio porque crescer QUEBRA a build. (4) a marcação é anotação, não semântica.
+  .
+  Vale preservar os três achados do item, porque dois derrubaram premissas dele: o número registrado
+  era o **DOBRO** do real (`cargo pgrx test` compila o crate duas vezes); o `cargo fix` do rustc
+  envolveria o CORPO inteiro da função, satisfazendo o lint sem entregar a visibilidade que o item
+  existe para obter — aplicado, medido e **revertido**; e a densidade medida (2,3% a 28,8%) derrubou a
+  hipótese de adiar os arquivos densos, porque mesmo no pior caso a revisão estreita 3,5×.
 resultado: 2026-08-21 — **1.444 → 0**, e o lint virou erro no crate (`#![deny(unsafe_op_in_unsafe_fn)]`).
   Primeiro achado: o número registrado era o DOBRO do real — 1.444, não 2.872, e os seis arquivos citados
   batem em precisamente metade, porque `cargo pgrx test` compila o crate duas vezes. Segundo: o `cargo fix`
