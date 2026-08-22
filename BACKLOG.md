@@ -68,12 +68,13 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-101 items — **Open** 11 · **In flight** 5 · **Closed** 85
+102 items — **Open** 12 · **In flight** 5 · **Closed** 85
 
-### Open (11)
+### Open (12)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
+| [`B-102`](#b-102--os-números-colunares-publicados-foram-medidos-com-um-recurso-opt-in-ligado-e-nada-diz-isso----) | Os números colunares publicados foram medidos com um recurso opt-in LIGADO, e nada diz isso | `triaged` | — |
 | [`B-002`](#b-002--o-objetivo-definir-e-medir-o-que-torna-o-theodb-atrativo-já-que-superar-todo-benchmark-é-impossível----) | O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível | `raw` | — |
 | [`B-003`](#b-003--vetorial-o-teto-é-o-build-não-a-busca--100m-nunca-foi-atingido----) | Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido | `raw` | — |
 | [`B-005`](#b-005--híbrido-o-ganho-da-fusão-sobre-o-vetorial-puro-é-estatisticamente-não-significativo----) | Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo | `raw` | — |
@@ -562,6 +563,26 @@ dod:
 > caíram no caminho até aqui**, todas pela mesma causa: eu media com `grep "time:"` e nunca olhava o
 > valor de retorno, então lia tempo-de-erro como latência. O oráculo do arnês existe exatamente para
 > isso — *"uma resposta errada produzida rápido não é uma consulta rápida"* — e eu media à mão sem ele.
+
+## B-102 — Os números colunares publicados foram medidos com um recurso opt-in LIGADO, e nada diz isso   [ ]
+
+domain: arnes
+repo: theodb-bench
+suggested_mode: review
+source: human
+evidence: medido em 2026-08-22. O `TheoDBAdapter` liga `theodb.enable_columnar_agg = on` para o caminho colunar (`adapters/postgres.py:1474`), e o recurso é **opt-in, default OFF** — o próprio código do `theodb_rs` o documenta como *"opt-in until benchmarked"*. Medido na mesma tabela e no mesmo servidor: `count(*)` a 2M custa **911 ms** no default e **74 ms** com ele ligado — **12×**. **E o bundle não registra essa GUC**: `system.json` → `effective_configuration` traz 14 entradas (`shared_buffers`, `work_mem`, `maintenance_work_mem`, `fsync`, …) e **nenhuma** delas é a de sessão que o adapter aplicou. Dos **53** conceitos que publicam número colunar em `wiki/benchmarks/`, apenas **3** mencionam a GUC — e num deles a menção foi acrescentada hoje, ao corrigir outro item.
+why_now: **o leitor de um artefato não tem como saber em que configuração o número foi obtido.** O adapter documenta a razão de ligar o recurso — *"medir o colunar sem o pushdown é um caminho que já se sabe perder para o heap, e publicar isso como 'nosso colunar' seria o mesmo erro que medir o ScaNN com o quantizador AH desligado"* — e a razão é boa. O defeito não é ligar: é ligar **sem registrar**. O próprio arnês nomeia essa classe pelo lado oposto: *"uma GUC que vem desligada e silenciosamente continua desligada é como uma medição acaba descrevendo uma configuração que ninguém rodou"*. Ligada e não registrada produz o mesmo dano, na direção inversa: descreve uma configuração que o **usuário** não roda.
+status: triaged
+dod:
+  - `effective_configuration` do bundle passa a incluir as GUCs de sessão que o adapter aplicou, com o valor VERIFICADO no servidor — não o valor que ele pediu
+  - existe teste que reprova um bundle cujo `ANALYTICAL_SESSION_SETTINGS` não apareça no artefato, pela mesma lógica do `_verified_search_settings` que já existe para os botões de busca
+  - os conceitos que publicam número colunar recebem, por acréscimo, a declaração da configuração — ou a checagem que os obriga a tê-la
+  - fica declarado em `wiki/` que o default do produto NÃO é a configuração medida, e qual é a diferença: 911 ms contra 74 ms a 2M linhas
+
+> Registrado em 2026-08-22 ao responder "quais os gaps maiores". Encontrado por acidente: eu media
+> `count(*)` à mão e batia com o publicado por 264×, e a explicação era esta. **O `B-101` morreu por
+> premissa errada justamente porque eu não sabia que as duas medições rodavam em configurações
+> diferentes** — se o artefato dissesse, eu teria sabido em cinco segundos.
 
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
