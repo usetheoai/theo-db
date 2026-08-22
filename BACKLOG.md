@@ -68,12 +68,13 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-98 items — **Open** 11 · **In flight** 5 · **Closed** 82
+99 items — **Open** 12 · **In flight** 5 · **Closed** 82
 
-### Open (11)
+### Open (12)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
+| [`B-099`](#b-099--o-modo-de-contenção-não-emite-bundle-e-uma-leitura-colunar-mede-250-o-esperado----) | O modo de contenção não emite bundle, e uma leitura colunar mede 250× o esperado | `triaged` | — |
 | [`B-002`](#b-002--o-objetivo-definir-e-medir-o-que-torna-o-theodb-atrativo-já-que-superar-todo-benchmark-é-impossível----) | O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível | `raw` | — |
 | [`B-003`](#b-003--vetorial-o-teto-é-o-build-não-a-busca--100m-nunca-foi-atingido----) | Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido | `raw` | — |
 | [`B-005`](#b-005--híbrido-o-ganho-da-fusão-sobre-o-vetorial-puro-é-estatisticamente-não-significativo----) | Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo | `raw` | — |
@@ -422,6 +423,28 @@ por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão 
 >
 > O checkbox já estava `[x]` e o status `raw` — inconsistência que ninguém pegou porque nada compara os dois.
 > A última release é a **v0.158.0**; os PRs #227 e #228 seguem aguardando aprovação humana. `shipped` exige `RELEASED` (`rules/cycle-backlog.md § Status transitions`), então o estado correto é `planned`.
+## B-099 — O modo de contenção não emite bundle, e uma leitura colunar mede 250× o esperado   [ ]
+
+domain: colunar
+repo: theodb-bench
+suggested_mode: bug
+source: human
+evidence: medido em 2026-08-22 na primeira corrida bem-sucedida do executor de contenção (`g-16vcpu-64gb`, nyc1, 10M linhas em `theodb_columnar`, 125 MiB, 4 leitores × 2 escritores). **`SELECT count(*)` no caminho colunar deu p95 de 16 700 ms (memory-resident) e 15 938 ms (exceeds-cache).** A mesma consulta no mesmo caminho mediu **12,5 ms a 2M linhas** no sweep do [[B-096]] (`benchmarks/artifacts/b096/`), o que projeta ~60 ms a 10M — **250× de diferença**. Descartado custo de conexão: `src/load.py:186` documenta e implementa `make_client` uma vez POR CLIENTE, não por operação. Além disso, `theodb-bench contention` imprime JSON em stdout e **não escreve bundle**, então a corrida foi destruída com os dados só num log local.
+why_now: os dois se somam para produzir o pior resultado possível — um número que parece medição e não é publicável. A anomalia de leitura torna a razão de contenção ininterpretável (não dá para dizer "sem contenção" quando o baseline está 250× fora), e a ausência de bundle a torna não-publicável pelo [[B-069]] mesmo que fosse. O bullet 3 do [[B-058]] depende dos dois.
+status: triaged
+nota_status: nasce `triaged` e não `raw` porque a medição já aconteceu — o gate cobrou isso, e com
+  razão: `raw` significa hipótese não medida, e aqui há número, artefato e uma causa descartada.
+dod:
+  - a latência de leitura é explicada e medida: ou o `count(*)` colunar É lento nesse shape (e o número vira achado próprio), ou há defeito no caminho da contenção — com `file:line`
+  - o modo contenção emite bundle válido, como as suítes registradas, para que o número saia do arnês (invariante do [[B-069]])
+  - a ordem isolado-antes-de-concorrente é reavaliada OU o viés de cache que ela introduz é declarado no artefato: hoje o isolado paga cache frio e o concorrente colhe quente, e a razão de escrita de 0,16 é melhor explicada por isso que por contenção
+
+> Registrado em 2026-08-22 pela tentativa do bullet 3 do [[B-058]]. **Antes de chegar aqui foram
+> necessários três consertos no executor** — sonda com id inexistente, carga falhando em silêncio, e
+> fábrica entregando cliente sem conexão —, todos no [[B-066]], que havia sido fechado por inspeção de
+> código e testes contra o adapter `fake`. A anomalia de 250× só apareceu quando o caminho finalmente
+> executou de ponta a ponta.
+
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
 domain: acervo
@@ -2802,6 +2825,38 @@ separado; **(b)** a população automática do store **falha em silêncio** num 
 restart, porque o recomendador usa histórico de consultas que está vazio: o store fica vazio, todo plano cai
 para heap, e a corrida não mede nada sem erro nem aviso.
 status: triaged
+tentativa_bullet3_2026_08_22: **o executor de contenção rodou pela primeira vez e produziu números —
+  que eu NÃO vou publicar.** Registro do que aconteceu, porque a tentativa vale mais que o silêncio.
+  .
+  Foram necessários TRÊS consertos no executor, cada um escondendo o próximo: a sonda nomeava uma
+  consulta que adapter real nenhum conhece; a carga falhava em silêncio (`psql` sem `ON_ERROR_STOP`);
+  e a fábrica entregava cliente sem conexão (`measure_contention` usa o que a fábrica devolve e não o
+  inicia). Os três estavam no [[B-066]], que eu havia fechado por inspeção de código e testes verdes —
+  testes que usavam o adapter `fake`, sem as restrições que quebram.
+  .
+  Números obtidos (10M linhas, 125 MiB, 4 leitores × 2 escritores, `g-16vcpu-64gb`):
+  .
+  | regime | lado | razão p95 | isolado p95 | concorrente p95 |
+  |---|---|---|---|---|
+  | memory-resident | leitura | 0,979 | **16 700 ms** | 16 353 ms |
+  | memory-resident | escrita | 0,160 | 11,6 ms | 1,9 ms |
+  | exceeds-cache | leitura | 1,002 | **15 938 ms** | 15 969 ms |
+  | exceeds-cache | escrita | 0,920 | 1,8 ms | 1,7 ms |
+  .
+  **POR QUE NÃO PUBLICO — dois defeitos de método, e o primeiro é uma anomalia sem diagnóstico:**
+  .
+  1. **Leitura em ~16 s.** O mesmo `count(*)` no caminho colunar mediu **12,5 ms a 2M linhas** no sweep
+     do [[B-096]]; a 10M seriam ~60 ms. Estou **250× fora**, e não sei por quê. Descartei custo de
+     conexão (`run_load` cria o cliente uma vez por cliente, não por operação). Publicar "sem contenção
+     em leitura" com a leitura nesse regime seria publicar um número que não sei explicar.
+  .
+  2. **A escrita "melhora" sob concorrência (0,16), e a ordem explica isso melhor que a contenção.** O
+     executor roda os isolados **primeiro** — decisão deliberada e documentada —, então o isolado paga
+     cache frio e o concorrente colhe cache quente. O viés vai exatamente na direção do número obtido.
+  .
+  **E uma lacuna de processo:** o modo contenção imprime JSON em stdout e **não escreve bundle**, então
+  a coleta não achou nada e o droplet foi destruído com os dados só no log local. Pelo [[B-069]], número
+  sem bundle não é publicável — o que confirma, por outro caminho, que estes não devem ser publicados.
 lancado_2026_08_21: bullets 2 e 4 **lançados em `v0.166.0`** (medição) e `theodb-bench v0.6.0`
   (o portão). O item segue `triaged` porque os bullets 1 e 3 continuam abertos — e o motivo está
   escrito abaixo, não é esquecimento.
