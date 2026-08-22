@@ -33,6 +33,19 @@ from pathlib import Path
 DISCO = re.compile(r"\bbenchmarks/artifacts/[A-Za-z0-9._/\-]+")
 NO_GIT = re.compile(r"\bgit:([0-9a-f]{7,40}\^?):([A-Za-z0-9._/\-]+)")
 
+#: A catraca (B-069). O gate acima cobre "quem cita, cita algo que resolve"; ele nao cobre o caso
+#: de publicar um numero SEM citacao nenhuma — que e o que eu fiz em 2026-08-22, horas depois de
+#: listar o B-069 entre os itens abertos. Sem citacao nao ha o que reprovar.
+#:
+#: Exigir bundle de todo documento foi recusado, com razao: reprovaria 168 de 171, e gate que nunca
+#: passa alguem desliga. A catraca e a terceira via — exigir a DECLARACAO so dos conceitos NOVOS.
+#: Nada do passado e reprovado, e a escolha deixa de poder ser tacita.
+CATRACA_DESDE = "2026-08-22"
+PROCEDENCIAS = ("arnes", "fora-do-arnes")
+GERADO_EM = re.compile(r"^generated:.*?\bat:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})", re.M)
+PROCEDENCIA = re.compile(r"^procedencia:\s*(\S+)\s*$", re.M)
+E_MEDICAO = re.compile(r"^type:\s*Measurement\s*$", re.M)
+
 
 def _clone_raso(raiz: Path) -> bool:
     r = subprocess.run(
@@ -75,11 +88,49 @@ def verificar(raiz: Path, alvo: Path) -> tuple[list[tuple[Path, str, str]], int]
                 quebradas.append((f, m.group(0), "nao resolve no git"))
         # Só depois de tirar as formas `git:` é que sobra o que de fato aponta para disco.
         sem_git = NO_GIT.sub("", texto)
+        cita_disco = False
         for m in DISCO.finditer(sem_git):
             caminho = m.group(0).rstrip(".,;:)`'\"")
+            cita_disco = True
             if not (raiz / caminho).exists():
                 quebradas.append((f, caminho, "nao existe em disco"))
+        quebradas.extend(_catraca(raiz, f, texto, cita_disco))
     return quebradas, nao_verificaveis
+
+
+def _catraca(raiz: Path, f: Path, texto: str, cita_disco: bool) -> list[tuple[Path, str, str]]:
+    """Conceito `Measurement` novo tem de DECLARAR de onde o numero veio.
+
+    Nao e retroativo, e essa e a diferenca entre esta catraca e a proposta que a nota do item
+    corretamente recusou: um conceito anterior a `CATRACA_DESDE` passa sem nada.
+    """
+    if not E_MEDICAO.search(texto):
+        return []
+    gerado = GERADO_EM.search(texto)
+    if gerado is None or gerado.group(1) < CATRACA_DESDE:
+        return []
+    proc = PROCEDENCIA.search(texto)
+    if proc is None:
+        return [
+            (
+                f,
+                "procedencia",
+                f"conceito Measurement de {gerado.group(1)} sem campo `procedencia:` "
+                f"(use um de: {', '.join(PROCEDENCIAS)})",
+            )
+        ]
+    valor = proc.group(1)
+    if valor not in PROCEDENCIAS:
+        return [(f, "procedencia", f"valor '{valor}' invalido (use um de: {', '.join(PROCEDENCIAS)})")]
+    if valor == "arnes" and not (cita_disco or NO_GIT.search(texto)):
+        return [
+            (
+                f,
+                "procedencia: arnes",
+                "diz que saiu do arnes e nao cita bundle algum — a alegacao sem o artefato",
+            )
+        ]
+    return []
 
 
 def main() -> int:

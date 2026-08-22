@@ -4,6 +4,7 @@ title: b096 — o custo do read_parquet são DOIS round-trips por texto, e só u
 description: Medido no arnês, seis escalas × quatro consultas: remover a travessia Arrow→NDJSON→Value dá 1,085× mediano, não a ordem de grandeza estimada. O segundo round-trip vive no pgrx (JsonB→texto→jsonb_in) e é inescapável enquanto o retorno for jsonb — o que confirma a hipótese do item e refuta a minha leitura dela.
 tags: [colunar, parquet, jsonb, pgrx, b-096, honest-negative, retratacao]
 item: B-096
+procedencia: arnes
 generated: { by: claude-code/opus-5, at: 2026-08-22T03:00:00Z }
 ---
 

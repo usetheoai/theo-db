@@ -1,9 +1,10 @@
 ---
 type: Measurement
 title: b102 — os números colunares publicados descrevem uma configuração que o default do produto não entrega
-description: "O arnês liga theodb.enable_columnar_agg (opt-in, default OFF) para medir o colunar com pushdown — corretamente — e verificava a GUC sem registrá-la em lugar nenhum. Medido: count(*) a 2M custa 911 ms no default contra 74 ms com ela ligada, 12×. O system.json de uma corrida publicada traz 14 GUCs de servidor e nenhuma de sessão; dos 53 conceitos que publicam número colunar, 3 mencionavam a GUC."
+description: "O arnês liga theodb.enable_columnar_agg (opt-in, default OFF) para medir o colunar com pushdown — corretamente — e verificava a GUC sem registrá-la em lugar nenhum. A diferença medida (911 ms contra 74 ms, 12×) saiu de psql à mão e NÃO é publicável sob o B-069; o achado, porém, não depende dela — o artefato não declarar a configuração se verifica abrindo o artefato. O system.json de uma corrida publicada traz 14 GUCs de servidor e nenhuma de sessão; dos 53 conceitos que publicam número colunar, 3 mencionavam a GUC."
 tags: [colunar, arnes, medicao, honest-negative, integridade, b-102]
 item: B-102
+procedencia: fora-do-arnes
 generated: { by: claude-code/opus-5, at: 2026-08-22T16:00:00Z }
 ---
 
@@ -22,6 +23,39 @@ Mesma tabela, mesmo servidor, mesma sessão, variando **um** botão:
 
 **12×.** Consistente com a medição anterior a 1M (1407 ms → 108 ms, 13×), registrada em comentário de
 teste desde a construção do portão de residência.
+
+# Procedência dos números desta página — e o que ela custa a eles
+
+*Acrescentado no mesmo dia, algumas horas depois, ao revisar o [[B-069]] contra o próprio trabalho.*
+
+**Os 911 ms e os 74 ms não saíram do arnês.** Foram obtidos com `psql` à mão, num servidor que eu
+tinha de pé por outra razão, durante a investigação do [[B-099]]. Não há bundle, não há
+`validation.json`, não há registro de ambiente, e **ninguém consegue reproduzi-los a partir de um
+artefato** — que é precisamente o requisito que o [[B-069]] impõe a número publicável, e que o
+`docs/methodology/PUBLICATION.md` do arnês declara desde 2026-08-20.
+
+Escrevi esta página horas depois de listar o B-069 entre os itens abertos, e ainda assim publiquei
+um número por fora. Registro isto aqui em vez de reescrever a página em silêncio, porque uma
+retratação apagada é a forma mais cara de erro que este projeto conhece.
+
+**O que a procedência fraca derruba, e o que ela não derruba:**
+
+| Afirmação | Como foi obtida | Vale? |
+|---|---|---|
+| O `system.json` traz 14 GUCs de servidor e nenhuma de sessão | leitura direta do artefato publicado | **sim** — o artefato está no disco e qualquer um o abre |
+| O `manifest.json` não cita a GUC | idem | **sim** |
+| 3 de 53 conceitos colunares mencionam a GUC | `grep` sobre `wiki/benchmarks/` | **sim** |
+| O adapter verificava e descartava a verificação | leitura do código, agora coberta por 4 testes | **sim** |
+| **A diferença é de 911 ms para 74 ms (12×)** | **`psql` à mão, sem bundle** | **não é publicável** |
+
+**O achado desta página não depende do número.** Ele é: *o artefato não declara a configuração*, e isso
+se verifica abrindo o artefato. A **magnitude** do que a configuração decide é que está mal-medida — e
+ela importa, porque é o que diz ao leitor se a omissão é grave ou trivial.
+
+**Fica em aberto no [[B-069]]:** repetir a comparação `enable_columnar_agg` off × on por
+`theodb-bench run`, com bundle, e substituir a linha da tabela acima **por acréscimo**, mantendo a
+versão de hoje visível. Até lá, a ordem de grandeza é indicativa e está dita como tal — não é
+"aproximadamente 12×", é *"medido por fora, e por isso não publicável"*.
 
 # O que estava errado, e o que não estava
 

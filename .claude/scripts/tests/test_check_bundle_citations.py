@@ -179,3 +179,73 @@ def test_a_shallow_clone_reports_what_it_could_not_check(tmp_path: Path) -> None
     assert r.returncode == 0, r.stdout
     assert "NAO foram verificadas" in r.stdout, "o que nao foi checado tem de ser DITO"
     assert "BLOQUEADO" not in r.stdout
+
+
+# ---------------------------------------------------------------- a catraca (B-069)
+#
+# O gate acima cobre "quem cita, cita algo que resolve". Ele NAO cobre o caso que eu
+# mesmo produzi em 2026-08-22, horas depois de listar o B-069 entre os itens abertos:
+# publicar um numero SEM citacao nenhuma. Sem citacao nao ha o que reprovar, e o
+# documento passa exatamente como passaria um numero saido do arnes.
+#
+# A nota do item recusou, com razao, exigir bundle de todo documento — reprovaria 168 de
+# 171 e um gate que nunca passa alguem desliga. A catraca e a terceira via: exigir a
+# DECLARACAO de procedencia so dos conceitos novos. Nao reprova nada do passado, e
+# obriga a escolha a ficar visivel em vez de tacita.
+
+
+def _conceito(alvo: Path, nome: str, *, data: str, procedencia: str | None, corpo: str = "") -> None:
+    alvo.mkdir(parents=True, exist_ok=True)
+    proc = f"procedencia: {procedencia}\n" if procedencia else ""
+    (alvo / nome).write_text(
+        f"---\ntype: Measurement\ntitle: t\n{proc}"
+        f"generated: {{ by: x, at: {data} }}\n---\n\n{corpo}\n",
+        encoding="utf-8",
+    )
+
+
+def test_conceito_antigo_sem_procedencia_continua_passando() -> None:
+    """A catraca nao e retroativa — esse era o motivo real da recusa anterior."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        raiz = Path(d)
+        _conceito(raiz / "w", "velho.md", data="2026-08-01", procedencia=None)
+        r = _roda(raiz, raiz / "w")
+        assert r.returncode == 0, r.stdout
+        assert "procedencia" not in r.stdout.lower()
+
+
+def test_conceito_novo_sem_procedencia_e_reprovado() -> None:
+    """O caso que eu produzi: numero publicado, nenhuma citacao, nada detecta."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        raiz = Path(d)
+        _conceito(raiz / "w", "novo.md", data="2026-08-22", procedencia=None)
+        r = _roda(raiz, raiz / "w")
+        assert r.returncode != 0, r.stdout
+        assert "procedencia" in r.stdout.lower()
+
+
+def test_conceito_novo_declarado_fora_do_arnes_passa() -> None:
+    """Declarar que o numero nao e publicavel e uma resposta valida — e a honesta."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        raiz = Path(d)
+        _conceito(raiz / "w", "novo.md", data="2026-08-22", procedencia="fora-do-arnes")
+        r = _roda(raiz, raiz / "w")
+        assert r.returncode == 0, r.stdout
+
+
+def test_conceito_novo_que_diz_arnes_precisa_citar_bundle_que_resolve() -> None:
+    """Dizer 'arnes' sem bundle e a alegacao sem artefato que este gate ja existia para pegar."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        raiz = Path(d)
+        _conceito(raiz / "w", "novo.md", data="2026-08-22", procedencia="arnes")
+        r = _roda(raiz, raiz / "w")
+        assert r.returncode != 0, r.stdout
+        assert "arnes" in r.stdout.lower() or "bundle" in r.stdout.lower()

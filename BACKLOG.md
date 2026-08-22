@@ -3762,6 +3762,27 @@ dod:
   - existe um teste ou gate que detecta número citado em documento sem bundle correspondente — a alegação e o
     artefato deixam de poder divergir
   - `docs/` do `theodb-bench` documenta que medição fora do arnês não é publicável, com a razão
+status_nota_2026_08_22: **Uma catraca fecha o buraco que o bullet 3 deixou — e o buraco foi medido
+  contra mim mesmo.** O gate de 2026-08-21 cobre *"quem cita, cita algo que resolve"*. Ele **não**
+  cobre publicar um número **sem citação nenhuma** — e foi isso que eu fiz horas depois de listar este
+  item entre os abertos: `wiki/benchmarks/b102-configuracao-nao-declarada.md` publicou *911 ms contra
+  74 ms* medidos com `psql` à mão, sem bundle, e **nada detectou**, porque sem citação não há o que
+  reprovar.
+  .
+  A nota de 2026-08-20 recusou, corretamente, exigir bundle de todo documento — reprovaria 168 de 171,
+  e gate que nunca passa alguém desliga. A catraca é a terceira via: **exigir a DECLARAÇÃO só dos
+  conceitos novos** (`generated.at >= 2026-08-22`). Nada do passado reprova, e a escolha deixa de poder
+  ser tácita. Campo `procedencia:` no frontmatter, com dois valores: `arnes` — e então tem de citar um
+  bundle que resolve — ou `fora-do-arnes`, que é uma resposta **válida e honesta**, não uma derrota.
+  .
+  Implementado em `.claude/scripts/check_bundle_citations.py` (estendido, não duplicado), 4 testes
+  novos, 11 no total. Aplicado aos dois conceitos de hoje: `b096` → `arnes` (cita 3 bundles), `b102` →
+  `fora-do-arnes`, com uma seção de procedência que separa o que a medição fraca derruba (a magnitude
+  de 12×) do que ela não derruba (o artefato não declarar a configuração, verificável abrindo o
+  artefato).
+  .
+  **Bullets 1 e 2 seguem abertos** e continuam exigindo servidor vivo.
+
 ## B-070 — Carga de 1M por `executemany` domina o tempo de toda corrida em escala   [x]
 
 domain: arnes
