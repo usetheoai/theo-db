@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-98 items — **Open** 12 · **In flight** 5 · **Closed** 81
+98 items — **Open** 11 · **In flight** 5 · **Closed** 82
 
-### Open (12)
+### Open (11)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -85,7 +85,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-057`](#b-057--o-veredito-locked-do-north-star-mediu-a-biblioteca-scann-e-o-concorrente-é-um-índice-do-postgresql----) | O veredito LOCKED do North Star mediu a BIBLIOTECA ScaNN, e o concorrente é um índice do PostgreSQL | `triaged` | — |
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
-| [`B-095`](#b-095--group-by-por-texto-recusa-o-pushdown-colunar-e-a-guarda-está-certa----) | `GROUP BY` por TEXTO recusa o pushdown colunar, e a guarda está certa | `triaged` | — |
 
 ### In flight (5)
 
@@ -97,7 +96,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
 
-### Closed (81)
+### Closed (82)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -180,6 +179,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-093`](#b-093--o-ndcg-publicado-do-pilar-lexical-foi-medido-com-agregação-que-trunca-e-o-arnês-já-não-trunca---x) | O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca | `shipped` | — |
 | [`B-094`](#b-094--o-arnês-é-65-mais-lento-que-o-pgbench-sob-carga-e-é-ele-que-publicamos---x) | O arnês é 6,5× mais lento que o `pgbench` sob carga, e é ele que publicamos | `killed` | — |
 | [`B-098`](#b-098--provisionar-um-host-de-bench-leva-20-min-e-falha-por-capacidade-ausente-uma-por-vez---x) | Provisionar um host de bench leva 20 min e falha por capacidade ausente, uma por vez | `shipped` | — |
+| [`B-095`](#b-095--group-by-por-texto-recusa-o-pushdown-colunar-e-a-guarda-está-certa---x) | `GROUP BY` por TEXTO recusa o pushdown colunar, e a guarda está certa | `shipped` | — |
 | [`B-096`](#b-096--read_parquet-devolve-setof-jsonb-e-é-isso-que-custa-142---x) | `read_parquet` devolve `SETOF jsonb`, e é isso que custa 142× | `shipped` | — |
 | [`B-097`](#b-097--o-tam-colunar-reporta-zero-linhas-ao-planner-e-o-analyze-não-amostra-nada---x) | O TAM colunar reporta ZERO linhas ao planner, e o ANALYZE não amostra nada | `shipped` | — |
 
@@ -4557,7 +4557,7 @@ dod:
 > ao servidor uma falha de consulta — o servidor estava de pé e saudável o tempo todo. Um portão que
 > aponta o culpado errado custa mais que a falha que ele reporta.
 
-## B-095 — `GROUP BY` por TEXTO recusa o pushdown colunar, e a guarda está certa   [ ]
+## B-095 — `GROUP BY` por TEXTO recusa o pushdown colunar, e a guarda está certa   [x]
 
 domain: colunar
 repo: theo-db
@@ -4577,7 +4577,29 @@ why_now: o sweep de crossover de 2026-08-21 reprovou `group_by_category` nas sei
 >
 > Evidência: [[b058-crossover-colunar]] § Re-medido em 2026-08-21.
 
-status: triaged
+status: shipped
+resultado_2026_08_22: **FECHADO pelo [[B-097]], e as duas notas anteriores deste bloco estavam erradas.**
+  Medido com CONTROLE nas duas imagens, `theodb.enable_columnar_agg=on` em ambas:
+  .
+  | | sem a correção de estimativa | com a correção |
+  |---|---|---|
+  | estimativa | `rows=1` | `rows=200000` |
+  | plano `GROUP BY <text>` | `GroupAggregate → Sort → Seq Scan` | **`Sort → Custom Scan (theodb_columnar_agg)`** |
+  .
+  A guarda do M153 exige um `Sort` **acima** para admitir chave de texto, e era a estimativa degenerada
+  que impedia o planner de produzir essa forma — o `Sort` saía **abaixo**, como ordenação de entrada do
+  `GroupAggregate`. **A saída nº 2 hipotetizada por este item funcionou**, e a nº 1 (emitir em ordem de
+  collation) não precisa ser implementada.
+  .
+  **O QUE ME ENGANOU, e é o achado que sobrevive ao fechamento:** o agregado vetorizado é **opt-in,
+  default OFF** — o código o documenta como *"opt-in until benchmarked"*. O arnês mede a configuração
+  **default**, então o portão de caminho analítico reporta o agregado como ausente nos seis pontos do
+  sweep. **Eu li "ausente" como "ainda bloqueado"; significa "não habilitado".** Um portão que responde
+  *"não está ligado"* parece responder *"não funciona"*, e a diferença decide se alguém vai implementar
+  uma saída que já existe — que era exatamente o que eu ia fazer.
+  .
+  Bullet 3 (limite declarado em `wiki/`) continua entregue, agora com a correção: o limite real é que o
+  recurso vem desligado, não que ele falhe.
 verificacao_2026_08_22: **bullets 1 e 3 fechados; o 2 é o que mantém o item aberto.**
   .
   **Bullet 1 (medido se, com estatística real, o planner escolhe `HashAggregate`)**: SIM — medido nos

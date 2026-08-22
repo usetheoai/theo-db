@@ -57,20 +57,42 @@ Não é bug de omissão. Nosso executor emite grupos em ordem **byte-wise**; o P
 de **collation**. Trocar o plano sem um `Sort` completo acima devolveria a ordem errada — resposta
 incorreta, rápida. **Recusar é o comportamento certo.**
 
-## O que o [[B-097]] mudou, e o que não mudou
+## CORREÇÃO (2026-08-22): o [[B-097]] FECHOU isto, e a seção abaixo está errada
+
+Medido com controle nas duas imagens, `theodb.enable_columnar_agg=on` nas duas:
+
+| | sem a correção de estimativa | com a correção |
+|---|---|---|
+| estimativa | `rows=1` | `rows=200000` |
+| plano do `GROUP BY <text>` | `GroupAggregate → Sort → Seq Scan` | **`Sort → Custom Scan (theodb_columnar_agg)`** |
+
+**O pushdown engata.** A guarda do M153 exige um `Sort` **acima** para admitir chave de texto, e era a
+estimativa degenerada que impedia o planner de produzir essa forma — o `Sort` saía **abaixo**, como
+ordenação de entrada do `GroupAggregate`.
+
+**O que me enganou, e vale mais que a correção:** o recurso é **opt-in, default OFF** — o código o
+documenta como *"opt-in until benchmarked"*. O arnês mede a configuração **default**, então seu portão
+de caminho analítico reporta o agregado como ausente. Eu li isso como *"ainda bloqueado"*; significa
+*"não habilitado"*. **Um portão que responde "não está ligado" parece responder "não funciona"**, e a
+diferença decide se alguém vai implementar uma saída que já existe.
+
+A seção abaixo foi escrita antes deste controle e fica preservada, riscada, porque foi publicada.
+
+## ~~O que o [[B-097]] mudou, e o que não mudou~~ (ERRADO — ver acima)
 
 O [[B-095]] previa duas saídas: emitir em ordem de collation, **ou** fazer o planner produzir a forma
 com `Sort` acima. O [[B-097]] entregou a segunda — o planner passou a ver a contagem real e a forma do
 plano mudou nos seis pontos do sweep, de `GroupAggregate` para `Sort` + `HashAggregate`.
 
-**E o `theodb_columnar_agg` continua ausente.** Medido nos seis pontos, de 10K a 2M linhas: o portão de
-caminho analítico reprova exatamente como antes. **A forma do plano não era o bloqueio, ou não era o
-único** — o que refuta a saída nº 2 hipotetizada pelo próprio item. A saída nº 1, emitir em ordem de
-collation, segue sem exploração.
+~~**E o `theodb_columnar_agg` continua ausente.** Medido nos seis pontos, de 10K a 2M linhas: o portão
+de caminho analítico reprova exatamente como antes. A forma do plano não era o bloqueio.~~ **ERRADO.**
+O portão reprova porque o recurso está desligado por default, não porque o pushdown falhe. Com ele
+ligado, engata. Ver a correção acima.
 
 ## Para quem usa
 
-Uma tabela `USING theodb_columnar` agregada por coluna de texto **não recebe o agregado vetorizado**,
+Uma tabela `USING theodb_columnar` agregada por coluna de texto recebe o agregado vetorizado **desde que
+`theodb.enable_columnar_agg` esteja ligado** — ele é opt-in e vem desligado. Com ele desligado,
 e a diferença medida entre as duas formas é de ordem de grandeza (13× no docstring do adapter). Se a
 carga agrupa por texto e o ganho colunar importa, a chave inteira é o caminho que hoje entrega — e
 isto está escrito aqui em vez de ser descoberto lendo um `EXPLAIN`.

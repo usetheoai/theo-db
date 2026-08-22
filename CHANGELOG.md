@@ -62,7 +62,19 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   `*tuples = 0.0` fixo, então uma tabela de 200.000 linhas era planejada como se tivesse ~1: forma de
   agregação, ordem de junção e caminho de acesso escolhidos às cegas. Passa a somar `row_count` de
   `columnar.stripe`, metadado que já existia. Medido no servidor: `rows=1` → `rows=200000` (B-097)
-- **RETRATADO: o `GROUP BY` NÃO voltou ao caminho colunar, e o `B-095` segue aberto.** A entrada
+- **RETRATAÇÃO DA RETRATAÇÃO — o `B-097` FECHOU o `B-095`, e a entrada abaixo está errada.** Medido em
+  2026-08-22 com controle nas duas imagens: com `theodb.enable_columnar_agg=on`, a imagem **sem** a
+  correção de estimativa dá `GroupAggregate → Sort → Seq Scan` (sem pushdown, com o `Sort` ABAIXO); a
+  imagem **com** a correção dá **`Sort → Custom Scan (theodb_columnar_agg)`** — o pushdown engata, com
+  o `Sort` ACIMA, que é exatamente o que a guarda do M153 exige. **A saída nº 2 hipotetizada pelo
+  `B-095` funcionou.**
+  .
+  O que me enganou: o recurso é **opt-in e default OFF** (documentado no código como *"opt-in until
+  benchmarked"*), e o arnês mede a configuração **default**. Li o "ausente" do portão de caminho como
+  *"ainda bloqueado"* quando ele significa *"não habilitado"* — duas coisas diferentes, e o portão
+  responde a segunda (B-095, B-097)
+- **RETRATADO — e esta entrada, por sua vez, estava errada; ver acima. Preservada porque foi publicada.**
+  ~~O `GROUP BY` NÃO voltou ao caminho colunar, e o `B-095` segue aberto.~~ A entrada
   acima, escrita antes da medição, dizia que ele voltava e que era sintoma da estimativa degenerada.
   Medido no sweep de crossover nos seis pontos de 10K a 2M: a **forma** do plano mudou de
   `GroupAggregate` para `Sort` + `HashAggregate` — a que a guarda do M153 admite —, mas o agregado

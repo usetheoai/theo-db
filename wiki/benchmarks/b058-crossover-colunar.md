@@ -132,7 +132,17 @@ E a forma do plano do `GROUP BY` mudou nos **seis** pontos da faixa:
 
 É exatamente a forma que a guarda do M153 já admitia e que o planner cego nunca alcançava.
 
-## Mas o `GROUP BY` continua recusado — e eu havia afirmado o contrário
+## CORREÇÃO (2026-08-22): o `GROUP BY` NÃO continua recusado
+
+Medido com controle nas duas imagens, com `theodb.enable_columnar_agg=on`: sem a correção de
+estimativa o plano é `GroupAggregate → Sort → Seq Scan`; com ela é **`Sort → Custom Scan
+(theodb_columnar_agg)`**. **O pushdown engata, e o [[B-095]] fecha pelo [[B-097]].**
+
+O portão de caminho analítico reprova nesta corrida porque o recurso é **opt-in e default OFF**, e o
+arnês mede a configuração default. *"Não está ligado"* e *"não funciona"* são respostas diferentes, e
+o portão dá a primeira — eu li como a segunda. A seção abaixo fica preservada, riscada.
+
+## ~~Mas o `GROUP BY` continua recusado — e eu havia afirmado o contrário~~ (ERRADO — ver acima)
 
 **RETRATAÇÃO.** Ao entregar o [[B-097]] eu escrevi, no `CHANGELOG.md` e na mensagem do commit
 `a5abb85`, que o [[B-095]] *"fecha junto"* e que o `GROUP BY` voltava ao caminho colunar. **A medição
