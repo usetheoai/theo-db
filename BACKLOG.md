@@ -432,6 +432,25 @@ source: human
 evidence: medido em 2026-08-22 na primeira corrida bem-sucedida do executor de contenção (`g-16vcpu-64gb`, nyc1, 10M linhas em `theodb_columnar`, 125 MiB, 4 leitores × 2 escritores). **`SELECT count(*)` no caminho colunar deu p95 de 16 700 ms (memory-resident) e 15 938 ms (exceeds-cache).** A mesma consulta no mesmo caminho mediu **12,5 ms a 2M linhas** no sweep do [[B-096]] (`benchmarks/artifacts/b096/`), o que projeta ~60 ms a 10M — **250× de diferença**. Descartado custo de conexão: `src/load.py:186` documenta e implementa `make_client` uma vez POR CLIENTE, não por operação. Além disso, `theodb-bench contention` imprime JSON em stdout e **não escreve bundle**, então a corrida foi destruída com os dados só num log local.
 why_now: os dois se somam para produzir o pior resultado possível — um número que parece medição e não é publicável. A anomalia de leitura torna a razão de contenção ininterpretável (não dá para dizer "sem contenção" quando o baseline está 250× fora), e a ausência de bundle a torna não-publicável pelo [[B-069]] mesmo que fosse. O bullet 3 do [[B-058]] depende dos dois.
 status: triaged
+estreitamento_2026_08_22: **o produto está inocente, e a anomalia é do caminho do arnês.** Medido
+  localmente em contêiner, mesma imagem, mesma forma de tabela, mesmas 10M linhas:
+  .
+  | | |
+  |---|---|
+  | `count(*)` local, 3 repetições | **14,3 / 7,6 / 5,3 ms** |
+  | idem com 4 clientes simultâneos | **6,6 / 5,6 / 7,0 / 5,5 ms** |
+  | o mesmo pelo executor de contenção, no droplet | **15 727 ms (p50)** |
+  .
+  ~2000× de diferença, e a concorrência **não** degrada nada localmente. Além disso o bundle mostra
+  `response_p50 == service_p50` e `queueing_seconds_total = 0`: os 15,7 s são **tempo de operação**, não
+  fila do gerador de carga. A consulta não é lenta; o caminho que a executa no arnês é.
+  .
+  **Segundo sinal, não explicado:** a tabela do droplet reportou **125 MiB** para 10M linhas; a local,
+  com a mesma carga e a mesma forma, **31 MB**. Quatro vezes maior com a mesma contagem — pode ser
+  layout de stripe diferente, e pode ser a mesma causa da lentidão. Não medi o suficiente para afirmar.
+  .
+  O que isso muda na DoD: o bullet 1 deixa de ser *"ou o `count(*)` colunar É lento nesse shape"* — ele
+  não é. Resta localizar, com `file:line`, o que o caminho do arnês faz a mais.
 nota_status: nasce `triaged` e não `raw` porque a medição já aconteceu — o gate cobrou isso, e com
   razão: `raw` significa hipótese não medida, e aqui há número, artefato e uma causa descartada.
 dod:
