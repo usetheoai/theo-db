@@ -3933,6 +3933,25 @@ status_nota_2026_08_22d: **CORREÇÃO da nota anterior, medida — e ela custou 
   o teto real e **parar de usar a palavra "publicável"** para o que sai dele. **A (c) é grátis e
   honesta, e as outras duas dependem do dono.**
 
+status_nota_2026_08_22e: **Bullet 2 FECHADO, e o defeito era pior do que o bullet supunha.** Ele pedia
+  que o efeito do `pre_reordering_num_neighbors` fosse *"uma varredura registrada, não um script"*. Ele
+  **estava registrado** — e não varria: o comentário acima das suítes ScaNN afirma que *"a profundidade de
+  rerank é varrida junto com as folhas, porque as duas se trocam entre si"*, e o código declarava
+  `(100,)`, **um valor**, nas duas suítes SIFT.
+  .
+  Uma fronteira com a profundidade fixa **não é uma fronteira**: é um ponto de operação reportado três
+  vezes sob rótulos diferentes do outro botão. Agora `(25, 100, 400)` e `(100, 400)`, com os valores
+  enquadrando a faixa útil contra `k=10` — profundidade abaixo de `k` não significa nada.
+  .
+  **Nota sobre o teste, porque a diferença importa:** o primeiro que escrevi era largo demais e reprovou
+  uma terceira suíte, `vector/synthetic/scann-sweep`. Conferida, ela **não mente** — a descrição nomeia o
+  botão que varre e não promete o outro. Estreitei o teste para "quem **declara** a profundidade tem de
+  varrê-la, e **alguma** suíte registrada tem de varrer". Isso é corrigir o teste, não afrouxar o portão.
+  .
+  **Estado dos quatro bullets:** 2 ✅ · 3 ✅ (catraca de procedência) · 4 ✅ (docs) ·
+  **1 ❌ estruturalmente bloqueado** pelo teto de `cpu_governor`. O item só fecha por decisão do dono
+  entre as três saídas nomeadas acima.
+
 ## B-070 — Carga de 1M por `executemany` domina o tempo de toda corrida em escala   [x]
 
 domain: arnes
