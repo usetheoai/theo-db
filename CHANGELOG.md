@@ -13,6 +13,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Os modos de falha do egress passam a ter teste contra um servidor HTTP real e local.** O próprio
+  código declarava a lacuna — *"We can't hit a live 4xx hermetically"* — e ela fecha com a saída de
+  allowlist que o projeto já documenta (`theodb.egress_allowlist = '127.0.0.1'`) mais um `TcpListener`
+  da stdlib, **sem dependência nova**. Cobertos: 5xx com retentativas esgotadas falhando com erro
+  tipado que **nomeia o status**; credencial ausente virando 401 **sem retentativa e sem abrir o
+  disjuntor** (um 4xx é a nossa requisição sendo recusada, não o provedor caindo); e a chave de API
+  **nunca** aparecendo na mensagem de erro. **Timeout NÃO está coberto** e a razão vai declarada:
+  custaria ~90 s de suíte, e cobri-lo exigiria tornar o timeout injetável — mudar produção para servir
+  teste (B-009)
+
 ### Changed
 - **O README passa a dizer que `halfvec` e `sparsevec` NÃO existem**, ao lado do que é suportado. A
   decisão de deixá-los fora é o ADR-0063 e já estava registrada; o que faltava era a limitação

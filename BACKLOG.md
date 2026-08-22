@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-98 items — **Open** 13 · **In flight** 7 · **Closed** 78
+98 items — **Open** 13 · **In flight** 6 · **Closed** 79
 
 ### Open (13)
 
@@ -88,11 +88,10 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-095`](#b-095--group-by-por-texto-recusa-o-pushdown-colunar-e-a-guarda-está-certa----) | `GROUP BY` por TEXTO recusa o pushdown colunar, e a guarda está certa | `triaged` | — |
 | [`B-096`](#b-096--read_parquet-devolve-setof-jsonb-e-é-isso-que-custa-142----) | `read_parquet` devolve `SETOF jsonb`, e é isso que custa 142× | `triaged` | — |
 
-### In flight (7)
+### In flight (6)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
-| [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada----) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `planned` | — |
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `planned` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
@@ -100,13 +99,14 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
 
-### Closed (78)
+### Closed (79)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-001`](#b-001--cargo-pgrx-test-não-roda-o-binário-de-teste-morre-em-currentmemorycontext---x) | `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext` | `shipped` | — |
 | [`B-004`](#b-004--lexical-qualidade-de-recuperação-nunca-foi-medida-contra-um-corpus-público---x) | Lexical: qualidade de recuperação nunca foi medida contra um corpus público | `shipped` | — |
 | [`B-007`](#b-007--grafo-23-funções-expostas-e-nenhuma-medição-contra-peer-algum---x) | Grafo: 23 funções expostas e nenhuma medição contra peer algum | `shipped` | — |
+| [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada---x) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `shipped` | — |
 | [`B-011`](#b-011--o-vector-join-do-hnsw-perde-exatamente-um-elemento---x) | O vector-join do HNSW perde exatamente um elemento | `shipped` | — |
 | [`B-012`](#b-012--as-outras-18-falhas-da-suíte-seguem-sem-causa-capturada---x) | As outras 18 falhas da suíte seguem sem causa capturada | `shipped` | — |
 | [`B-013`](#b-013--a-suíte-não-roda-no-ci-então-a-próxima-regressão-espera-meses---x) | A suíte não roda no CI, então a próxima regressão espera meses | `shipped` | — |
@@ -573,7 +573,7 @@ dod:
   - os 6 testes existentes efetivamente executados (depende de B-001)
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `lakehouse-escala-formatos`).
-## B-009 — AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada   [ ]
+## B-009 — AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada   [x]
 
 domain: ai-surface
 repo: theo-db
@@ -581,7 +581,20 @@ suggested_mode: review
 source: human
 evidence: 2026-08-21 — remedido, e METADE da premissa envelheceu. `rerank.rs` tem hoje **6** testes (todos de erro tipado sobre um `parse_*` puro) e `egress.rs` tem **5** (SSRF/allowlist). O buraco real era só `embed.rs`: **1** teste em 236 linhas, e seis caminhos de erro tipado inalcançáveis porque viviam depois do `post_json`.
 why_now: o M184 contou **1** teste em `embed.rs` e **1** em `rerank.rs` — os dois extremos inferiores do crate inteiro. É a superfície que faz egress HTTP para provedor externo, ou seja, a que mais tem modo de falha que teste unitário pega: timeout, 5xx, resposta malformada, credencial ausente. O M177 mediu a performance desse caminho; a robustez dele não.
-status: planned
+status: shipped
+verificacao_2026_08_21: os três bullets fechados, e a ressalva do `resultado` acima — *"timeout, 5xx e
+  credencial ausente NÃO estão cobertos"* — deixou de valer para dois dos três. **Bullet 1**: 5xx com
+  retentativas esgotadas e credencial ausente (401) agora têm teste contra servidor HTTP **real e
+  local**. O próprio `http.rs` declarava a lacuna (*"We can't hit a live 4xx hermetically"*) e ela fecha
+  com a saída de allowlist que o projeto já documenta mais um `TcpListener` da stdlib — degrau 2 da
+  parsimony ladder, sem dependência nova. **Bullet 2**: teste assere que a chave de API não aparece na
+  mensagem de erro, nem o prefixo `sk-`. **Bullet 3**: o 401 prova o fail-fast declarado — 4xx não
+  reteta e **não abre o disjuntor**, porque um 4xx é a nossa requisição sendo recusada e punir o
+  provedor por erro nosso faria a próxima chamada legítima falhar sem razão.
+  .
+  **TIMEOUT segue sem cobertura, declarado e não escondido**: `HTTP_TIMEOUT_SECS = 30` × `MAX_RETRIES = 2`
+  custaria ~90 s de suíte, e cobri-lo exigiria tornar o timeout injetável — mudança de produção para
+  servir teste, que não cabe neste item. 505 testes passando, 0 falhando.
 resultado: 2026-08-21 — `parse_embedding_data` extraído como função PURA (molde do `parse_rerank_results` do
   irmão `rerank.rs`, que já resolvera o mesmo problema no mesmo crate), e os seis caminhos de erro tipado
   passaram a ter teste que assere a MENSAGEM INTEIRA: `data` ausente, tamanho divergente (N-entra/N-sai),
