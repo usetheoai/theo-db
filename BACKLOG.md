@@ -68,14 +68,12 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-101 items — **Open** 13 · **In flight** 5 · **Closed** 83
+101 items — **Open** 11 · **In flight** 5 · **Closed** 85
 
-### Open (13)
+### Open (11)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
-| [`B-099`](#b-099--o-modo-de-contenção-não-emite-bundle-e-uma-leitura-colunar-mede-250-o-esperado----) | O modo de contenção não emite bundle, e uma leitura colunar mede 250× o esperado | `triaged` | — |
-| [`B-101`](#b-101--count-no-colunar-custa-1-s-por-milhão-de-linhas-e-isso-contradiz-um-número-publicado-por-264----) | `count(*)` no colunar custa ~1 s por milhão de linhas, e isso contradiz um número publicado por 264× | `triaged` | — |
 | [`B-002`](#b-002--o-objetivo-definir-e-medir-o-que-torna-o-theodb-atrativo-já-que-superar-todo-benchmark-é-impossível----) | O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível | `raw` | — |
 | [`B-003`](#b-003--vetorial-o-teto-é-o-build-não-a-busca--100m-nunca-foi-atingido----) | Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido | `raw` | — |
 | [`B-005`](#b-005--híbrido-o-ganho-da-fusão-sobre-o-vetorial-puro-é-estatisticamente-não-significativo----) | Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo | `raw` | — |
@@ -98,12 +96,14 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
 
-### Closed (83)
+### Closed (85)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-001`](#b-001--cargo-pgrx-test-não-roda-o-binário-de-teste-morre-em-currentmemorycontext---x) | `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext` | `shipped` | — |
+| [`B-099`](#b-099--o-modo-de-contenção-não-emite-bundle-e-uma-leitura-colunar-mede-250-o-esperado---x) | O modo de contenção não emite bundle, e uma leitura colunar mede 250× o esperado | `shipped` | — |
 | [`B-100`](#b-100--select-count-em-tabela-colunar-grande-ainda-falha-a-correção-do-b-097-está-incompleta---x) | `SELECT count(*)` em tabela colunar grande AINDA falha: a correção do B-097 está incompleta | `killed` | — |
+| [`B-101`](#b-101--count-no-colunar-custa-1-s-por-milhão-de-linhas-e-isso-contradiz-um-número-publicado-por-264---x) | `count(*)` no colunar custa ~1 s por milhão de linhas, e isso contradiz um número publicado por 264× | `killed` | — |
 | [`B-004`](#b-004--lexical-qualidade-de-recuperação-nunca-foi-medida-contra-um-corpus-público---x) | Lexical: qualidade de recuperação nunca foi medida contra um corpus público | `shipped` | — |
 | [`B-007`](#b-007--grafo-23-funções-expostas-e-nenhuma-medição-contra-peer-algum---x) | Grafo: 23 funções expostas e nenhuma medição contra peer algum | `shipped` | — |
 | [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada---x) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `shipped` | — |
@@ -425,7 +425,7 @@ por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão 
 >
 > O checkbox já estava `[x]` e o status `raw` — inconsistência que ninguém pegou porque nada compara os dois.
 > A última release é a **v0.158.0**; os PRs #227 e #228 seguem aguardando aprovação humana. `shipped` exige `RELEASED` (`rules/cycle-backlog.md § Status transitions`), então o estado correto é `planned`.
-## B-099 — O modo de contenção não emite bundle, e uma leitura colunar mede 250× o esperado   [ ]
+## B-099 — O modo de contenção não emite bundle, e uma leitura colunar mede 250× o esperado   [x]
 
 domain: colunar
 repo: theodb-bench
@@ -433,7 +433,29 @@ suggested_mode: bug
 source: human
 evidence: medido em 2026-08-22 na primeira corrida bem-sucedida do executor de contenção (`g-16vcpu-64gb`, nyc1, 10M linhas em `theodb_columnar`, 125 MiB, 4 leitores × 2 escritores). **`SELECT count(*)` no caminho colunar deu p95 de 16 700 ms (memory-resident) e 15 938 ms (exceeds-cache).** A mesma consulta no mesmo caminho mediu **12,5 ms a 2M linhas** no sweep do [[B-096]] (`benchmarks/artifacts/b096/`), o que projeta ~60 ms a 10M — **250× de diferença**. Descartado custo de conexão: `src/load.py:186` documenta e implementa `make_client` uma vez POR CLIENTE, não por operação. Além disso, `theodb-bench contention` imprime JSON em stdout e **não escreve bundle**, então a corrida foi destruída com os dados só num log local.
 why_now: os dois se somam para produzir o pior resultado possível — um número que parece medição e não é publicável. A anomalia de leitura torna a razão de contenção ininterpretável (não dá para dizer "sem contenção" quando o baseline está 250× fora), e a ausência de bundle a torna não-publicável pelo [[B-069]] mesmo que fosse. O bullet 3 do [[B-058]] depende dos dois.
-status: triaged
+status: shipped
+causa_e_correcao_2026_08_22: **causa encontrada com `file:line`, corrigida e verificada.**
+  .
+  `_apply_analytical_session(table)` — que liga `theodb.enable_columnar_agg` — era chamado **apenas
+  dentro de `load_analytical`** (`adapters/postgres.py:944`), na conexão que CARREGA a tabela. É um
+  ajuste de **sessão**. A suíte analítica carrega e mede na mesma conexão, então herda o ajuste; **a
+  contenção cria clientes novos, que nunca passavam pelo carregador — e media o colunar SEM o
+  pushdown.**
+  .
+  O próprio adapter descreve o defeito antes de ele acontecer: *"uma GUC que vem desligada e
+  silenciosamente continua desligada é como uma medição acaba descrevendo uma configuração que ninguém
+  rodou"*.
+  .
+  **Medido na mesma tabela e no mesmo servidor, 2M linhas:** `count(*)` custa **911 ms** no caminho
+  default e **74 ms** pelo arnês com a correção. Os 15,7 s observados a 40M são exatamente o que
+  911 ms a 2M projetam — a anomalia era linear e de configuração, não de gerador de carga nem de volume.
+  .
+  Corrigido em `_contention_client_factory`, que passa a aplicar a sessão analítica DEPOIS de conectar,
+  com três testes: o gancho é chamado, a ordem é depois do `start` (um `SET` sem conexão levantaria), e
+  um adapter que não implemente o gancho não quebra. 1102 testes passando.
+  .
+  Restam do item as duas lacunas menores, movidas para [[B-058]]: o modo contenção não emite bundle, e
+  a ordem isolado-antes-de-concorrente introduz viés de cache que precisa ser declarado no artefato.
 correcao_do_estreitamento_2026_08_22: **o estreitamento abaixo está ERRADO e fica preservado por
   isso.** Ele conclui que "o produto está inocente e a anomalia é do caminho do arnês", a partir de
   medições locais de 5–14 ms. **Aquelas medições eram o tempo de FALHAR**: rodei numa imagem sem a
@@ -510,7 +532,7 @@ dod:
 > que ele age em toda forma de plano paralelo. Um teste que força o caminho por GUC não cobre o caminho
 > que o volume produz sozinho.
 
-## B-101 — `count(*)` no colunar custa ~1 s por milhão de linhas, e isso contradiz um número publicado por 264×   [ ]
+## B-101 — `count(*)` no colunar custa ~1 s por milhão de linhas, e isso contradiz um número publicado por 264×   [x]
 
 domain: colunar
 repo: theo-db
@@ -518,7 +540,18 @@ suggested_mode: bug
 source: human
 evidence: medido em 2026-08-22 na imagem construída do `HEAD` (contém as duas metades do [[B-097]]), contêiner limpo, `shared_buffers=2GB`, **com o valor de retorno conferido em toda medição**. Tabela `USING theodb_columnar`, plano serial `Aggregate → Seq Scan` em todos os casos: **2M `(id,value)` → 1,0–2,0 s**; **2M com as 4 colunas do crossover → 3,3–3,7 s**; **10M → 9–14 s**; **40M → 44–48 s**. Aproximadamente **1 segundo por milhão de linhas**, e linear. **O crossover publicado em [[b058-crossover-colunar]] reporta `total_rows via columnar @ 2.000.000` em 12,5 ms** — mesma consulta, mesma forma de tabela, mesmo access method, **264× de diferença**.
 why_now: **um dos dois está errado, e o publicado é o do crossover.** O b058 é citado como evidência de que o colunar ganha do heap em contagem (4,02× a 500K) e de onde está o crossover — se os 12,5 ms não se sustentarem, a conclusão que ele publica sobre contagem cai junto. E a direção importa: a medição direta é mais lenta, então o erro, se for do crossover, é a favor do produto.
-status: triaged
+status: killed
+kill_reason: **não há contradição — os dois números medem CONFIGURAÇÕES diferentes, e ambos estão
+  certos.** O `TheoDBAdapter` declara `ANALYTICAL_SESSION_SETTINGS = {"columnar": {"theodb.enable_columnar_agg": "on"}}`
+  (`adapters/postgres.py:1474`), com a razão escrita: *"deixá-la no default mede armazenamento colunar
+  sem o pushdown, um caminho que já se sabe perder para o heap — e publicar isso como 'nosso colunar'
+  seria o mesmo erro que medir o ScaNN com o quantizador AH desligado"*.
+  .
+  Medido na MESMA tabela e no MESMO servidor: `count(*)` a 2M dá **911 ms** com o default e o arnês
+  mede **74 ms** com o pushdown ligado. Eu medi o default à mão e comparei com o número publicado, que
+  é do caminho com pushdown. **A comparação é que era inválida, não os números.**
+  .
+  O que sobrevive deste item vai para o [[B-099]], que ganhou a causa exata do seu próprio achado.
 dod:
   - a discrepância é resolvida por medição, não por argumento: o mesmo `count(*)` medido pelo arnês e por `psql` no MESMO servidor e na MESMA tabela, com o valor de retorno conferido nos dois
   - se o número do arnês não se sustentar, o [[b058-crossover-colunar]] é corrigido por acréscimo e a conclusão sobre contagem é revista
