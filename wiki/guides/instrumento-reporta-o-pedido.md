@@ -91,3 +91,55 @@ era *"o scann do AlloyDB teto em 0,66 de recall enquanto o nosso chega a 0,9956"
 É a mesma classe que o `bm25_search` devolvendo zero em silêncio e que o `SET hnsw.ef_search`
 aceito-e-ignorado: **superfície que responde onde deveria recusar**. A diferença é que aqui ela
 aponta para fora.
+
+# A quinta ocorrência é a imagem espelhada, e passou dez meses invisível
+
+*Acrescentado em 2026-08-22 ([[b102-configuracao-nao-declarada]]). Nada acima foi reescrito.*
+
+As quatro acima têm a mesma forma: **o instrumento respondeu o pedido em vez do efeito**. A quinta
+inverte a forma e produz o mesmo dano — o instrumento verificou o efeito **e não reportou nada**.
+
+O arnês liga `theodb.enable_columnar_agg` antes de medir o caminho colunar. Isso está **certo**, é
+deliberado, e a razão está escrita no próprio código: medir o colunar sem o pushdown é um caminho que
+já se sabe perder para o heap, e publicá-lo como "nosso colunar" seria o mesmo erro que medir o ScaNN
+com o quantizador AH desligado. O adapter inclusive **verificava** a GUC, com a mesma função que
+verifica os botões de busca.
+
+**E descartava a resposta.** O caminho vetorial atribuía o valor verificado a
+`_effective_search_parameters` e o levava até `points[].parameters`; o caminho analítico chamava a
+mesma função e ignorava o retorno. Resultado: o `system.json` de uma corrida publicada traz 14 GUCs de
+servidor — `shared_buffers`, `work_mem`, `fsync` — e **nenhuma de sessão**. Dos 53 conceitos que
+publicam número colunar em `wiki/benchmarks/`, **3** mencionavam a GUC.
+
+## O número que separa as duas configurações
+
+Medido em 2026-08-22, mesma tabela, mesmo servidor, mesma sessão:
+
+| Configuração | `count(*)` a 2M linhas |
+|---|---|
+| `theodb.enable_columnar_agg = off` — **o default do produto** | **911 ms** |
+| `theodb.enable_columnar_agg = on` — o que o arnês mede | **74 ms** |
+
+**12×.** Consistente com os 1407 ms → 108 ms já medidos a 1M.
+
+**Portanto: o default do TheoDB não é a configuração em que os números colunares publicados foram
+obtidos.** Quem instala o produto e roda uma agregação recebe o caminho de 911 ms até ligar a GUC.
+Isto fica dito aqui porque não estava dito em lugar nenhum.
+
+## Por que isto é a mesma classe, e não um item de higiene
+
+A regra que as quatro primeiras produziram foi *"o arnês declara e verifica"*. A quinta mostra que a
+regra estava pela metade: **declarar e verificar sem registrar não deixa rastro nenhum.** Um leitor do
+bundle não distingue "a GUC foi ligada e confirmada" de "a GUC nunca foi tocada" — os dois artefatos
+são byte a byte iguais no que ele consegue ler.
+
+E o custo já apareceu, antes de alguém procurar por ele: o [[B-101]] foi registrado sobre uma premissa
+errada e morreu, porque duas medições minhas rodaram em configurações diferentes e **nenhum artefato
+dizia qual era qual**. A ausência não é neutra — ela já produziu uma hipótese falsa e o trabalho de
+matá-la.
+
+## A regra, corrigida
+
+> **Não basta declarar e verificar. O que foi verificado tem de sair no artefato.**
+> Uma configuração aplicada e confirmada que não chega ao bundle descreve, para quem lê, a
+> configuração que **não** foi usada.

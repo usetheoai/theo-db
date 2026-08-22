@@ -395,3 +395,13 @@ conceito em vez de apagadas.
 O teto que resta é físico: `cpufreq` não é exposto ao hóspede numa VM, então **nenhum número medido em
 droplet pode ser `publishable` pelas regras do próprio arnês — inclusive os já publicados.** Isso não
 os invalida como evidência; invalida chamá-los de `release`.
+
+## 2026-08-22 — b102: o que foi verificado tem de sair no artefato
+
+Quinta ocorrência de [o instrumento reporta o pedido](guides/instrumento-reporta-o-pedido.md), na forma
+espelhada: o arnês **verificava** `theodb.enable_columnar_agg` e **descartava** a resposta. Medido —
+`count(*)` a 2M: **911 ms** no default do produto contra **74 ms** com a GUC ligada, **12×**. O
+`system.json` de uma corrida publicada traz 14 GUCs de servidor e nenhuma de sessão; 3 de 53 conceitos
+colunares mencionavam a GUC. Novo conceito: [b102](benchmarks/b102-configuracao-nao-declarada.md).
+Guia atualizado por acréscimo. Conserto no arnês com 4 testes; artefatos anteriores **não** foram
+reconstruídos, e a página diz isso.

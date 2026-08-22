@@ -68,13 +68,12 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-102 items — **Open** 12 · **In flight** 5 · **Closed** 85
+102 items — **Open** 11 · **In flight** 5 · **Closed** 86
 
-### Open (12)
+### Open (11)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
-| [`B-102`](#b-102--os-números-colunares-publicados-foram-medidos-com-um-recurso-opt-in-ligado-e-nada-diz-isso----) | Os números colunares publicados foram medidos com um recurso opt-in LIGADO, e nada diz isso | `triaged` | — |
 | [`B-002`](#b-002--o-objetivo-definir-e-medir-o-que-torna-o-theodb-atrativo-já-que-superar-todo-benchmark-é-impossível----) | O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível | `raw` | — |
 | [`B-003`](#b-003--vetorial-o-teto-é-o-build-não-a-busca--100m-nunca-foi-atingido----) | Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido | `raw` | — |
 | [`B-005`](#b-005--híbrido-o-ganho-da-fusão-sobre-o-vetorial-puro-é-estatisticamente-não-significativo----) | Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo | `raw` | — |
@@ -97,7 +96,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
 
-### Closed (85)
+### Closed (86)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -105,6 +104,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-099`](#b-099--o-modo-de-contenção-não-emite-bundle-e-uma-leitura-colunar-mede-250-o-esperado---x) | O modo de contenção não emite bundle, e uma leitura colunar mede 250× o esperado | `shipped` | — |
 | [`B-100`](#b-100--select-count-em-tabela-colunar-grande-ainda-falha-a-correção-do-b-097-está-incompleta---x) | `SELECT count(*)` em tabela colunar grande AINDA falha: a correção do B-097 está incompleta | `killed` | — |
 | [`B-101`](#b-101--count-no-colunar-custa-1-s-por-milhão-de-linhas-e-isso-contradiz-um-número-publicado-por-264---x) | `count(*)` no colunar custa ~1 s por milhão de linhas, e isso contradiz um número publicado por 264× | `killed` | — |
+| [`B-102`](#b-102--os-números-colunares-publicados-foram-medidos-com-um-recurso-opt-in-ligado-e-nada-diz-isso---x) | Os números colunares publicados foram medidos com um recurso opt-in LIGADO, e nada diz isso | `shipped` | — |
 | [`B-004`](#b-004--lexical-qualidade-de-recuperação-nunca-foi-medida-contra-um-corpus-público---x) | Lexical: qualidade de recuperação nunca foi medida contra um corpus público | `shipped` | — |
 | [`B-007`](#b-007--grafo-23-funções-expostas-e-nenhuma-medição-contra-peer-algum---x) | Grafo: 23 funções expostas e nenhuma medição contra peer algum | `shipped` | — |
 | [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada---x) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `shipped` | — |
@@ -564,7 +564,7 @@ dod:
 > valor de retorno, então lia tempo-de-erro como latência. O oráculo do arnês existe exatamente para
 > isso — *"uma resposta errada produzida rápido não é uma consulta rápida"* — e eu media à mão sem ele.
 
-## B-102 — Os números colunares publicados foram medidos com um recurso opt-in LIGADO, e nada diz isso   [ ]
+## B-102 — Os números colunares publicados foram medidos com um recurso opt-in LIGADO, e nada diz isso   [x]
 
 domain: arnes
 repo: theodb-bench
@@ -572,7 +572,7 @@ suggested_mode: review
 source: human
 evidence: medido em 2026-08-22. O `TheoDBAdapter` liga `theodb.enable_columnar_agg = on` para o caminho colunar (`adapters/postgres.py:1474`), e o recurso é **opt-in, default OFF** — o próprio código do `theodb_rs` o documenta como *"opt-in until benchmarked"*. Medido na mesma tabela e no mesmo servidor: `count(*)` a 2M custa **911 ms** no default e **74 ms** com ele ligado — **12×**. **E o bundle não registra essa GUC**: `system.json` → `effective_configuration` traz 14 entradas (`shared_buffers`, `work_mem`, `maintenance_work_mem`, `fsync`, …) e **nenhuma** delas é a de sessão que o adapter aplicou. Dos **53** conceitos que publicam número colunar em `wiki/benchmarks/`, apenas **3** mencionam a GUC — e num deles a menção foi acrescentada hoje, ao corrigir outro item.
 why_now: **o leitor de um artefato não tem como saber em que configuração o número foi obtido.** O adapter documenta a razão de ligar o recurso — *"medir o colunar sem o pushdown é um caminho que já se sabe perder para o heap, e publicar isso como 'nosso colunar' seria o mesmo erro que medir o ScaNN com o quantizador AH desligado"* — e a razão é boa. O defeito não é ligar: é ligar **sem registrar**. O próprio arnês nomeia essa classe pelo lado oposto: *"uma GUC que vem desligada e silenciosamente continua desligada é como uma medição acaba descrevendo uma configuração que ninguém rodou"*. Ligada e não registrada produz o mesmo dano, na direção inversa: descreve uma configuração que o **usuário** não roda.
-status: triaged
+status: shipped
 dod:
   - `effective_configuration` do bundle passa a incluir as GUCs de sessão que o adapter aplicou, com o valor VERIFICADO no servidor — não o valor que ele pediu
   - existe teste que reprova um bundle cujo `ANALYTICAL_SESSION_SETTINGS` não apareça no artefato, pela mesma lógica do `_verified_search_settings` que já existe para os botões de busca
@@ -583,6 +583,21 @@ dod:
 > `count(*)` à mão e batia com o publicado por 264×, e a explicação era esta. **O `B-101` morreu por
 > premissa errada justamente porque eu não sabia que as duas medições rodavam em configurações
 > diferentes** — se o artefato dissesse, eu teria sabido em cinco segundos.
+
+> **Fechado em 2026-08-22.** Conserto: `effective_analytical_settings()` (irmã de
+> `effective_search_parameters()`) devolve as GUCs de sessão aplicadas E confirmadas, e
+> `bench/analytical.py` as leva até `points[].parameters`. 4 testes RED-GREEN; suíte 1106 passed.
+> Conceito [[b102-configuracao-nao-declarada]] publicado com os números; o guia
+> `instrumento-reporta-o-pedido` atualizado por acréscimo como a quinta ocorrência da classe.
+>
+> **Desvio declarado do primeiro `dod`:** ele pedia as GUCs em `effective_configuration` do
+> `system.json`. Elas foram para `points[].parameters`, que é onde o caminho vetorial já põe os botões
+> verificados — por ponto, e não por corrida. Isso é mais correto, porque uma corrida pode medir
+> caminhos com configurações diferentes e um campo único da corrida teria de escolher um. O
+> `effective_configuration` segue com as 14 GUCs de servidor, que é o que ele descreve.
+>
+> **O que NÃO foi feito, e fica dito:** os bundles já publicados não foram reconstruídos. A correção
+> possível para eles é a página do conceito, não o artefato.
 
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
