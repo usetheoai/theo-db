@@ -234,7 +234,7 @@ parser lia como 48 GB (base 1000). O mesmo texto ia para os dois lugares signifi
 diferentes, o cgroup ficava mais frouxo que a declaração, e o portão reprovava — com razão. O parser
 passou a seguir systemd e docker no sufixo simples.
 
-# As seis armadilhas — e a regra que torna a lista obsoleta
+# As sete armadilhas — e a regra que torna a lista obsoleta
 
 Medidas em 2026-08-21, provisionando do zero pela primeira vez em muito tempo. **Todas só aparecem em
 host limpo** — é por isso que passaram despercebidas: toda corrida anterior herdou estado.
@@ -296,10 +296,28 @@ host limpo** — é por isso que passaram despercebidas: toda corrida anterior h
    A regra que sai disto organiza o executor inteiro: **o que MEDE aborta em erro; o que apenas
    REGISTRA nunca aborta.** Toda linha de proveniência termina em `|| true`.
 
+7. **A corrida terminou e o script local ficou pendurado duas horas.** O `bench-run.sh` fechou no
+   droplet com `rc=0` às 00:40; o SSH que o conduzia morreu sem devolver, e o `bench-droplet.sh`
+   local esperou até alguém olhar. **~US$ 1,50 de host ocioso**, com os resultados prontos lá dentro.
+
+   A lição é uma distinção que eu não tinha feito: **o `trap EXIT` protege contra o script MORRER; ele
+   não protege contra o script TRAVAR.** São falhas diferentes e precisam de defesas diferentes —
+   `ServerAliveInterval` derruba a sessão quando o outro lado some, e um `timeout` cobre o caso em que
+   ele responde e nunca termina.
+
+   ```bash
+   timeout "$MEDICAO_TIMEOUT" ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=6 …
+   ```
+
+   E o código de saída 124 do `timeout` é tratado como **"pode haver resultado lá"**, não como falha
+   limpa: foi exatamente o caso — a medição existia, só a condução tinha travado, e a coleta a trouxe.
+
 # A regra, que vale mais que a lista
 
-As seis têm a mesma forma: **capacidade que existe na máquina de desenvolvimento e não num host
-limpo, descoberta DEPOIS do trabalho caro.** Uma lista de armadilhas não impede a sétima — ela só
+Seis das sete têm a mesma forma: **capacidade que existe na máquina de desenvolvimento e não num host
+limpo, descoberta DEPOIS do trabalho caro.** A sétima é de outra família e por isso vale destacá-la: não
+falta capacidade nenhuma — falta **teto de tempo** numa chamada remota, e a defesa contra travar não é a
+mesma que a defesa contra morrer. Uma lista de armadilhas não impede a sétima — ela só
 registra as seis que já doeram.
 
 O que impede é um **portão de capacidades executável, rodado antes de qualquer trabalho caro**:
