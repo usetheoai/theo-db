@@ -2077,6 +2077,21 @@ source: discover-evolve
 evidence: medido em 2026-08-13 no droplet `g-16vcpu-64gb`, MS MARCO 100K, caso `FTSBm25Performance`. Curva de concorrência (clientes → QPS): 1 → 251,2 · 5 → 1.025,9 · 10 → 1.460,4 · **20 → 1.613,2** · 30 → 1.507,3 · 40 → 1.592,6 · 60 → 1.616,4 · 80 → 1.600,0. A latência p99 cresce de 0,005 s a 0,112 s no mesmo intervalo. Ou seja: **de 20 a 80 clientes o throughput não sobe 1%, e a p99 cresce 4×** — a fila cresce contra capacidade fixa. A p99 serial é 4,8 ms, o que a 16 núcleos daria um teto teórico bem acima de 1.616.
 why_now: o pilar lexical acabou de ganhar seu primeiro número público (`wiki/benchmarks/b040-theodb-fts-msmarco.md`), e o teto de vazão é a métrica que uma instalação real encontra primeiro. **A causa não está medida** e há pelo menos três candidatas que exigem instrumentos diferentes: saturação de CPU real (o trabalho por consulta é simplesmente caro), contenção no índice lexical compartilhado (trava), ou teto do cliente Python do arnês — que a esta escala é hipótese séria, porque o B-035 já declarou que a 50 mil vetores boa parte do custo é round-trip. Publicar a curva sem investigar deixa o leitor concluir o que quiser.
 status: triaged
+verificacao_2026_08_22: **bullet 2 FECHADO, e a resposta é o oposto do que o título deste item sugeria.**
+  O [[B-094]] mediu com gerador externo (`pgbench`) e o conceito [[b043-teto-lexical-e-o-cliente]]
+  registra o veredito: *"os dois geradores saturam, e a distância entre eles é de 27%. **O platô é real
+  e é do servidor.**"* A hipótese do cliente Python está **descartada**, não confirmada — e o teste de
+  threads contra processos descarta também o GIL: se ele fosse o teto, processos escalariam e threads
+  não, e não é o que acontece.
+  .
+  Vale notar que o conceito é ele próprio uma **retratação**: a primeira leitura dizia que o teto era o
+  cliente, e o colapso de 61% era artefato de contagem de operações fixa independente do número de
+  clientes — a 80 clientes, 3,75 consultas cada, com a abertura de conexão dominando a janela.
+  .
+  Restam os bullets 1, 3 e 4: nomear e medir a causa do platô do servidor (perfil de CPU do backend a
+  20 e a 80 clientes) e, conforme o achado, apontar contenção com `file:line` ou decompor o custo por
+  consulta. Isso é campanha de perfilamento, e o `doctor` reporta `perf_events` indisponível no droplet
+  — o que precisa ser resolvido antes, ou contornado com amostragem por software.
 retratacao_2026_08_21: **⚠ O RESULTADO ABAIXO ESTÁ ERRADO, e o erro é do meu desenho de medição.**
   O `run_concurrent` emitia total FIXO de 300 operações independente do número de clientes — a 80
   clientes são **3,75 consultas por cliente**, e a abertura de conexão domina a janela inteira.
