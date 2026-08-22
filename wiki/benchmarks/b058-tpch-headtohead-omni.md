@@ -79,9 +79,89 @@ máquina, no mesmo dado, no mesmo minuto** — que é a única forma que o [[ADR
 North Star exige. E o eixo onde vamos bem — o heap, com a q18 à nossa frente — não estava medido
 contra ninguém.
 
+# Re-medido com n=3 e uma escala acima — e um dos números vira ao contrário
+
+*Acrescentado em 2026-08-22, algumas horas depois. **Nada acima foi reescrito**: as tabelas de n=1
+ficam visíveis porque foram publicadas e porque a comparação entre as duas corridas é ela própria o
+argumento de por que n=1 não servia.* Artefatos: `benchmarks/artifacts/b058/tpch-n3/`.
+
+Mediana de 3 repetições, com o desvio entre parênteses. **O oráculo foi conferido em todas as 90
+verificações** (5 configurações × 2 escalas × 3 queries × 3 repetições) e concordou em todas.
+
+## SF=1 (≈150 mil clientes, ≈6 milhões de `lineitem`), ms
+
+| configuração | q1 | q6 | q18 |
+|---|---|---|---|
+| **TheoDB heap** | 729,0 (33,2) | 263,0 (3,9) | **3.255,8 (54,1)** |
+| **TheoDB colunar** | 7.685,3 (193,8) | 6.801,9 (286,7) | 15.655,9 (272,2) |
+| Omni, engine desligado | 735,7 (29,3) | 239,3 (36,6) | 4.236,4 (69,5) |
+| Omni, engine ligado, heap | 814,0 (7,9) | 261,1 (71,3) | 4.265,8 (38,9) |
+| **Omni colunar** | **163,7 (2,3)** | **8,2 (0,3)** | 4.821,5 (16,7) |
+
+## SF=0,1, ms
+
+| configuração | q1 | q6 | q18 |
+|---|---|---|---|
+| TheoDB heap | 84,7 (7,2) | 33,2 (0,2) | **364,7 (19,9)** |
+| TheoDB colunar | 718,2 (53,6) | 597,1 (32,2) | 1.639,2 (201,7) |
+| Omni, engine desligado | 76,2 (8,2) | 29,4 (4,1) | 403,1 (10,0) |
+| Omni, engine ligado, heap | 81,9 (0,7) | 28,4 (1,1) | 413,7 (23,3) |
+| Omni colunar | 43,1 (2,7) | **1,8 (1,0)** | 870,9 (24,0) |
+
+## O que muda em relação ao n=1
+
+**O empate no heap era empate mesmo, e agora dá para dizer isso com base.** A SF=1, q1: 729,0±33,2
+contra 735,7±29,3 — os intervalos se sobrepõem largamente, e chamar qualquer um dos dois de mais
+rápido seria ler ruído. Na q6 idem (263,0±3,9 contra 239,3±36,6, com o desvio do Omni grande o
+bastante para cobrir a diferença).
+
+**A vantagem na q18 sobrevive, e agora é defensável.** 3.255,8±54,1 contra 4.236,4±69,5 — **1,30× a
+nosso favor, com os desvios sem qualquer sobreposição.** A SF=0,1 o mesmo vale (364,7±19,9 contra
+403,1±10,0). É o único ponto desta página em que estamos à frente, e é o mais robusto dos três.
+
+**No colunar o gap PIORA com a escala, e isso o n=1 não deixava ver.**
+
+| nosso colunar ÷ nosso heap | q1 | q6 | q18 |
+|---|---|---|---|
+| SF=0,1 | 8,5× | 18,0× | 4,5× |
+| **SF=1** | **10,5×** | **25,9×** | **4,8×** |
+
+**Colunar contra colunar, e aqui o número é brutal:**
+
+| nós ÷ Omni | q1 | q6 | q18 |
+|---|---|---|---|
+| SF=0,1 | 16,7× | 332× | 1,9× |
+| **SF=1** | **47×** | **829×** | **3,25×** |
+
+## Três coisas que só a repetição revelou
+
+1. **Ligar o engine colunar CUSTA ao Omni mesmo em tabela heap.** A SF=1 q1: 735,7 com o engine
+   desligado, **814,0** com ele ligado sobre a mesma tabela heap — 10,6% mais lento, e os desvios
+   (29,3 e 7,9) não se sobrepõem. É um custo do concorrente que a corrida n=1 não separava do ruído.
+2. **A q18 do Omni piora com o engine em ambas as escalas** (4.236 → 4.822 a SF=1; 403 → 871 a
+   SF=0,1). Junção de três tabelas com subconsulta não é terreno de scan colunar, e o planner dele
+   escolhe o caminho colunar mesmo assim.
+3. **O nosso colunar é o mais instável dos cinco.** Desvio de 201,7 ms sobre 1.639,2 na q18 a SF=0,1
+   (12%), contra 5% do nosso heap. Ruído maior é, ele próprio, um sintoma.
+
+## O que esta corrida não prova, e como sei que o caminho foi o declarado
+
+**O portão `assert_analytical_path` foi ligado na suíte TPC-H DEPOIS que esta corrida foi lançada.**
+Nenhuma perna passou por prova formal de residência — o que é exatamente o defeito que o portão existe
+para impedir, e ele fica dito aqui em vez de omitido.
+
+A evidência de que os caminhos foram os declarados é **indireta, e está no próprio resultado**:
+
+- **Nosso colunar** é 10× a 26× mais lento que o nosso heap. Heap não produz esse número; só o
+  `theodb_columnar` produz.
+- **O colunar do Omni** é 32× mais rápido que o heap dele na q6 (261,1 → 8,2). Um store não residente
+  cairia para heap e devolveria ~261 ms.
+
+Isso é forte, e não é prova. A próxima corrida passa pelo portão.
+
 # Ressalvas, e elas são grandes
 
-- **Uma execução por ponto.** O comando `tpch` roda cada query uma vez. **Não há variância, não há
+- **~~Uma execução por ponto.~~ RESOLVIDO no mesmo dia — ver a seção de n=3 acima.** O texto abaixo descreve a corrida n=1 e fica como registro. O comando `tpch` rodava cada query uma vez. **Não há variância, não há
   intervalo de confiança, não há teste pareado** — nada que `papers/rigorous-perf-eval-georges-2007`
   exigiria. Diferenças de poucos por cento nesta página não significam nada; as de 8× a 159×
   dificilmente são ruído, mas isso é um julgamento, não uma medição.

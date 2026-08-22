@@ -419,3 +419,10 @@ como root, no estado que ele chamava de indisponível (`paranoid = 4`): `perf st
 `perf record` produziu perfil com símbolos. A regra lia a **política**, que só restringe usuário sem
 privilégio. **As anteriores produziram números errados; esta impediu uma medição de acontecer** — e
 isso não deixa rastro que alguém refaça e conteste.
+
+**b058 re-medido com n=3 e SF=1.** O "empate no heap" era empate (desvios sobrepostos); **a vantagem
+de 1,30× na q18 sobrevive sem sobreposição** e é o único ponto em que estamos à frente. O gap colunar
+**piora com a escala** — 47× / **829×** / 3,25× contra o Omni a SF=1. Três achados que só a repetição
+deu: ligar o engine custa ao Omni **mesmo em heap**; a q18 dele piora com o engine; e **o nosso colunar
+é o mais instável dos cinco**. Declarado: esta corrida não passou pelo portão de residência, que foi
+ligado depois dela.

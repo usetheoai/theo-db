@@ -3178,6 +3178,29 @@ status_nota_2026_08_22: **Critério 1 MEDIDO — e o resultado é um honest-nega
   .
   **Abertos:** critério 3 (contenção escrita×scan nos dois regimes) e o TPC-H em escala real.
 
+status_nota_2026_08_22c: **Re-medido com n=3 e uma escala acima (SF=1, ≈6M `lineitem`). Artefatos em
+  `benchmarks/artifacts/b058/tpch-n3/`; conceito atualizado por acréscimo, com as tabelas de n=1
+  preservadas.** O oráculo concordou nas **90** verificações.
+  .
+  **O que a repetição mudou:** o "empate no heap" era empate mesmo (q1 a SF=1: 729,0±33,2 contra
+  735,7±29,3 — intervalos sobrepostos, ler qualquer vencedor seria ler ruído). **A vantagem na q18
+  sobrevive e agora é defensável: 3.255,8±54,1 contra 4.236,4±69,5, 1,30× a nosso favor, sem
+  sobreposição.** É o único ponto em que estamos à frente, e o mais robusto dos três.
+  .
+  **O gap colunar PIORA com a escala**, que o n=1 não deixava ver: nosso colunar ÷ nosso heap vai de
+  8,5× / 18,0× / 4,5× (SF=0,1) para **10,5× / 25,9× / 4,8×** (SF=1). Colunar contra colunar:
+  **47× / 829× / 3,25×** contra nós.
+  .
+  **Três achados que só a repetição revelou:** (a) ligar o engine **custa ao Omni mesmo em heap** —
+  735,7 → 814,0 na q1, desvios sem sobreposição; (b) a q18 dele **piora** com o engine nas duas escalas;
+  (c) **o nosso colunar é o mais instável dos cinco** (desvio de 12% contra 5% do nosso heap), e ruído
+  maior é sintoma.
+  .
+  **Declarado no conceito:** o portão `assert_analytical_path` foi ligado na suíte TPC-H **depois** desta
+  corrida. A evidência de que o caminho foi o declarado é **indireta** (nosso colunar 26× mais lento que
+  heap só o `theodb_columnar` produz; o Omni 32× mais rápido só o engine produz) — forte, não prova.
+  A próxima corrida passa pelo portão.
+
 ## B-059 — O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia   [ ]
 
 domain: arnes

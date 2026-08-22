@@ -1,0 +1,41 @@
+{
+  "scale_factor": 1.0,
+  "seed": 20260821,
+  "path": "columnar",
+  "repetitions": 3,
+  "queries": {
+    "q1": {
+      "seconds": 7.685266862000049,
+      "samples": [
+        8.008574711999927,
+        7.661749095000005,
+        7.685266862000049
+      ],
+      "stdev_seconds": 0.19380792030753408,
+      "matches_oracle": true,
+      "rows_returned": 6
+    },
+    "q6": {
+      "seconds": 6.801920098999972,
+      "samples": [
+        6.507291524000038,
+        6.801920098999972,
+        7.080660308000006
+      ],
+      "stdev_seconds": 0.2867210792696959,
+      "matches_oracle": true,
+      "rows_returned": 1
+    },
+    "q18": {
+      "seconds": 15.655935411000087,
+      "samples": [
+        16.032949961999975,
+        15.504219777000003,
+        15.655935411000087
+      ],
+      "stdev_seconds": 0.27224780800947984,
+      "matches_oracle": true,
+      "rows_returned": 100
+    }
+  }
+}
