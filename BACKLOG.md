@@ -2939,6 +2939,30 @@ dod:
     default raso e publicaria vantagem falsa — a classe [[B-034]]/[[B-041]] no concorrente
   - o índice é medido em TAMANHO e TEMPO DE BUILD, não só em QPS: o avaliador mediu 2,6 GB contra 76 GB do
     ivfflat e build 7–9× mais rápido, e esse eixo o `m33` nunca cobriu
+  - a suíte de sweep passa a ser **casada por recall**, não por parâmetro: cada sistema varre o SEU botão até
+    os pontos de operação se encontrarem. Ver a medição de 2026-08-22 abaixo — sem isso a corrida de três vias
+    não roda, e não é um defeito do arnês.
+
+> **Medido em 2026-08-22, e muda o desenho da corrida (acréscimo, nada acima foi reescrito).** Primeira execução
+> real de três vias no droplet: `theodb:fix` (PG 18.6) × `alloydbomni` (PG 17.9) × `pgvector` (PG 17.11), mesma
+> máquina, mesma suíte `vector/synthetic/sweep`. **A perna do Omni voltou `INVALID`, e pelo motivo certo:**
+>
+> `alloydbomni cannot apply search parameter(s) 'ef_search'; it understands num_leaves_to_search,`
+> `pct_leaves_to_search, pre_reordering_num_neighbors`
+>
+> O arnês **recusou-se a medir** em vez de aceitar o pedido e medir o default três vezes — que é exatamente a
+> armadilha que o quarto `dod` acima já previa, encontrada agora do lado do arnês em vez do lado do produto.
+> **A causa é estrutural, não um bug:** o índice do Omni é de **árvore** (ScaNN), o nosso e o do pgvector são de
+> **grafo**. `ef_search` não existe lá e nunca vai existir. Uma suíte parametrizada por um botão só não compara
+> os três — a comparação tem de ser **casada por recall**, cada sistema no seu próprio botão.
+>
+> As outras duas pernas rodaram e voltaram `EXPLORATORY` (não publicável — a maioria dos pontos veio marcada
+> `unstable`). **Não tiro conclusão de comparação daqui, e registro os números só para que a próxima corrida
+> tenha de onde partir:** theodb `ef_search=64` → 1.490,7 QPS @ recall 0,7794; pgvector `ef_search=64` → 1.307,4
+> QPS @ recall 0,9012. **Os pontos de operação não estão casados** — mais rápido com recall pior não é vantagem,
+> é outro ponto da curva, e é a lição que o b035 já pagou uma vez.
+>
+> Custo: um droplet `g-16vcpu-64gb`, criado 12:23 e destruído 12:31. Bundle colhido antes de destruir (152K).
 
 > Registrado 2026-08-16. **Não é reabertura do ADR-0002 nem contestação do M73** — a vantagem algorítmica do
 > AH-LUT é real e está medida. É a observação de que a comparação usou um substituto mais favorável ao
