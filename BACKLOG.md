@@ -2954,9 +2954,9 @@ dod:
     default raso e publicaria vantagem falsa — a classe [[B-034]]/[[B-041]] no concorrente
   - o índice é medido em TAMANHO e TEMPO DE BUILD, não só em QPS: o avaliador mediu 2,6 GB contra 76 GB do
     ivfflat e build 7–9× mais rápido, e esse eixo o `m33` nunca cobriu
-  - a suíte de sweep passa a ser **casada por recall**, não por parâmetro: cada sistema varre o SEU botão até
-    os pontos de operação se encontrarem. Ver a medição de 2026-08-22 abaixo — sem isso a corrida de três vias
-    não roda, e não é um defeito do arnês.
+  - a corrida usa o par **já registrado** `vector/sift/scann-ah` (Omni) × `vector/sift/hnsw` (nós e pgvector),
+    comparados por recall casado — **não** uma suíte única parametrizada por um botão só. Ver a correção de
+    2026-08-22 abaixo.
 
 > **Medido em 2026-08-22, e muda o desenho da corrida (acréscimo, nada acima foi reescrito).** Primeira execução
 > real de três vias no droplet: `theodb:fix` (PG 18.6) × `alloydbomni` (PG 17.9) × `pgvector` (PG 17.11), mesma
@@ -2978,6 +2978,23 @@ dod:
 > é outro ponto da curva, e é a lição que o b035 já pagou uma vez.
 >
 > Custo: um droplet `g-16vcpu-64gb`, criado 12:23 e destruído 12:31. Bundle colhido antes de destruir (152K).
+>
+> **CORREÇÃO, mesma data, minha (acréscimo — o parágrafo acima fica como foi escrito).** Eu tratei "a suíte
+> tem de ser casada por recall" como trabalho novo a fazer. **Ela já existe e já está registrada:**
+> `registry.py` traz o par `vector/sift/scann-ah` × `vector/sift/hnsw`, e o comentário acima delas diz,
+> textualmente, que *"o botão de busca pertence à família do índice, não ao benchmark"*, que *"uma suíte não
+> pode pedir os dois"* e que as duas famílias *"são comparadas a RECALL CASADO a partir das suas fronteiras,
+> nunca pareando valores de botão que significam coisas diferentes"* — inclusive com a armadilha do
+> `scann.enable_ah_quantizer` já coberta por uma suíte AH separada.
+>
+> **O defeito foi meu, não do arnês:** rodei `vector/synthetic/sweep`, que é uma suíte de `ef_search`, contra
+> os três sistemas. O arnês recusou a perna do Omni exatamente como foi construído para recusar. Isto é a
+> classe que a wiki já nomeia — *seis diagnósticos caíram por medição e nenhum era novo em espécie; todos
+> tinham precedente registrado em algum lugar que não disparou*. O precedente aqui estava a doze linhas de
+> distância, num comentário do arquivo que eu mandei rodar.
+>
+> **Consequência prática:** a corrida certa é `scann-ah` no Omni contra `sift/hnsw` em nós e no pgvector, e
+> ela precisa do SIFT no droplet. Nenhum código novo é necessário para isso.
 
 > Registrado 2026-08-16. **Não é reabertura do ADR-0002 nem contestação do M73** — a vantagem algorítmica do
 > AH-LUT é real e está medida. É a observação de que a comparação usou um substituto mais favorável ao
