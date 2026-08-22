@@ -3630,6 +3630,19 @@ status_nota: 2026-08-20 — bullets 1 e 3 fechados; o 2 está bloqueado e digo p
   contrato. A regra que passa a valer: projetar antes de tentar e recusar nomeando o número.
   **Bullet 2 BLOQUEADO**: re-medir a curva nos mesmos três pontos exige host dedicado, e os droplets
   ativos são do owner e estão em uso. Não vou tomá-los nem fabricar a medição.
+bloqueio_reavaliado_2026_08_21: **a razão registrada acima deixou de valer, e a real é outra — mais
+  funda.** Host dedicado deixou de ser obstáculo: o [[B-098]] entregou snapshot e um caminho de ~2 min
+  (`ops/bench-droplet.sh`), e a curva inteira custaria ~US$ 0,30.
+  .
+  O bloqueio real é do arnês, e conferido no código: `src/telemetry.py` **tem** o amostrador com
+  `VmHWM` (`ProcessSampler`), mas ele **não está ligado** à fase de build — nenhuma referência em
+  `bench/vector.py` nem em `runner.py`. E ligá-lo não é uma linha: o backend do PostgreSQL roda
+  **dentro de um contêiner**, então o `pg_backend_pid()` vive no namespace de PID do contêiner e não
+  casa com `/proc/<pid>` do host, que é onde o arnês roda. Medir dali exige ou namespace de PID
+  compartilhado, ou amostrar de dentro do contêiner, e nenhuma das duas é escolha trivial de método.
+  .
+  Registrado assim para que a próxima pessoa não suba um droplet e só então descubra que o arnês não
+  mede o que a DoD pede.
   Verificado: 5 testes novos, suíte completa **488 passed, 0 failed** — o portão não recusa nenhum
   build existente, que era o risco de ligar uma verificação em todo `CREATE INDEX`.
 dod:
