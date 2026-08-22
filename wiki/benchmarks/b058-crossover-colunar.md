@@ -89,6 +89,32 @@ E **piora com a escala**. Oito segundos para contar 2 milhões de linhas. O cami
 responde certo — o oráculo confere —, mas nesta forma de consulta ele não é uma alternativa ao heap
 em nenhuma escala medida.
 
+## A desvantagem do Parquet não é uma propriedade da consulta — vale para as quatro
+
+*Acrescentado em 2026-08-22, ao fechar o [[B-008]]. Nada acima foi reescrito.* A tabela anterior mostra
+**uma** forma de consulta, e uma tabela de uma consulta deixa em aberto a leitura mais generosa: *"o
+Parquet perde nesta forma; talvez em outra ele ganhe"*. O mesmo bundle já continha as outras três, e
+elas fecham essa porta.
+
+Razão Parquet ÷ heap, p50 mediano, mesmo bundle:
+
+| linhas | `total_rows` | `sum_amount` | `filtered_sum` | `group_by_category` |
+|---|---|---|---|---|
+| 10.000 | 38,9× | 52,5× | 24,6× | 14,9× |
+| 100.000 | 51,1× | 42,5× | 35,9× | 17,4× |
+| 1.000.000 | 134,2× | 105,8× | 86,2× | 54,4× |
+| 2.000.000 | **154,0×** | **119,8×** | **100,3×** | **56,7×** |
+
+**Nenhuma das quatro escapa, e as quatro pioram com a escala.** A melhor razão medida em qualquer
+ponto — 14,9× no `GROUP BY` a 10 mil linhas — ainda é uma ordem de grandeza. O `group_by_category` é o
+caso mais favorável ao Parquet **porque é onde o heap também sofre**, não porque o Parquet melhore: em
+números absolutos ele sai de 43,2 ms para 9.684 ms na mesma faixa.
+
+**Parte da constante já tem causa medida** e está em [[b096-parquet-jsonb-dois-roundtrips]]: são dois
+round-trips de texto por leitura, e apenas um deles é nosso. Remover o nosso deu 1,085× — o que
+significa que **esta desvantagem não é um problema de parsing**, e que atacá-la por ali seria otimizar
+o eixo errado.
+
 # O que isto muda
 
 - **A resposta do [[B-058]] bullet 2 não é um número.** É: *abaixo de ~10K para contagem, entre 10K e

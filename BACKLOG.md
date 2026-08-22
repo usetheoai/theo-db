@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-102 items — **Open** 11 · **In flight** 5 · **Closed** 86
+102 items — **Open** 10 · **In flight** 5 · **Closed** 87
 
-### Open (11)
+### Open (10)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -78,7 +78,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-003`](#b-003--vetorial-o-teto-é-o-build-não-a-busca--100m-nunca-foi-atingido----) | Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido | `raw` | — |
 | [`B-005`](#b-005--híbrido-o-ganho-da-fusão-sobre-o-vetorial-puro-é-estatisticamente-não-significativo----) | Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo | `raw` | — |
 | [`B-006`](#b-006--colunar-43-queries-do-clickbench-medidas-a-suíte-completa-nunca----) | Colunar: 43 queries do ClickBench medidas, a suíte completa nunca | `raw` | — |
-| [`B-008`](#b-008--lakehouse-4-funções-expostas-escala-e-formatos-nunca-medidos----) | Lakehouse: 4 funções expostas, escala e formatos nunca medidos | `triaged` | — |
 | [`B-010`](#b-010--maturidade-zero-uso-real-e-é-o-gargalo-de-todos-os-pilares----) | Maturidade: zero uso real, e é o gargalo de todos os pilares | `raw` | — |
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
 | [`B-043`](#b-043--o-qps-lexical-satura-em-20-clientes-numa-máquina-de-16-vcpu-e-não-sobe-mais----) | O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais | `triaged` | — |
@@ -96,7 +95,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
 
-### Closed (86)
+### Closed (87)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -107,6 +106,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-102`](#b-102--os-números-colunares-publicados-foram-medidos-com-um-recurso-opt-in-ligado-e-nada-diz-isso---x) | Os números colunares publicados foram medidos com um recurso opt-in LIGADO, e nada diz isso | `shipped` | — |
 | [`B-004`](#b-004--lexical-qualidade-de-recuperação-nunca-foi-medida-contra-um-corpus-público---x) | Lexical: qualidade de recuperação nunca foi medida contra um corpus público | `shipped` | — |
 | [`B-007`](#b-007--grafo-23-funções-expostas-e-nenhuma-medição-contra-peer-algum---x) | Grafo: 23 funções expostas e nenhuma medição contra peer algum | `shipped` | — |
+| [`B-008`](#b-008--lakehouse-4-funções-expostas-escala-e-formatos-nunca-medidos---x) | Lakehouse: 4 funções expostas, escala e formatos nunca medidos | `shipped` | — |
 | [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada---x) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `shipped` | — |
 | [`B-011`](#b-011--o-vector-join-do-hnsw-perde-exatamente-um-elemento---x) | O vector-join do HNSW perde exatamente um elemento | `shipped` | — |
 | [`B-012`](#b-012--as-outras-18-falhas-da-suíte-seguem-sem-causa-capturada---x) | As outras 18 falhas da suíte seguem sem causa capturada | `shipped` | — |
@@ -735,7 +735,7 @@ dod:
 > nenhum era do produto. O mais grave: os dois lados da comparação mediam semânticas diferentes
 > (não-dirigido com semente vs. dirigido sem), o que tornaria a razão entre os tempos um número sem
 > referente. Todos corrigidos e cobertos por teste.
-## B-008 — Lakehouse: 4 funções expostas, escala e formatos nunca medidos   [ ]
+## B-008 — Lakehouse: 4 funções expostas, escala e formatos nunca medidos   [x]
 
 domain: colunar
 repo: theo-db
@@ -743,7 +743,7 @@ suggested_mode: evolve
 source: human
 evidence: medido em 2026-08-22. **Leitura**: sweep de 10 000 a 2 000 000 de linhas (200×, duas ordens de grandeza) com tempo publicado em [[b096-parquet-jsonb-dois-roundtrips]] e bundle em `benchmarks/artifacts/b096/`. **Arquivo inválido**: `theodb_rs/src/parquet.rs` — quatro casos novos provam que bytes arbitrários, `PAR1` sem footer e arquivo **vazio** erram com erro tipado e sem derrubar o backend; o vazio era a suspeita real, porque zero linhas para arquivo inválido seria dado errado disfarçado de resposta. **Testes**: 507 passando, com o [[B-001]] já `shipped` destravando a execução
 why_now: o M184 mediu 4 funções de parquet no default e **zero testes próprios** em `parquet.rs` contra uma nota que exigia "testado" — a nota estava alta, e isso está registrado. Foram adicionados 6 testes em 2026-08-09, que **não rodaram** (bloqueados por B-001). Escala, formatos além de Parquet e comportamento sob arquivo corrompido seguem sem medição.
-status: triaged
+status: shipped
 evidence_2026_08_22: **os três bullets medidos; o 1 e o 3 fechados, o 2 fechado com o produto passando.**
   .
   **Bullet 3 (os 6 testes efetivamente executados, dependia do [[B-001]])**: destravado — o `B-001` está
@@ -773,6 +773,29 @@ dod:
   - os 6 testes existentes efetivamente executados (depende de B-001)
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `lakehouse-escala-formatos`).
+> **Fechado em 2026-08-22, e dois dos três critérios já estavam respondidos — eu é que não olhei.**
+>
+> **(1) Leitura em ≥2 ordens de grandeza, com tempo publicado — JÁ ESTAVA.** O bundle
+> `benchmarks/artifacts/20260821T122336Z-analytical-crossover-row-count-theodb-eed87401` varre Parquet de
+> **10 mil a 2 milhões** de linhas (200×), tudo `measured`, e o resultado está publicado em
+> [[b058-crossover-colunar]] desde então. **Acrescentei o que faltava:** a tabela de lá cobria UMA forma de
+> consulta, o que deixava aberta a leitura *"talvez em outra forma o Parquet ganhe"*. As outras três estavam
+> no mesmo bundle e fecham a porta — razão Parquet÷heap de **14,9× a 154×**, as quatro piorando com a escala.
+>
+> **Ressalva declarada:** o critério diz *"tamanho de arquivo"* e o que foi medido é **contagem de linhas**.
+> São 200× de dado com esquema fixo, o que torna a contagem um proxy razoável do tamanho — mas é um proxy, e
+> fica dito em vez de assumido.
+>
+> **(2) Truncado/corrompido: erro tipado, nunca crash — ENTREGUE hoje.** Quatro casos (truncado, corrompido,
+> vazio, não-Parquet) em `theodb_rs/src/parquet.rs`. O arquivo vazio ganhou teste próprio porque devolver zero
+> linhas para arquivo inválido seria **dado errado, não erro**.
+>
+> **(3) Os 6 testes efetivamente executados — desbloqueado.** Dependia do [[B-001]], que está fechado. Hoje o
+> arquivo tem **14** `pg_test` e a suíte rodou com 507 passando.
+>
+> **A lição, que é a terceira igual hoje:** o precedente existia, estava publicado, e não disparou. É o que
+> `wiki/` já registra — *seis diagnósticos caíram por medição e nenhum era novo em espécie*.
+
 ## B-009 — AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada   [x]
 
 domain: ai-surface
