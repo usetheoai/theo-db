@@ -4802,6 +4802,19 @@ source: discover-review
 evidence: `theodb_rs/src/am/columnar.rs:2225-2244` — `columnar_relation_estimate_size` fixa `*tuples = 0.0` com o comentário *"Phase A: no catalog row-count yet; a real estimate reads columnar.stripe (Phase C ANALYZE)"*; `columnar_scan_analyze_next_block` e `columnar_scan_analyze_next_tuple` devolvem `false`. Medido no mesmo repro: tabela colunar de 200.000 linhas fica com `reltuples=0`, `relpages=1` **depois do `ANALYZE`**, e `pg_stats` tem **zero linhas** para ela; a heap equivalente fica com `reltuples=200000`, `relpages=1280`. O `EXPLAIN` da tabela de 200 mil linhas diz `rows=1`.
 why_now: isto não é um caso de borda de uma consulta — é a entrada de TODA decisão de plano sobre dado colunar. Sem contagem de linhas e sem `pg_stats`, o planner não tem seletividade, `n_distinct` nem histograma: escolhe forma de agregação, ordem de junção e caminho de acesso às cegas, e os custos colapsam a ponto de `enable_sort=off` não mudar o plano (medido). É a causa do [[B-095]]: com 5 grupos em 200 mil linhas o planner escolheria `HashAggregate`, e o `ORDER BY` poria o `Sort` **acima** — exatamente a forma que a guarda do M153 já admite. O estado é conhecido e declarado como incompleto ("Fase A"), e o custo dele nunca foi medido.
 status: shipped
+retratacao_parcial_2026_08_22: **a segunda metade deste item — a recusa de plano paralelo — está
+  INCOMPLETA, e a afirmação de correção já foi promovida para `develop`.** Reproduzido com `psql` puro
+  numa tabela colunar de 40M linhas: `SELECT count(*)` ainda erra com `parallel scan is not supported`.
+  A 10M funciona. O `EXPLAIN` diz por quê: o paralelismo é montado no nível do **agregado**
+  (`Partial Aggregate` sob `Gather`), não na lista de caminhos da relação base onde o `pathlist_hook`
+  age. Registrado como [[B-100]] com repro e DoD próprios.
+  .
+  **O teste que eu escrevi não podia pegar isto**: ele usa 50 mil linhas com
+  `min_parallel_table_scan_size = 0` para forçar o plano paralelo. Isso prova que o hook age; não prova
+  que ele age em toda forma de plano paralelo. Forçar o caminho por GUC exercita um caminho diferente
+  do que o volume produz sozinho — e foi o volume que revelou o defeito.
+  .
+  A primeira metade do item (a estimativa real lida de `columnar.stripe`) permanece correta e medida.
 evidence_final: medido em 2026-08-21 em droplet `g-16vcpu-64gb` (nyc1), PostgreSQL 18.6, `theodb_rs 1.5.0` lidos DO SERVIDOR. Benchmark registrado `analytical/crossover/row-count`, duas imagens construídas de `HEAD~1` e `HEAD` no mesmo host, no mesmo dia. **`rows=1` → `rows=200000`**; forma do plano do `GROUP BY` mudou de `GroupAggregate` para `Sort`+`HashAggregate` nos seis pontos; **QPS inalterado (0,90×–1,02×, ruído), publicado como nulo**; `count(*)` roda a 2M (a correção do plano paralelo segurou). Veredito do arnês `EXPLORATORY` nas duas corridas — tarball, então `clean_source_tree` fica `UNAVAILABLE`. Registrado em [[b058-crossover-colunar]].
 dod:
   - `columnar_relation_estimate_size` devolve contagem real lida de `columnar.stripe` (a tabela já existe e já tem o metadado)
