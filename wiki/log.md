@@ -405,3 +405,9 @@ espelhada: o arnês **verificava** `theodb.enable_columnar_agg` e **descartava**
 colunares mencionavam a GUC. Novo conceito: [b102](benchmarks/b102-configuracao-nao-declarada.md).
 Guia atualizado por acréscimo. Conserto no arnês com 4 testes; artefatos anteriores **não** foram
 reconstruídos, e a página diz isso.
+
+**b058 — TPC-H contra o AlloyDB Omni.** Primeira corrida contra o concorrente real na mesma máquina.
+No heap somos par dele e **1,4× mais rápidos na q18**; no colunar somos **5× a 16× mais lentos que o
+nosso próprio heap**, enquanto o engine dele ganha do heap dele em duas das três queries. Colunar
+contra colunar a q6 dá **159×** contra nós. Uma execução por ponto — sem variância.
+[b058-tpch-headtohead-omni](benchmarks/b058-tpch-headtohead-omni.md).

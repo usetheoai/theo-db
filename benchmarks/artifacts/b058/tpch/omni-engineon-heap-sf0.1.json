@@ -1,0 +1,22 @@
+{
+  "scale_factor": 0.1,
+  "seed": 20260821,
+  "path": "row",
+  "queries": {
+    "q1": {
+      "seconds": 0.07506260999997494,
+      "matches_oracle": true,
+      "rows_returned": 6
+    },
+    "q6": {
+      "seconds": 0.026256234000015866,
+      "matches_oracle": true,
+      "rows_returned": 1
+    },
+    "q18": {
+      "seconds": 0.33241171099996336,
+      "matches_oracle": true,
+      "rows_returned": 100
+    }
+  }
+}

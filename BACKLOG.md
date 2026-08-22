@@ -3144,6 +3144,25 @@ parcial_2026-08-17: **dois dos quatro critérios já têm resposta medida, por c
 
 > Registrado 2026-08-16 a partir de avaliação independente. Os números dela são o alvo mais concreto que o
 > pilar colunar já teve.
+status_nota_2026_08_22: **Critério 1 MEDIDO — e o resultado é um honest-negative dos grandes.**
+  Primeira corrida do TheoDB contra o AlloyDB Omni na mesma máquina, mesmo dado, mesmo minuto:
+  `wiki/benchmarks/b058-tpch-headtohead-omni.md`, artefatos em `benchmarks/artifacts/b058/tpch/`.
+  Toda resposta conferida contra o oráculo, nas dez corridas.
+  .
+  **No heap somos competitivos** — a SF=0,1 empatamos na q1 e somos **1,4× mais rápidos na q18**.
+  Isso não estava medido contra ninguém e é notícia boa.
+  .
+  **No colunar perdemos para o nosso próprio heap:** 9,2× / 15,9× / 5,2× pior em q1 / q6 / q18, com o
+  pushdown ligado e verificado. O engine do Omni, no mesmo teste, **ganha do heap dele** na q1 (1,9×) e
+  na q6 (8,0×) — e perde 1,7× na q18, o que fica registrado porque nem ele ganha em tudo.
+  Colunar contra colunar: **17,9× / 159× / 2,2×** contra nós.
+  .
+  Ressalvas declaradas no conceito, e são grandes: **uma execução por ponto** (sem variância, sem
+  significância), SF=0,1 é pequeno (a avaliação independente usou SF10/SF100), PG 18.6 contra 17.9, e
+  os artefatos são JSON cru porque o comando `tpch` não emite bundle — lacuna do [[B-069]].
+  .
+  **Abertos:** critério 3 (contenção escrita×scan nos dois regimes) e o TPC-H em escala real.
+
 ## B-059 — O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia   [ ]
 
 domain: arnes
