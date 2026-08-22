@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "analytical/synthetic/paths",
+  "version": 1,
+  "workload": {
+    "type": "analytical",
+    "loop": "closed",
+    "operation_count": 12
+  },
+  "quality": {
+    "metric": "exact_match",
+    "ground_truth": "computed"
+  },
+  "parameters": {
+    "paths": [
+      "row",
+      "columnar",
+      "parquet"
+    ]
+  },
+  "warmup": {
+    "policy": "fixed_operations",
+    "operations": 1
+  },
+  "repetitions": 3
+}

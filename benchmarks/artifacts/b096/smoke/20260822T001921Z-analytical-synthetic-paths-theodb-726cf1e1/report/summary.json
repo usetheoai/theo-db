@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "20260822T001921Z-analytical-synthetic-paths-theodb-726cf1e1",
+  "status": "VALID",
+  "profile": "nightly",
+  "publishable": false,
+  "benchmark": {
+    "id": "analytical/synthetic/paths",
+    "version": 1,
+    "commit": "8c5ca32e22e528484b488970de4dc0b8bcac8aea"
+  },
+  "system": {
+    "id": "theodb",
+    "version": null
+  },
+  "environment_digest": "sha256:e30d44a711f08382d4da7657af74eda4",
+  "headline": {
+    "configuration": "total_rows via columnar",
+    "throughput_per_second": 468.9622054124348,
+    "latency_p50_ms": 2.213718999996672,
+    "latency_p95_ms": 2.369512600046164,
+    "latency_p99_ms": 2.3833609200505634
+  },
+  "limitations": [
+    "profile 'nightly' is not publishable",
+    "total_rows via columnar: unstable (latency_p95_ms cv=0.059; latency_p99_ms cv=0.060; throughput_per_second cv=0.078)",
+    "sum_amount via columnar: unstable (latency_p95_ms cv=0.074; latency_p99_ms cv=0.076; throughput_per_second cv=0.056)",
+    "filtered_sum via columnar: unstable (latency_p50_ms cv=0.074; latency_p95_ms cv=0.073; latency_p99_ms cv=0.073; throughput_per_second cv=0.085)"
+  ]
+}

@@ -35,8 +35,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   ~90% do tempo era a travessia `Arrow → texto NDJSON → serde_json::Value → JsonB`, serializando e
   re-parseando cada linha. **Nem o parser nem o `jsonb` eram o gargalo.** A via por texto permanece
   como oráculo dos testes de equivalência e como fallback para tipos que a conversão direta não cobre
-  (nested, temporal, decimal). **O ganho ainda NÃO foi medido** — quando for, entra aqui com o número
-  e sai do arnês (B-096, B-069)
+  (nested, temporal, decimal). **Ganho medido no arnês: 1,085× mediano** (0,98×–1,21×, n=24, seis
+  escalas × quatro consultas, `nightly`/`VALID`) — ~8,5%, e **não** a ordem de grandeza que a
+  decomposição local sugeria (B-096, B-069)
+- **CORREÇÃO da entrada acima: minha leitura da decomposição estava errada, e a hipótese do `B-096`
+  estava CERTA.** Eu atribuí ~90% do custo à travessia `Arrow → NDJSON → Value` e disse que a
+  assinatura `SETOF jsonb` não era o problema. **Havia DOIS round-trips por texto, e a correção removeu
+  um.** O segundo vive dentro do `pgrx` — `impl IntoDatum for JsonB` faz `serde_json::to_string` e
+  entrega o texto ao `jsonb_in` do Postgres, por linha. Enquanto o retorno for `jsonb`, nenhuma
+  otimização do lado Arrow escapa dele, que é exatamente o que o item afirmava (B-096)
 - **Chave nula em `read_parquet` continua OMITIDA, não emitida como `null`.** O `arrow-json` omite
   campos nulos, e a primeira versão da conversão direta os emitia — diferença invisível em qualquer
   benchmark e visível em `doc ? 'chave'` e `jsonb_object_keys(doc)`. Pega pelo teste de equivalência

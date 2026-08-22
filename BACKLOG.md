@@ -68,9 +68,9 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-98 items — **Open** 13 · **In flight** 6 · **Closed** 79
+98 items — **Open** 12 · **In flight** 6 · **Closed** 80
 
-### Open (13)
+### Open (12)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -86,7 +86,6 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-058`](#b-058--o-colunar-nunca-foi-comparado-ao-concorrente-que-faz-a-mesma-coisa-e-agora-há-números-públicos----) | O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos | `triaged` | — |
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-095`](#b-095--group-by-por-texto-recusa-o-pushdown-colunar-e-a-guarda-está-certa----) | `GROUP BY` por TEXTO recusa o pushdown colunar, e a guarda está certa | `triaged` | — |
-| [`B-096`](#b-096--read_parquet-devolve-setof-jsonb-e-é-isso-que-custa-142----) | `read_parquet` devolve `SETOF jsonb`, e é isso que custa 142× | `triaged` | — |
 
 ### In flight (6)
 
@@ -99,7 +98,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
 
-### Closed (79)
+### Closed (80)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -181,6 +180,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-093`](#b-093--o-ndcg-publicado-do-pilar-lexical-foi-medido-com-agregação-que-trunca-e-o-arnês-já-não-trunca---x) | O nDCG publicado do pilar lexical foi medido com agregação que trunca, e o arnês já não trunca | `shipped` | — |
 | [`B-094`](#b-094--o-arnês-é-65-mais-lento-que-o-pgbench-sob-carga-e-é-ele-que-publicamos---x) | O arnês é 6,5× mais lento que o `pgbench` sob carga, e é ele que publicamos | `killed` | — |
 | [`B-098`](#b-098--provisionar-um-host-de-bench-leva-20-min-e-falha-por-capacidade-ausente-uma-por-vez---x) | Provisionar um host de bench leva 20 min e falha por capacidade ausente, uma por vez | `shipped` | — |
+| [`B-096`](#b-096--read_parquet-devolve-setof-jsonb-e-é-isso-que-custa-142---x) | `read_parquet` devolve `SETOF jsonb`, e é isso que custa 142× | `shipped` | — |
 | [`B-097`](#b-097--o-tam-colunar-reporta-zero-linhas-ao-planner-e-o-analyze-não-amostra-nada---x) | O TAM colunar reporta ZERO linhas ao planner, e o ANALYZE não amostra nada | `shipped` | — |
 
 <!-- BACKLOG-INDEX:END -->
@@ -2337,6 +2337,17 @@ source: discover-evolve
 evidence: o [[B-045]] fechou a lacuna para métricas de **qualidade** — a paridade lexical do `b047` passou a ter p=0,477 sobre 6.980 consultas, com IC 95% de [−0,0011, +0,0025]. Ele **não** fecha para velocidade, e a razão é estrutural: o teste pareado precisa de valor **por consulta**, e QPS não tem — é uma taxa agregada sobre a corrida inteira. As duas maiores diferenças que publicamos são justamente de velocidade e seguem sem teste: **Elasticsearch faz 4,3× o nosso QPS** no lexical (`b047`) e **pgvector faz +16,3%** a recall casado no vetorial (`b035`). O que existe hoje como sustentação são duas corridas concordantes a 1,3% no b035, e **uma única corrida por configuração** no b047.
 why_now: os dois números são grandes o bastante para que ninguém duvide do sinal — mas o projeto acabou de gastar um ciclo inteiro para poder dizer "demonstrado" em vez de "observado" num empate de terceira casa decimal, e continua dizendo "observado" nas duas diferenças que mais aparecem. A assimetria é indefensável: exigimos rigor onde a diferença é minúscula e o dispensamos onde ela é de 4×. Pior, a ausência morde na direção errada quando o número **melhorar**: o [[B-042]] e o [[B-046]] existem para fechar essas diferenças, e sem teste um ganho de 8% será tão inafirmável quanto o déficit atual.
 status: planned
+verificacao_2026_08_21: **bullets 2 e 5 fechados; o 4 NÃO, e não estava dito.** `src/analysis/throughput.py`
+  existe com Welch + bootstrap sobre a RAZÃO (que é a forma que a gente publica — "4,3×" —, e um IC
+  sobre a diferença não responde a pergunta que a frase faz), a escolha justificada com citação
+  (Welch 1947; Delacre/Lakens/Leys 2017), e o comando `theodb-bench throughput`. 27 testes passando.
+  .
+  **O bullet 4 pede aplicação retroativa ao `b047` (4,3×) e ao `b035` (+16,3%), e nenhum dos dois a
+  recebeu.** Conferido: o `b047` não menciona Welch; o `b035` tem *"duas corridas independentes do
+  TheoDB"* e nenhuma segunda corrida do pgvector — Welch com n=2 contra n=1 não produz veredito.
+  .
+  O que falta é MEDIÇÃO, não código: N corridas de cada configuração, que é tempo de droplet. O item
+  segue `planned` por isso, e não por esquecimento.
 status_nota_evidencia: 2026-08-20 — o campo ARGUMENTA a partir de medições que já existem (p=0,477 do
   [[B-045]]; os 4,3× do b047 e +16,3% do b035) em vez de trazer medição nova. Sustenta `triaged` porque
   cada fato citado é verificável, e a lacuna que ele afirma é de ausência — que se verifica por ausência.
@@ -4519,7 +4530,7 @@ dod:
 > `cycle-discover § Mode is reclassifiable` manda fazer.
 
 
-## B-096 — `read_parquet` devolve `SETOF jsonb`, e é isso que custa 142×   [ ]
+## B-096 — `read_parquet` devolve `SETOF jsonb`, e é isso que custa 142×   [x]
 
 domain: colunar
 repo: theo-db
@@ -4527,7 +4538,30 @@ suggested_mode: evolve
 source: discover-review
 evidence: `theodb_rs` via `src/adapters/postgres.py:1558-1563` — *"`read_parquet` returns SETOF jsonb, so the columns are projected out of the jsonb document"*; medido em `…122336Z-analytical-crossover…/result.json`: **0,1 QPS contra 18,4 do heap** a 2M linhas, em todas as quatro consultas e todas as seis escalas
 why_now: a leitura fácil do número (142× mais lento) é "o parser de Parquet é lento", e ela leva a reescrever o componente errado. A causa está na **interface**: cada linha é materializada como documento JSON e as colunas são extraídas de dentro dele, o que desfaz exatamente a propriedade pela qual se escolhe Parquet. Enquanto a assinatura for `SETOF jsonb`, nenhuma otimização de parsing muda a ordem de grandeza.
-status: triaged
+status: shipped
+resultado_2026_08_21: **os três bullets fechados, e a hipótese do item estava CERTA — a minha leitura
+  dela é que estava errada.**
+  .
+  Bullet 1 (separar parsing de materialização): o parser Parquet lê e agrega 2M linhas em **25 ms**, o
+  PG constrói 2M `jsonb` nativos em **435 ms**, e `read_parquet` levava **4 650 ms**.
+  .
+  Bullet 2 (protótipo medido no mesmo sweep): conversão direta Arrow→`Value` medida no arnês contra a
+  via anterior, duas imagens no **mesmo droplet e na mesma hora**, `nightly`/`VALID` nas duas —
+  **1,085× mediano** (n=24, 0,98× a 1,21×).
+  .
+  **Por que só 8,5%: havia DOIS round-trips por texto e eu removi um.** O segundo vive no `pgrx`
+  (`impl IntoDatum for JsonB` → `serde_json::to_string` → `jsonb_in`), por linha, e é inescapável
+  enquanto a função devolver `jsonb`. Eu havia declarado a hipótese do item "parcialmente refutada" no
+  `CHANGELOG`; ela estava certa, e por razão mais precisa que a enunciada — não é "a assinatura" em
+  abstrato, é que a ponte `pgrx`→PG para `jsonb` passa por texto.
+  .
+  Bullet 3 (limite declarado): **aplicado**. 8,5% não torna o Parquet caminho de consulta quente — a
+  2M linhas ele segue em ~6 s contra ~0,06 s do heap. O caminho para ordem de grandeza é interface
+  **tipada**, que evita `jsonb`; o `olap()` já demonstra o padrão no mesmo arquivo, em 25 ms.
+  .
+  Segue aberta, e o item já a declarava: se o uso pretendido do Parquet é varredura em lote, a métrica
+  QPS-por-consulta é que está errada, não o código. Agora há lastro para responder.
+  Conceito: [[b096-parquet-jsonb-dois-roundtrips]].
 dod:
   - medido o custo separando parsing de projeção — quanto do tempo é a materialização jsonb
   - uma interface tipada/colunar para `read_parquet` é prototipada e medida contra a atual no mesmo sweep
