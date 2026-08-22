@@ -2292,6 +2292,21 @@ verificacao_2026_08_22: **bullet 2 FECHADO, e a resposta é o oposto do que o t�
   20 e a 80 clientes) e, conforme o achado, apontar contenção com `file:line` ou decompor o custo por
   consulta. Isso é campanha de perfilamento, e o `doctor` reporta `perf_events` indisponível no droplet
   — o que precisa ser resolvido antes, ou contornado com amostragem por software.
+  .
+  **CORREÇÃO de 2026-08-22, medida: esse bloqueio NÃO EXISTE, e o defeito era do instrumento.**
+  Verificado no droplet, como root, com `perf_event_paranoid = 4` — exatamente o estado que o `doctor`
+  chamava de indisponível: `perf stat -e task-clock` devolveu **1,19 ms**, e `perf record -e cpu-clock`
+  produziu **perfil com símbolos de userspace e de kernel**. A regra do arnês era `paranoid <= 2`, que é
+  o valor da **política**; `perf_event_paranoid` restringe usuário **sem privilégio**, root o contorna, e
+  nós rodamos como root no host de medição. Era `guides/instrumento-reporta-o-pedido.md` **dentro do
+  instrumento que deveria detectar essa classe**.
+  .
+  Consertado: a capacidade passa a ser **medida por probe**, e `perf_sampling` foi **separado** de
+  `perf_events` — contador de hardware e amostragem por software falham por razões diferentes, e a
+  campanha só precisa da segunda. Quando falha, a mensagem diz o conserto
+  (`sysctl kernel.perf_event_paranoid=1`). **A campanha de perfilamento está desbloqueada e nunca
+  esteve bloqueada** — o que a impediu por um dia foi uma resposta errada, não uma limitação da
+  plataforma.
 retratacao_2026_08_21: **⚠ O RESULTADO ABAIXO ESTÁ ERRADO, e o erro é do meu desenho de medição.**
   O `run_concurrent` emitia total FIXO de 300 operações independente do número de clientes — a 80
   clientes são **3,75 consultas por cliente**, e a abertura de conexão domina a janela inteira.
