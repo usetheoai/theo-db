@@ -234,7 +234,7 @@ parser lia como 48 GB (base 1000). O mesmo texto ia para os dois lugares signifi
 diferentes, o cgroup ficava mais frouxo que a declaração, e o portão reprovava — com razão. O parser
 passou a seguir systemd e docker no sufixo simples.
 
-# As sete armadilhas — e a regra que torna a lista obsoleta
+# As oito armadilhas — e a regra que torna a lista obsoleta
 
 Medidas em 2026-08-21, provisionando do zero pela primeira vez em muito tempo. **Todas só aparecem em
 host limpo** — é por isso que passaram despercebidas: toda corrida anterior herdou estado.
@@ -312,12 +312,34 @@ host limpo** — é por isso que passaram despercebidas: toda corrida anterior h
    E o código de saída 124 do `timeout` é tratado como **"pode haver resultado lá"**, não como falha
    limpa: foi exatamente o caso — a medição existia, só a condução tinha travado, e a coleta a trouxe.
 
+8. **`psql` devolve 0 mesmo quando o SQL falha.** Apareceu DUAS vezes em 2026-08-22, em contextos
+   diferentes e com horas de distância: primeiro num `psql` de proveniência que usava o nome antigo da
+   extensão, depois numa carga de tabela que "teve sucesso" com a tabela inexistente — e a medição
+   seguinte leu `0/200` sem que o erro real aparecesse em lugar nenhum.
+
+   Sem `-v ON_ERROR_STOP=1`, um comando SQL que erra **não** faz o `psql` retornar não-zero. Todo
+   `psql ... || { echo FALHA; exit 1; }` que dependa disso é uma guarda que não guarda:
+
+   ```bash
+   psql -v ON_ERROR_STOP=1 -c "…"   # sem isto, o `||` nunca dispara
+   ```
+
+   **A segunda ocorrência é a informativa**: eu havia diagnosticado e corrigido a primeira poucas horas
+   antes, e reintroduzi a mesma armadilha em código novo. Uma lição registrada num lugar não protege o
+   código que alguém escreve em outro — o que é exatamente o argumento de § A regra abaixo.
+
+   Da mesma família, no mesmo dia: `[ "$tam" -lt 33554432 ]` com `$tam` **vazio** é falso, então a
+   guarda que recusava um regime de cache falso passava calada. **Uma guarda que não trata o caso
+   degenerado não é guarda** — ela é uma linha que parece proteger.
+
 # A regra, que vale mais que a lista
 
-Seis das sete têm a mesma forma: **capacidade que existe na máquina de desenvolvimento e não num host
-limpo, descoberta DEPOIS do trabalho caro.** A sétima é de outra família e por isso vale destacá-la: não
-falta capacidade nenhuma — falta **teto de tempo** numa chamada remota, e a defesa contra travar não é a
-mesma que a defesa contra morrer. Uma lista de armadilhas não impede a sétima — ela só
+Seis das oito têm a mesma forma: **capacidade que existe na máquina de desenvolvimento e não num host
+limpo, descoberta DEPOIS do trabalho caro.** A sétima e a oitava são de outra família e por isso valem destaque: não falta capacidade nenhuma. Na
+sétima falta **teto de tempo** numa chamada remota — a defesa contra travar não é a mesma que a defesa
+contra morrer. Na oitava falta **fazer o erro chegar**: `psql` sem `ON_ERROR_STOP` engole a falha, e uma
+guarda que compara variável vazia passa calada. Nas duas, o defeito é uma verificação que existe e não
+verifica. Uma lista de armadilhas não impede a sétima — ela só
 registra as seis que já doeram.
 
 O que impede é um **portão de capacidades executável, rodado antes de qualquer trabalho caro**:
