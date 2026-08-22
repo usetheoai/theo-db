@@ -68,12 +68,13 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-102 items — **Open** 10 · **In flight** 5 · **Closed** 87
+103 items — **Open** 11 · **In flight** 5 · **Closed** 87
 
-### Open (10)
+### Open (11)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
+| [`B-103`](#b-103--o-head2head-pareia-por-posição-enquanto-o-casamento-por-recall-existe-e-não-é-chamado----) | O `head2head` pareia por POSIÇÃO enquanto o casamento por recall existe e não é chamado | `triaged` | — |
 | [`B-002`](#b-002--o-objetivo-definir-e-medir-o-que-torna-o-theodb-atrativo-já-que-superar-todo-benchmark-é-impossível----) | O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível | `raw` | — |
 | [`B-003`](#b-003--vetorial-o-teto-é-o-build-não-a-busca--100m-nunca-foi-atingido----) | Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido | `raw` | — |
 | [`B-005`](#b-005--híbrido-o-ganho-da-fusão-sobre-o-vetorial-puro-é-estatisticamente-não-significativo----) | Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo | `raw` | — |
@@ -598,6 +599,52 @@ dod:
 >
 > **O que NÃO foi feito, e fica dito:** os bundles já publicados não foram reconstruídos. A correção
 > possível para eles é a página do conceito, não o artefato.
+
+## B-103 — O `head2head` pareia por POSIÇÃO enquanto o casamento por recall existe e não é chamado   [ ]
+
+domain: arnes
+repo: theodb-bench
+suggested_mode: review
+source: human
+evidence: medido em 2026-08-22 numa corrida real no droplet. `src/compare.py:91` define
+`match_by_recall(...)` com a lógica certa — procura entre os candidatos o par cujo `gap` de recall é
+`<= tolerance` (0,01), e o docstring diz que *"`tolerance` is honoured rather than taking the nearest pair
+at any distance"*. **E `cmd_head2head` nunca a chama:** `src/cli.py:565` faz
+`zip(sides[0][2], sides[1][2], strict=False)` — pareamento por **posição**, primeiro com primeiro.
+.
+**Consequência medida.** A varredura do ScaNN é cartesiana (`bench/vector.py:167`, `itertools.product`),
+logo `num_leaves_to_search: (5,20,80)` × `pre_reordering: (25,100,400)` gera **9 pontos**. O `zip` pegou os
+**3 primeiros** contra os nossos 3 — e os três primeiros do produto cartesiano têm todos
+`num_leaves_to_search=5`, o valor mais raso. Resultado da corrida:
+.
+| nosso ponto | recall | ponto do Omni pareado | recall |
+|---|---|---|---|
+| `ef_search=16` | 0,8698 | `leaves=5, rerank=25` | 0,6742 |
+| `ef_search=64` | 0,9606 | `leaves=5, rerank=100` | 0,7202 |
+| `ef_search=256` | 0,9950 | `leaves=5, rerank=400` | 0,6986 |
+.
+Os três `no verdict` que o arnês emitiu estão **certos** — os pontos não estão casados. Mas a razão é mais
+rasa do que a mensagem sugere: **ele nunca viu os pontos do ScaNN que poderiam casar**, porque só mediu o
+canto mais raso da fronteira dele.
+why_now: **isto invalida a leitura fácil da corrida de hoje, e a leitura fácil é favorável a nós.** Olhando a
+tabela acima alguém concluiria que *"o ScaNN do AlloyDB satura em 0,72 de recall enquanto o nosso chega a
+0,995"* — e isso seria **falso**: o recall dele nem é monotônico entre os três pontos (0,6742 → 0,7202 →
+0,6986), que é a assinatura de ruído em torno de **um** ponto de operação, não de uma curva. É exatamente a
+classe que o [[B-034]]/[[B-041]] já registram, agora apontando **para fora** — e o `dod` do [[B-057]] já
+avisava que medir o concorrente num default raso produziria vantagem falsa.
+status: triaged
+dod:
+  - `cmd_head2head` mede a fronteira COMPLETA dos dois lados e usa `match_by_recall` para escolher os pares;
+    o `zip` posicional sai
+  - quando nenhum par casa dentro da tolerância, a mensagem diz **qual faixa de recall cada lado cobriu** —
+    "não casou" sem a faixa não distingue "o concorrente não alcança" de "não medimos onde ele alcança"
+  - teste que reprova o pareamento posicional: dois lados com fronteiras de recall em ordens diferentes têm de
+    casar por recall, não por índice
+  - o intercalado query-a-query, que existe por justiça de medição, é preservado
+
+> Registrado em 2026-08-22 ao investigar por que a corrida casada por recall do [[B-057]] não deu veredito.
+> Sexta ocorrência no mesmo dia de *a peça existia e não foi consultada* — e a primeira delas dentro do
+> próprio arnês, na comparação de que o North Star depende.
 
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
