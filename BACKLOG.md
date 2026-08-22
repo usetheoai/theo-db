@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-98 items — **Open** 12 · **In flight** 6 · **Closed** 80
+98 items — **Open** 12 · **In flight** 5 · **Closed** 81
 
 ### Open (12)
 
@@ -87,18 +87,17 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-069`](#b-069--toda-medição-publicável-tem-de-sair-do-arnês-e-três-das-minhas-de-hoje-saíram-de-scripts----) | Toda medição publicável tem de sair do arnês, e três das minhas de hoje saíram de scripts | `triaged` | — |
 | [`B-095`](#b-095--group-by-por-texto-recusa-o-pushdown-colunar-e-a-guarda-está-certa----) | `GROUP BY` por TEXTO recusa o pushdown colunar, e a guarda está certa | `triaged` | — |
 
-### In flight (6)
+### In flight (5)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `planned` | — |
-| [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
 | [`B-073`](#b-073--oito-dos-catorze-pilares-declarados-não-têm-adapter-nenhum----) | Oito dos catorze pilares declarados não têm adapter nenhum | `planned` | — |
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
 
-### Closed (80)
+### Closed (81)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -148,6 +147,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-053`](#b-053--o-núcleo-de-distância-vetorial-é-puro-por-uma-linha-e-é-ela-que-prende-o-micro-bench-na-suíte---x) | O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte | `shipped` | — |
 | [`B-054`](#b-054--toda-iteração-em-rust-custa-8-minutos-e-2m34s-deles-eram-um-cp--r---x) | Toda iteração em Rust custa 8 minutos, e 2m34s deles eram um `cp -r` | `shipped` | — |
 | [`B-055`](#b-055--compatibilidade-com-pgbouncer-nunca-foi-medida-e-o-readme-promete-ferramentas-funcionam-sem-mudança---x) | Compatibilidade com PgBouncer nunca foi medida, e o README promete "ferramentas funcionam sem mudança" | `shipped` | — |
+| [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito---x) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `shipped` | — |
 | [`B-060`](#b-060--o-arnês-verifica-que-o-índice-foi-usado-e-não-verifica-que-o-knob-de-busca-pegou---x) | O arnês verifica que o índice foi usado, e NÃO verifica que o knob de busca pegou | `shipped` | — |
 | [`B-061`](#b-061--só-duas-suites-registradas-as-duas-vetoriais-o-colunar-não-tem-onde-ser-comparado---x) | Só duas suites registradas, as duas vetoriais: o colunar não tem onde ser comparado | `shipped` | — |
 | [`B-062`](#b-062--o-theodb-bench-não-tinha-develop-nem-main-e-a-branch-de-trabalho-era-a-default---x) | O `theodb-bench` não tinha `develop` nem `main`, e a branch de trabalho era a default | `shipped` | — |
@@ -2646,7 +2646,7 @@ dod:
 
 > Registrado 2026-08-13 a partir de pergunta direta do owner ("nosso banco de dados suporta PgBouncer?"). A
 > pergunta não tinha resposta no projeto — e a ausência é o achado tanto quanto a análise.
-## B-056 — O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito   [ ]
+## B-056 — O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito   [x]
 
 domain: governanca
 repo: theo-db
@@ -2668,7 +2668,18 @@ performance de completude, exatamente a classe que o [[B-048]] persegue no produ
 recusou as três. E há um agravante de método: o `cycle-acceptance.md` já estabelece que **o veredito é
 computado por script a partir de artefato em disco, nunca asserido pelo agente** — o gate do `/goal` faz o
 oposto, julgando por leitura de prosa.
-status: planned
+status: shipped
+verificacao_2026_08_21: os quatro bullets conferidos no `check_goal_met.py`, com 63 testes passando.
+  (1) o gate lê `BACKLOG.md`, `knowledge-base/` e o estado do repositório — não a janela de conversa.
+  (2) `maintenance-runs/{B-NNN}-*.md` é aceito como evidência de primeira classe, que é o formato que
+  o `cycle-maintenance.md` define. (3) `max_blocks` com teto e escalada. (4) o custo é medido por
+  `first_block_at`/`last_block_at` mais a contagem.
+  .
+  **O bullet 4 carrega uma honestidade que merece sobreviver ao fechamento:** o número histórico da
+  sessão que originou o item **está perdido**, e o código diz isso — *"nem o registro de manutenção
+  nem nenhum outro artefato capturou contagem ou tempo, e reconstruí-lo seria invenção"*. O que ele
+  faz é não repetir a perda. Fechar o bullet inventando o número retroativo teria sido exatamente o
+  defeito que o item existe para combater.
 status_nota: 2026-08-20 — os quatro bullets fecharam, dois deles já estavam. **Bullet 1 já estava**:
   `check_goal_met.py` lê o SISTEMA DE ARQUIVOS, e o docstring dele contrasta isso explicitamente com o
   `/goal` embutido, que "julga o transcript com um modelo pequeno". O defeito descrito no item é do
