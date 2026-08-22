@@ -94,6 +94,56 @@ buscar **superioridade de performance no pilar vetorial comprovada por benchmark
 
 ---
 
+## Estado medido contra o concorrente real (2026-08-22) — e o teto da nossa própria régua
+
+**Esta seção existe porque muda o que eu posso afirmar, não para relatar progresso.** O relatório completo
+está no [`README.md`](./README.md) e no dossiê publicado; aqui fica só o que decide uma frase minha.
+
+**O concorrente deixou de ser hipotético.** O `AlloyDB Omni` roda em container e há adapter no arnês. Primeira
+corrida de três vias na mesma máquina, TPC-H, n=3, oráculo conferido nas 90 respostas
+([`b058-tpch-headtohead-omni`](./wiki/benchmarks/b058-tpch-headtohead-omni.md)):
+
+| eixo | veredito medido |
+|---|---|
+| **heap × heap** | **paridade**; na q18 estamos **1,30× à frente**, desvios sem sobreposição |
+| **nosso colunar × nosso heap** | perdemos **4,8× a 25,9×** — com o pushdown ligado e verificado |
+| **colunar × colunar** | **47× a 829×** contra nós, e **piora com a escala** |
+
+**Consequência para o que eu escrevo:** "nosso colunar" nunca aparece sem qualificação. Ele é mais lento que
+o nosso próprio heap nas formas que o TPC-H exercita. O eixo onde somos competitivos é o **heap**, e isso
+também não estava medido contra ninguém antes.
+
+### Três regras de procedência que passaram a valer
+
+1. **Toda medição publicada declara a configuração em que foi obtida.** `theodb.enable_columnar_agg` é
+   opt-in e vem **desligada**; o arnês a liga para medir o colunar com pushdown — corretamente — e por meses
+   **não registrava isso**. Medido: `count(*)` a 2M custa **911 ms** no default e **74 ms** ligada
+   ([[b102-configuracao-nao-declarada]]). Conserto no arnês; conceitos antigos **não** foram reconstruídos.
+2. **Conceito `Measurement` novo carrega `procedencia:` no frontmatter** — `arnes` (e então cita bundle que
+   resolve) ou `fora-do-arnes`, que é resposta **válida**. O que a catraca impede é a fraqueza ficar invisível.
+   Mecanizado em `.claude/scripts/check_bundle_citations.py`.
+3. **Não use a palavra "publicável" para número deste projeto.** O arnês define cinco perfis e só `release`
+   é `publishable`; medido no acervo: **18 bundles, 15 `research`, 3 `nightly`, zero `release`**. E o zero é
+   **teto de máquina**, não descuido — `release` exige preflight de `cpu_governor`, que máquina virtualizada
+   não expõe. Isso não invalida as medições; invalida a palavra, pelo padrão que nós mesmos escrevemos.
+
+### A classe de defeito mais cara deste projeto, e ela é minha
+
+**"O instrumento responde o pedido, não o efeito"** ([`instrumento-reporta-o-pedido`](./wiki/guides/instrumento-reporta-o-pedido.md)) —
+seis ocorrências registradas, e a sexta vive **dentro do `doctor`**, a peça que existe para detectar a classe.
+Ele reportava `perf` indisponível lendo `perf_event_paranoid <= 2`, que é a **política**; como root, `perf
+stat` e `perf record` funcionam. Uma campanha inteira ficou registrada como bloqueada por um dia.
+
+> **A regra que sai daí: uma capacidade é medida tentando, não lendo a política que a governa.** E as outras
+> cinco produziram números errados — que alguém refaz e contesta; essa **impediu uma medição de acontecer**,
+> e isso não deixa rastro.
+
+**Corolário operacional, medido quatro vezes em um único dia:** *o precedente existia, estava publicado, e não
+disparou.* A suíte casada por recall já estava no `registry.py`, a doze linhas do que mandei rodar; dois dos
+três critérios do B-008 já estavam respondidos num bundle; o teto de `cpu_governor` estava no runbook **com a
+mesma mensagem de erro** — e custou um droplet. **Antes de concluir que algo está bloqueado ou ausente, procure
+no acervo primeiro** (Regra 8). É a diferença entre trabalho e retrabalho.
+
 ## Regras específicas do TheoDB
 
 1. **Ancore no SOTA AlloyDB.** Decisões de produto/arquitetura espelham o alvo (AlloyDB) e

@@ -134,7 +134,7 @@ Passo a passo das 12 capacidades em [`wiki/guides/quickstart.md`](./wiki/guides/
 
 - **Pilar vetorial** — tipo `vector` e índices ANN (`theodb_hnsw`, `theodb_ivfflat`) **own-code**, com paridade de recall classe-pgvector (ver o estado medido na Missão). Sem pgvector/pgvectorscale.
 - **Superfície AI-native (SQL)** — embeddings (`theodb.embed`), busca **híbrida** `ai.hybrid_search_rrf` (BM25/`ts_rank_cd` + vetor via RRF), rerank, NL→SQL com defesa a injeção, extração de grafo. Servida 100% pela extensão Rust — **sem `plpython3u`**.
-- **Colunar (in-DB)** — TableAM colunar próprio (`theodb_columnar`) com pushdown de agregação/GROUP-BY/zone-map sobre dados transacionais vivos (own-code).
+- **Colunar (in-DB)** — TableAM colunar próprio (`theodb_columnar`) com zone-map e pushdown de agregação sobre dados transacionais vivos (own-code). **O pushdown é condicional, e a condição é medida:** `GROUP BY` por chave **inteira** faz pushdown limpo (4,5 a 9,8×); por chave de **texto** ele é **recusado**, e a recusa está certa — nosso executor emite grupos em ordem byte-wise e o PostgreSQL promete ordem de collation ([`columnar-groupby-verdict`](./wiki/benchmarks/columnar-groupby-verdict.md)). Ver também os limites medidos em [Onde o colunar perde](#onde-o-colunar-perde-medido).
 - **Lakehouse Parquet (own-code)** — ler/escrever/agregar arquivos Parquet externos **own-code** via DataFusion/Arrow, **sem DuckDB** (M143 removeu o `pg_duckdb` por completo — ADR-0057). Superfície: `theodb.htap_refresh(rel)` (materializa uma tabela num snapshot Parquet) e `theodb.olap(rel)` (lê+agrega o snapshot); as primitivas `public.read_parquet(path)`/`write_parquet(rel,path)` são superuser-only (least-privilege — escrita de arquivo server-side). Uma imagem só, sem componente C++/httpfs; o lakehouse own-code custa +12 MB no build default vs os 118 MB do bundle DuckDB (`wiki/benchmarks/m143-pgduckdb-removal.md`).
 - **Grafo nativo** — engine de grafo persisted-CSR para GraphRAG (`theodb.graph_*`).
 - **Fundação de banco** — **PostgreSQL 18**, cadeia de upgrade própria (`ALTER EXTENSION ... UPDATE`), gates mecânicos de qualidade no CI (clippy `-D warnings`, rustfmt, Postgres `--enable-cassert`, license-gate D1, pgspot).
@@ -143,6 +143,51 @@ Passo a passo das 12 capacidades em [`wiki/guides/quickstart.md`](./wiki/guides/
 
 - **Engine lexical própria (M140)** — BM25 own-code sobre Tantivy (MIT), in-PG e transacional (MVCC/WAL/crash provados no binário shipado); ganho honesto na busca lexical standalone + moat de consolidação, **não** no retrieval híbrido dominado pelo vetor (M138).
 - **Remoção total do `pg_duckdb` (M142→M143)** — o lakehouse (ler/escrever/agregar Parquet) virou **own-code** (DataFusion/Arrow, sem DuckDB) no build default; o **último componente C++/httpfs saiu** do projeto. 118 MB de C++ fora, +12 MB de Rust dentro.
+
+### Head-to-head contra o AlloyDB Omni (medido em 2026-08-22)
+
+Primeira corrida do TheoDB contra o **concorrente real** — não a biblioteca que servia de proxy — na mesma
+máquina, mesmo dado, mesmo minuto. TPC-H q1/q6/q18, mediana de 3 repetições, oráculo conferido nas 90
+respostas. Artefatos em [`benchmarks/artifacts/b058/tpch-n3/`](./benchmarks/artifacts/b058/tpch-n3/); leitura
+completa em [`b058-tpch-headtohead-omni`](./wiki/benchmarks/b058-tpch-headtohead-omni.md).
+
+| SF=1 (≈6M `lineitem`), ms | q1 | q6 | q18 |
+|---|---|---|---|
+| **TheoDB heap** | 729,0 ±33 | 263,0 ±4 | **3.255,8 ±54** |
+| **TheoDB colunar** | 7.685,3 ±194 | 6.801,9 ±287 | 15.655,9 ±272 |
+| AlloyDB Omni, engine off | 735,7 ±29 | 239,3 ±37 | 4.236,4 ±70 |
+| AlloyDB Omni colunar | 163,7 ±2 | 8,2 ±0,3 | 4.821,5 ±17 |
+
+**No heap somos par do AlloyDB Omni**, e na q18 — a que junta três tabelas — estamos **1,30× à frente**, com
+os desvios sem sobreposição. Na q1 os intervalos se sobrepõem: é empate, e dizer outra coisa seria ler ruído.
+
+<a id="onde-o-colunar-perde-medido"></a>
+
+### Onde o colunar perde (medido)
+
+**No caminho colunar o resultado é o oposto do que o pilar existe para entregar.** Com o pushdown ligado e
+verificado, o nosso colunar é mais lento que o **nosso próprio heap** nas três queries e nas duas escalas —
+10,5× / 25,9× / 4,8× a SF=1. Contra o colunar do Omni a razão vai de 47× a **829×**, e **piora com a escala**.
+
+A causa não é surpresa e estava medida antes: as queries do TPC-H filtram e agrupam, e o
+[crossover do colunar](./wiki/benchmarks/b058-crossover-colunar.md) já registrava que o **agregado filtrado**
+perde em toda a faixa. O ganho do colunar vive em contagem e soma acima de ~100 mil linhas, não em carga
+analítica de forma geral.
+
+**Lakehouse Parquet:** 14,9× a 154× mais lento que heap, medido de 10 mil a 2 milhões de linhas, nas quatro
+formas de consulta. Causa parcial medida: dois round-trips de texto por leitura, **e só um é nosso** — remover
+o nosso rendeu 1,085×, o que descarta parsing como o eixo a atacar.
+
+### O teto do nosso próprio padrão de evidência
+
+O arnês define cinco perfis de rigor e **apenas `release` é publicável** — o módulo diz isso citando o PRD §10.
+Medido no acervo em 2026-08-22: **18 bundles, 15 em `research`, 3 em `nightly`, zero em `release`**. E o zero
+não é descuido: `release` exige um preflight bloqueante de `cpu_governor`, que **máquina virtualizada não
+expõe** — a corrida morre em um segundo. Nenhum número deste projeto saiu do perfil que o próprio código chama
+de publicável, e nenhum conserto de script muda isso.
+
+Isso **não invalida as medições** — elas foram feitas e conferidas contra oráculo. Invalida a palavra
+"publicável" aplicada a elas pelo padrão que nós mesmos escrevemos, e por isso ela não é usada aqui.
 
 **O único que falta (não é engenharia):**
 

@@ -13,6 +13,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **`README.md` e `CLAUDE.md` passam a carregar o estado medido contra o concorrente — inclusive onde o
+  sistema perde.** O README ganhou o head-to-head TPC-H contra o AlloyDB Omni (paridade no heap, **1,30× à
+  nossa frente na q18**, e **47× a 829× contra nós no colunar**), a seção *Onde o colunar perde* e o teto do
+  nosso próprio padrão de evidência. **Uma correção de exatidão junto:** o README afirmava *"pushdown de
+  agregação/GROUP-BY"* sem qualificar — o pushdown de `GROUP BY` funciona para chave **inteira** (4,5 a 9,8×)
+  e é **recusado** para chave de **texto**, e a recusa está certa, porque protege a ordem de collation. O
+  `CLAUDE.md` recebeu apenas o que muda o que pode ser afirmado: as três regras de procedência, o teto de
+  `cpu_governor` e o corolário de consultar o acervo antes de concluir que algo está bloqueado.
+
 ### Added
 - **Conceito de medição novo tem de declarar de onde o número veio (B-069).** O gate de bundles cobria
   *"quem cita, cita algo que resolve"* e não cobria o caso de publicar um número **sem citação nenhuma** —
