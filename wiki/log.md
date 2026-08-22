@@ -411,3 +411,11 @@ No heap somos par dele e **1,4× mais rápidos na q18**; no colunar somos **5× 
 nosso próprio heap**, enquanto o engine dele ganha do heap dele em duas das três queries. Colunar
 contra colunar a q6 dá **159×** contra nós. Uma execução por ponto — sem variância.
 [b058-tpch-headtohead-omni](benchmarks/b058-tpch-headtohead-omni.md).
+
+**Sexta ocorrência de [o instrumento reporta o pedido](guides/instrumento-reporta-o-pedido.md), e é a
+mais séria: ela vive DENTRO do detector.** O `doctor` do arnês dizia `perf_events: False` no droplet, e
+a nota do [[B-043]] registrou isso como o bloqueio da campanha de perfilamento. Medido no mesmo host,
+como root, no estado que ele chamava de indisponível (`paranoid = 4`): `perf stat` devolveu 1,19 ms e
+`perf record` produziu perfil com símbolos. A regra lia a **política**, que só restringe usuário sem
+privilégio. **As anteriores produziram números errados; esta impediu uma medição de acontecer** — e
+isso não deixa rastro que alguém refaça e conteste.

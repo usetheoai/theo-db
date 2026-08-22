@@ -138,8 +138,50 @@ errada e morreu, porque duas medições minhas rodaram em configurações difere
 dizia qual era qual**. A ausência não é neutra — ela já produziu uma hipótese falsa e o trabalho de
 matá-la.
 
-## A regra, corrigida
+## A sexta está DENTRO do detector, e custou um dia de campanha
+
+*Acrescentado em 2026-08-22, algumas horas depois da quinta ([[B-043]]). Nada acima foi reescrito.*
+
+O arnês tem um `doctor` cujo trabalho é dizer o que o host pode fazer. Ele respondia
+`perf_events: False` no droplet — e a nota do [[B-043]] registrou isso como **o bloqueio da campanha de
+perfilamento** que responderia por que o QPS lexical satura.
+
+**Medido no próprio droplet, como root, no estado exato que ele chamava de indisponível
+(`perf_event_paranoid = 4`):**
+
+```
+perf stat -e task-clock -- sleep 0.05   →  1.19 msec task-clock
+perf record -e cpu-clock                →  perfil com símbolos de userspace E de kernel
+```
+
+A regra era `perf_event_paranoid <= 2`. Esse número é a **política**, não o efeito — e a política
+restringe usuário **sem privilégio**. Root a contorna, e o arnês roda como root no host de medição.
+
+**Duas coisas fazem desta ocorrência a mais séria da lista.** A primeira: ela vive *dentro do
+instrumento que existe para detectar esta classe*. O `doctor` é a peça que responde "o que dá para
+medir aqui", e ele respondia lendo um valor de configuração em vez de tentar.
+
+A segunda: **as anteriores produziram números errados; esta impediu uma medição de acontecer.** Um
+número errado é encontrável — alguém o refaz e discorda. Uma campanha que não foi feita porque o
+instrumento disse que não dava **não deixa rastro nenhum**, e a nota do backlog registrou o bloqueio
+como fato de plataforma por um dia inteiro.
+
+**Um terceiro erro, menor e junto:** a capacidade era *uma*, e são *duas*. Contador de **hardware**
+(cycles, cache-misses) e amostragem por **software** (cpu-clock) falham por razões diferentes — uma VM
+tipicamente não expõe PMU e amostra por software sem problema. A campanha só precisava da segunda, e
+recebeu a resposta da primeira.
+
+O conserto foi trocar a dedução por um `perf stat` de verdade, e separar as duas capacidades. Custo:
+um subprocesso de poucos milissegundos por captura.
+
+# A regra, corrigida
 
 > **Não basta declarar e verificar. O que foi verificado tem de sair no artefato.**
 > Uma configuração aplicada e confirmada que não chega ao bundle descreve, para quem lê, a
 > configuração que **não** foi usada.
+
+E, da sexta:
+
+> **Uma capacidade é medida tentando, não lendo a política que a governa.**
+> Um instrumento que responde "não dá" sem ter tentado não erra um número — ele impede a medição de
+> existir, e isso não deixa rastro que alguém possa refazer e contestar.
