@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "system": "alloydbomni",
+  "capabilities": {
+    "vector_exact": true,
+    "vector_hnsw": true,
+    "vector_ivfflat": true,
+    "vector_scann": true,
+    "vector_quantized": false,
+    "vector_filtered": true,
+    "lexical": false,
+    "hybrid": false,
+    "rerank": false,
+    "columnar": true,
+    "parquet": false,
+    "graph": false,
+    "vectorizer": false,
+    "ai_sql": false
+  },
+  "version": "PostgreSQL 17.9 / alloydb_scann 0.1.4",
+  "effective_configuration": {
+    "shared_buffers": "51440MB",
+    "work_mem": "4MB",
+    "maintenance_work_mem": "64MB",
+    "max_connections": "100",
+    "max_parallel_workers": "8",
+    "max_parallel_workers_per_gather": "2",
+    "effective_cache_size": "4GB",
+    "synchronous_commit": "on",
+    "fsync": "on",
+    "full_page_writes": "on",
+    "wal_level": "replica",
+    "checkpoint_timeout": "5min",
+    "random_page_cost": "4",
+    "jit": "on"
+  },
+  "durability": {
+    "synchronous_commit": "on",
+    "fsync": "on"
+  }
+}

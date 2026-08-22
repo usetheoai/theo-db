@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "20260822T150102Z-vector-synthetic-smoke-pgvector-0dadd4cf",
+  "status": "EXPLORATORY",
+  "profile": "research",
+  "publishable": false,
+  "benchmark": {
+    "id": "vector/synthetic/smoke",
+    "version": 1,
+    "commit": "623faed9e52a910c4b6e82e5ccc3d089630bb858"
+  },
+  "system": {
+    "id": "pgvector",
+    "version": null
+  },
+  "environment_digest": "sha256:d91f8185fe6de5f66ef53ed834820915",
+  "headline": {
+    "configuration": "none",
+    "throughput_per_second": 1410.3892644049108,
+    "recall": 1.0,
+    "latency_p50_ms": 0.6262455000012324,
+    "latency_p95_ms": 0.694527949971757,
+    "latency_p99_ms": 0.761382730046307
+  },
+  "limitations": [
+    "profile 'research' is not publishable",
+    "run status is EXPLORATORY",
+    "none: unstable (no spread available for build_seconds, latency_p50_ms, latency_p95_ms, latency_p99_ms, recall, throughput_per_second)"
+  ]
+}

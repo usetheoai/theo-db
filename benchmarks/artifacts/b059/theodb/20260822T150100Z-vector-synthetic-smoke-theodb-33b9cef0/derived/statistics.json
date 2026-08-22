@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "run_id": "20260822T150100Z-vector-synthetic-smoke-theodb-33b9cef0",
+  "outlier_policy": {
+    "name": "none"
+  },
+  "points": [
+    {
+      "label": "none",
+      "parameters": {},
+      "metrics": {
+        "throughput_per_second": {
+          "median": 743.4383121634017,
+          "mean": 743.4383121634017,
+          "stdev": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no spread"
+          },
+          "min": 743.4383121634017,
+          "max": 743.4383121634017,
+          "coefficient_of_variation": {
+            "absent": "unavailable",
+            "detail": "no spread to divide by the mean"
+          },
+          "ci95_low": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no interval"
+          },
+          "ci95_high": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no interval"
+          },
+          "repetitions": 1,
+          "values": [
+            743.4383121634017
+          ]
+        },
+        "recall": {
+          "median": 1.0,
+          "mean": 1.0,
+          "stdev": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no spread"
+          },
+          "min": 1.0,
+          "max": 1.0,
+          "coefficient_of_variation": {
+            "absent": "unavailable",
+            "detail": "no spread to divide by the mean"
+          },
+          "ci95_low": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no interval"
+          },
+          "ci95_high": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no interval"
+          },
+          "repetitions": 1,
+          "values": [
+            1.0
+          ]
+        },
+        "latency_p50_ms": {
+          "median": 1.259758499969621,
+          "mean": 1.259758499969621,
+          "stdev": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no spread"
+          },
+          "min": 1.259758499969621,
+          "max": 1.259758499969621,
+          "coefficient_of_variation": {
+            "absent": "unavailable",
+            "detail": "no spread to divide by the mean"
+          },
+          "ci95_low": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no interval"
+          },
+          "ci95_high": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no interval"
+          },
+          "repetitions": 1,
+          "values": [
+            1.259758499969621
+          ]
+        },
+        "latency_p95_ms": {
+          "median": 1.4371017500252492,
+          "mean": 1.4371017500252492,
+          "stdev": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no spread"
+          },
+          "min": 1.4371017500252492,
+          "max": 1.4371017500252492,
+          "coefficient_of_variation": {
+            "absent": "unavailable",
+            "detail": "no spread to divide by the mean"
+          },
+          "ci95_low": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no interval"
+          },
+          "ci95_high": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no interval"
+          },
+          "repetitions": 1,
+          "values": [
+            1.4371017500252492
+          ]
+        },
+        "latency_p99_ms": {
+          "median": 1.4630553899843335,
+          "mean": 1.4630553899843335,
+          "stdev": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no spread"
+          },
+          "min": 1.4630553899843335,
+          "max": 1.4630553899843335,
+          "coefficient_of_variation": {
+            "absent": "unavailable",
+            "detail": "no spread to divide by the mean"
+          },
+          "ci95_low": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no interval"
+          },
+          "ci95_high": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no interval"
+          },
+          "repetitions": 1,
+          "values": [
+            1.4630553899843335
+          ]
+        },
+        "build_seconds": {
+          "median": 0.0,
+          "mean": 0.0,
+          "stdev": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no spread"
+          },
+          "min": 0.0,
+          "max": 0.0,
+          "coefficient_of_variation": {
+            "absent": "unavailable",
+            "detail": "no spread to divide by the mean"
+          },
+          "ci95_low": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no interval"
+          },
+          "ci95_high": {
+            "absent": "unavailable",
+            "detail": "a single repetition has no interval"
+          },
+          "repetitions": 1,
+          "values": [
+            0.0
+          ]
+        }
+      },
+      "stability": {
+        "stable": false,
+        "reason": "no spread available for build_seconds, latency_p50_ms, latency_p95_ms, latency_p99_ms, recall, throughput_per_second",
+        "threshold_cv": 0.05
+      }
+    }
+  ]
+}

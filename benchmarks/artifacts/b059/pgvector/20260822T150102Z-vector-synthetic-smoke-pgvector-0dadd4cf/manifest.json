@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "run_id": "20260822T150102Z-vector-synthetic-smoke-pgvector-0dadd4cf",
+  "status": "EXPLORATORY",
+  "profile": "research",
+  "created_at": "2026-08-22T15:01:03.296861Z",
+  "benchmark": {
+    "id": "vector/synthetic/smoke",
+    "version": 1,
+    "profile": "research",
+    "benchmark_commit": "623faed9e52a910c4b6e82e5ccc3d089630bb858",
+    "benchmark_dirty": false
+  },
+  "system": {
+    "id": "pgvector"
+  },
+  "execution": {
+    "warmup_operations": 20,
+    "repetitions": 1,
+    "loop": "closed"
+  },
+  "environment_ref": "environment.json",
+  "benchmark_ref": "benchmark.json",
+  "system_ref": "system.json",
+  "validation_ref": "validation.json"
+}

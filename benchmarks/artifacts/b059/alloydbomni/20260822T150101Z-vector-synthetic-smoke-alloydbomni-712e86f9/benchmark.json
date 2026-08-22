@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "vector/synthetic/smoke",
+  "version": 1,
+  "workload": {
+    "type": "ann",
+    "loop": "closed",
+    "clients": 1,
+    "arrival_rate_per_second": null,
+    "k": [
+      10
+    ],
+    "operation_count": 200
+  },
+  "quality": {
+    "metric": "recall",
+    "ground_truth": "computed"
+  },
+  "parameters": {},
+  "warmup": {
+    "policy": "fixed_operations",
+    "operations": 20
+  },
+  "repetitions": 1
+}

@@ -3063,6 +3063,30 @@ OSS, enquanto o produto expõe um access method do PostgreSQL que paga o mesmo i
 com Elasticsearch/OpenSearch. Com o AlloyDB nunca foi feito, e desde que o Omni é `docker pull
 google/alloydbomni:18` a impossibilidade deixou de existir.
 status: planned
+bullet4_2026_08_22: **a corrida de três vias EXISTE — três bundles, mesma máquina, mesma suíte.**
+  Droplet `g-16vcpu-64gb` (nyc1), suíte `vector/synthetic/smoke`, perfil `research`. Proveniência lida
+  de **cada servidor**, não das tags:
+  .
+  | sistema | versão (do servidor) | QPS | recall |
+  |---|---|---|---|
+  | TheoDB | PostgreSQL **18.6** | 743,4 | 1,0000 |
+  | AlloyDB Omni | PostgreSQL **17.9** | 1 344,2 | 1,0000 |
+  | pgvector | PostgreSQL **17.11** | 1 410,4 | 1,0000 |
+  .
+  **E este número NÃO é uma comparação do pilar vetorial — dizer que "o Omni é 1,8× mais rápido" seria
+  falso.** A única configuração medida é `none`, **busca exata**: os três varrem tudo, e o recall
+  1,0000 é por construção, não por qualidade de índice. Está medida varredura sequencial de vetores,
+  não o algoritmo que cada um oferece. As três corridas duraram 1–2 s, todas marcadas `(unstable)`,
+  sobre 2 000 vetores de 32 dimensões.
+  .
+  **O que o bullet 4 pedia está entregue**: os três sobem na mesma máquina, o arnês mede os três, cada
+  um produz bundle (`benchmarks/artifacts/b059/`). O caminho existe e é reprodutível por
+  `MODE=headtohead`. O número é subproduto, e fica com a ressalva colada nele.
+  .
+  A comparação de ANN exige suíte com índice — `vector/synthetic/sweep` (`none` + `hnsw`) — e mesmo ela
+  responde *"nosso HNSW contra os outros HNSW"*, **não** a pergunta do [[B-057]], que é sobre o AM
+  `alloydb_scann` do concorrente. Para essa só o Omni tem configuração, e ela precisa de desenho
+  próprio.
 medido_2026_08_22: **o adapter tocou um Omni REAL pela primeira vez, e produziu dois achados.**
   Imagem `google/alloydbomni:latest` (3,1 GB, pública) rodando localmente.
   .
