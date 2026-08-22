@@ -769,6 +769,21 @@ status_nota_2026_08_22: **Medido quanto falta em cada eixo, e as respostas são 
   runner chama. **Distância medida: cinco métodos de protocolo mais dois do benchmark** — trabalho de
   desenho, não de registro.
   .
+  **CORREÇÃO da conta acima, feita minutos depois: são mais que sete, e o bloqueio real é outro.** A matriz
+  mostra `vectorizer` com **nenhum adapter** declarando, e o `TheoDBAdapter.capabilities()` explica por quê no
+  próprio docstring: *"o que este adapter consegue exercitar, **não o que o TheoDB sabe fazer**. O TheoDB tem
+  busca híbrida, TAM colunar, I/O Parquet, grafo CSR **e um vectorizer em background**"* — e `vectorizer` fica
+  de fora do dicionário. A `SystemAdapter` declara `vectorizer_queue()` e `vectorizer_stats()` com **recusa
+  por default** (`base.py:488,494`), e o `TheoDBAdapter` **não as implementa**.
+  .
+  Então a cadeia inteira é: sete métodos de protocolo **+** duas da superfície do adapter **+** a declaração
+  da capacidade **+** um endpoint de embedding configurado. Wirar só o protocolo produziria suíte que reporta
+  `unsupported` — o que é o comportamento certo, e é trabalho jogado fora.
+  .
+  **O que essa correção preserva:** o adapter é honesto onde muitos não seriam. Ele distingue *"o produto sabe
+  fazer"* de *"eu consigo exercitar"* e recusa declarar a segunda — a mesma distinção que a coluna
+  `declarada × medida` da matriz existe para mostrar, um nível acima.
+  .
   **`rerank` / `ai_sql` — a maquinaria existe e ninguém a importa.** `src/ai.py` define `MockEndpoint`,
   `LocalEndpoint`, `RemoteEndpoint` e `CostBreakdown`, e **nenhum arquivo de `src/` importa
   `theodb_bench.ai`** — o único importador é `tests/test_ai.py`. É o mesmo padrão do
