@@ -1,0 +1,94 @@
+# Head to head: theodb vs alloydbomni
+
+`vector/sift/hnsw` against `vector/sift/scann-ah`, interleaved query by query with the order alternating.
+
+- `hnsw m=16 ef_search=16` (recall 0.8670) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=5 pre_reordering_num_neighbors=25` (recall 0.6898)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=16` (recall 0.8670) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=5 pre_reordering_num_neighbors=100` (recall 0.7226)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=16` (recall 0.8670) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=5 pre_reordering_num_neighbors=400` (recall 0.7236)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=16` (recall 0.8670) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=20 pre_reordering_num_neighbors=25` (recall 0.8756)
+None
+  **theodb** beats **alloydbomni** on latency_ms (p = 0.0001, n = 500, 95% CI [-0.085, -0.038], mean diff = -0.062, dz = -0.23; theodb faster on 255 of 500 queries, 0 tied)
+  caveat: theodb operated at 0.0086 lower recall, so part of its latency advantage is work it did not do.
+- `hnsw m=16 ef_search=16` (recall 0.8670) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=20 pre_reordering_num_neighbors=100` (recall 0.9556)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=16` (recall 0.8670) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=20 pre_reordering_num_neighbors=400` (recall 0.9576)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=16` (recall 0.8670) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=80 pre_reordering_num_neighbors=25` (recall 0.9034)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=16` (recall 0.8670) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=80 pre_reordering_num_neighbors=100` (recall 0.9956)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=16` (recall 0.8670) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=80 pre_reordering_num_neighbors=400` (recall 1.0000)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=64` (recall 0.9610) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=5 pre_reordering_num_neighbors=25` (recall 0.6898)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=64` (recall 0.9610) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=5 pre_reordering_num_neighbors=100` (recall 0.7226)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=64` (recall 0.9610) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=5 pre_reordering_num_neighbors=400` (recall 0.7236)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=64` (recall 0.9610) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=20 pre_reordering_num_neighbors=25` (recall 0.8756)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=64` (recall 0.9610) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=20 pre_reordering_num_neighbors=100` (recall 0.9556)
+None
+  **theodb** beats **alloydbomni** on latency_ms (p = 0.0001, n = 500, 95% CI [-0.211, -0.154], mean diff = -0.183, dz = -0.56; theodb faster on 345 of 500 queries, 0 tied)
+  caveat: alloydbomni operated at 0.0054 lower recall, so part of its latency advantage is work it did not do.
+- `hnsw m=16 ef_search=64` (recall 0.9610) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=20 pre_reordering_num_neighbors=400` (recall 0.9576)
+None
+  **theodb** beats **alloydbomni** on latency_ms (p = 0.0001, n = 500, 95% CI [-0.807, -0.740], mean diff = -0.774, dz = -2.02; theodb faster on 493 of 500 queries, 0 tied)
+  caveat: alloydbomni operated at 0.0034 lower recall, so part of its latency advantage is work it did not do.
+- `hnsw m=16 ef_search=64` (recall 0.9610) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=80 pre_reordering_num_neighbors=25` (recall 0.9034)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=64` (recall 0.9610) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=80 pre_reordering_num_neighbors=100` (recall 0.9956)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=64` (recall 0.9610) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=80 pre_reordering_num_neighbors=400` (recall 1.0000)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=256` (recall 0.9944) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=5 pre_reordering_num_neighbors=25` (recall 0.6898)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=256` (recall 0.9944) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=5 pre_reordering_num_neighbors=100` (recall 0.7226)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=256` (recall 0.9944) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=5 pre_reordering_num_neighbors=400` (recall 0.7236)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=256` (recall 0.9944) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=20 pre_reordering_num_neighbors=25` (recall 0.8756)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=256` (recall 0.9944) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=20 pre_reordering_num_neighbors=100` (recall 0.9556)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=256` (recall 0.9944) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=20 pre_reordering_num_neighbors=400` (recall 0.9576)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=256` (recall 0.9944) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=80 pre_reordering_num_neighbors=25` (recall 0.9034)
+None
+  no verdict — the two points differ in quality by more than 0.01 recall. Comparing them would report the one doing less work as faster.
+- `hnsw m=16 ef_search=256` (recall 0.9944) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=80 pre_reordering_num_neighbors=100` (recall 0.9956)
+None
+  **alloydbomni** beats **theodb** on latency_ms (p = 0.0001, n = 500, 95% CI [+0.601, +0.718], mean diff = +0.658, dz = 0.98; alloydbomni faster on 424 of 500 queries, 0 tied)
+  caveat: theodb operated at 0.0012 lower recall, so part of its latency advantage is work it did not do.
+- `hnsw m=16 ef_search=256` (recall 0.9944) vs `scann num_leaves=316 quantizer=AH num_leaves_to_search=80 pre_reordering_num_neighbors=400` (recall 1.0000)
+None
+  **alloydbomni** beats **theodb** on latency_ms (p = 0.0001, n = 500, 95% CI [+0.097, +0.222], mean diff = +0.160, dz = 0.22; alloydbomni faster on 309 of 500 queries, 0 tied)
+  caveat: theodb operated at 0.0056 lower recall, so part of its latency advantage is work it did not do.
+
+Recall coberto: theodb de 0.8670 a 0.9944; alloydbomni de 0.6898 a 1.0000.
+
+Interleaved: query *i* went to both systems back to back with the order alternating, so drift in the machine affects both sides equally and neither always pays the cold cache. This is the confounder a comparison of two sequential runs leaves in.

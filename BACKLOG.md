@@ -68,13 +68,12 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-103 items — **Open** 11 · **In flight** 5 · **Closed** 87
+103 items — **Open** 10 · **In flight** 5 · **Closed** 88
 
-### Open (11)
+### Open (10)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
-| [`B-103`](#b-103--o-head2head-pareia-por-posição-enquanto-o-casamento-por-recall-existe-e-não-é-chamado----) | O `head2head` pareia por POSIÇÃO enquanto o casamento por recall existe e não é chamado | `triaged` | — |
 | [`B-002`](#b-002--o-objetivo-definir-e-medir-o-que-torna-o-theodb-atrativo-já-que-superar-todo-benchmark-é-impossível----) | O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível | `raw` | — |
 | [`B-003`](#b-003--vetorial-o-teto-é-o-build-não-a-busca--100m-nunca-foi-atingido----) | Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido | `raw` | — |
 | [`B-005`](#b-005--híbrido-o-ganho-da-fusão-sobre-o-vetorial-puro-é-estatisticamente-não-significativo----) | Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo | `raw` | — |
@@ -96,7 +95,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
 
-### Closed (87)
+### Closed (88)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -105,6 +104,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-100`](#b-100--select-count-em-tabela-colunar-grande-ainda-falha-a-correção-do-b-097-está-incompleta---x) | `SELECT count(*)` em tabela colunar grande AINDA falha: a correção do B-097 está incompleta | `killed` | — |
 | [`B-101`](#b-101--count-no-colunar-custa-1-s-por-milhão-de-linhas-e-isso-contradiz-um-número-publicado-por-264---x) | `count(*)` no colunar custa ~1 s por milhão de linhas, e isso contradiz um número publicado por 264× | `killed` | — |
 | [`B-102`](#b-102--os-números-colunares-publicados-foram-medidos-com-um-recurso-opt-in-ligado-e-nada-diz-isso---x) | Os números colunares publicados foram medidos com um recurso opt-in LIGADO, e nada diz isso | `shipped` | — |
+| [`B-103`](#b-103--o-head2head-pareia-por-posição-enquanto-o-casamento-por-recall-existe-e-não-é-chamado---x) | O `head2head` pareia por POSIÇÃO enquanto o casamento por recall existe e não é chamado | `shipped` | — |
 | [`B-004`](#b-004--lexical-qualidade-de-recuperação-nunca-foi-medida-contra-um-corpus-público---x) | Lexical: qualidade de recuperação nunca foi medida contra um corpus público | `shipped` | — |
 | [`B-007`](#b-007--grafo-23-funções-expostas-e-nenhuma-medição-contra-peer-algum---x) | Grafo: 23 funções expostas e nenhuma medição contra peer algum | `shipped` | — |
 | [`B-008`](#b-008--lakehouse-4-funções-expostas-escala-e-formatos-nunca-medidos---x) | Lakehouse: 4 funções expostas, escala e formatos nunca medidos | `shipped` | — |
@@ -600,7 +600,7 @@ dod:
 > **O que NÃO foi feito, e fica dito:** os bundles já publicados não foram reconstruídos. A correção
 > possível para eles é a página do conceito, não o artefato.
 
-## B-103 — O `head2head` pareia por POSIÇÃO enquanto o casamento por recall existe e não é chamado   [ ]
+## B-103 — O `head2head` pareia por POSIÇÃO enquanto o casamento por recall existe e não é chamado   [x]
 
 domain: arnes
 repo: theodb-bench
@@ -632,7 +632,7 @@ tabela acima alguém concluiria que *"o ScaNN do AlloyDB satura em 0,72 de recal
 0,6986), que é a assinatura de ruído em torno de **um** ponto de operação, não de uma curva. É exatamente a
 classe que o [[B-034]]/[[B-041]] já registram, agora apontando **para fora** — e o `dod` do [[B-057]] já
 avisava que medir o concorrente num default raso produziria vantagem falsa.
-status: triaged
+status: shipped
 dod:
   - `cmd_head2head` mede a fronteira COMPLETA dos dois lados e usa `match_by_recall` para escolher os pares;
     o `zip` posicional sai
@@ -645,6 +645,19 @@ dod:
 > Registrado em 2026-08-22 ao investigar por que a corrida casada por recall do [[B-057]] não deu veredito.
 > Sexta ocorrência no mesmo dia de *a peça existia e não foi consultada* — e a primeira delas dentro do
 > próprio arnês, na comparação de que o North Star depende.
+
+> **Fechado em 2026-08-22, e verificado por uma corrida real que mudou de resultado.** O `zip` posicional
+> saiu; o laço varre o produto e o portão de tolerância — que já existia — decide os pares. A saída passa a
+> declarar a **faixa de recall coberta** por cada lado e a avisar quando as faixas não se sobrepõem.
+> Terceiro conserto, de custo: o índice só é reconstruído quando MUDA — trocar `ef_search` é parâmetro de
+> busca, e sem isso 40 pares custariam 80 construções onde 14 bastam.
+>
+> **A prova é o antes e o depois nos mesmos sistemas, na mesma máquina:** com o `zip`, três `no verdict` e
+> a leitura falsa de que o ScaNN satura em 0,72 de recall. Com o produto, **cinco vereditos** — três a
+> nosso favor e dois contra — e a faixa real do Omni indo até **1,0000**.
+>
+> **A leitura falsa era a favorável a nós**, e é o melhor argumento que este projeto tem para o portão de
+> recall casado: sem ele, a corrida teria publicado uma vantagem inexistente e nada teria reclamado.
 
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
@@ -3117,6 +3130,33 @@ status_nota_2026_08_22b: **Primeira medição em SIFT REAL nas três vias — e 
   .
   **Falta:** a corrida `recall-casado` de verdade — `vector/sift/hnsw` (nós) contra `vector/sift/scann-ah`
   (Omni), casada por recall. O caminho está pronto e verificado; nunca foi executado.
+
+status_nota_2026_08_22c: **MEDIDO — e o resultado se divide por regime de recall.** Conceito:
+  `wiki/benchmarks/b057-hnsw-vs-scann-am-recall-casado.md`. SIFT real, 100k×128d, os dois servidores no
+  mesmo host, intercalado consulta a consulta, produto das varreduras com veredito só nos pares dentro
+  de 0,01 de recall. **Cinco dos 40 pares casaram:**
+  .
+  | nosso ponto | recall | ponto do Omni | recall | vencedor | `dz` |
+  |---|---|---|---|---|---|
+  | `ef_search=16` | 0,8670 | `leaves=20, rerank=25` | 0,8756 | **nós** | −0,23 |
+  | `ef_search=64` | 0,9610 | `leaves=20, rerank=100` | 0,9556 | **nós** | −0,56 |
+  | `ef_search=64` | 0,9610 | `leaves=20, rerank=400` | 0,9576 | **nós** | **−2,02** |
+  | `ef_search=256` | 0,9944 | `leaves=80, rerank=100` | 0,9956 | **Omni** | +0,98 |
+  | `ef_search=256` | 0,9944 | `leaves=80, rerank=400` | 1,0000 | **Omni** | +0,22 |
+  .
+  **Vencemos até ~0,96 de recall, perdemos em 0,99+.** As ressalvas apontam em direções opostas: na
+  vitória mais fraca **nós** estávamos com recall menor (a descontar); nas duas sólidas o **Omni** estava
+  (nossa vantagem subestimada); nas duas derrotas **nós** estávamos (as derrotas também subestimadas).
+  .
+  **Contra o ACCESS METHOD não há gap de ordem de grandeza em nenhum sentido** — `mean diff` de −0,774
+  a +0,658 ms. O [[ADR-0035]] mediu a **biblioteca** e continua descrevendo o que mediu; **nada aqui
+  reabre o veredito LOCKED**, e o que esta corrida entrega é o dado que faltava para essa decisão.
+  .
+  **Ressalvas:** perfil `research` (não publicável pelo padrão do projeto), uma execução por ponto
+  (o `n=500` é de CONSULTAS, não de corridas), 100k e não 1M, latência de cliente único e não QPS.
+  .
+  **Aberto:** o mesmo em `sift1m`, o eixo de QPS multi-cliente, e o eixo de TAMANHO/TEMPO DE BUILD do
+  índice, que o `dod` pede e nenhuma corrida cobriu.
 
 ## B-058 — O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos   [ ]
 

@@ -426,3 +426,9 @@ de 1,30× na q18 sobrevive sem sobreposição** e é o único ponto em que estam
 deu: ligar o engine custa ao Omni **mesmo em heap**; a q18 dele piora com o engine; e **o nosso colunar
 é o mais instável dos cinco**. Declarado: esta corrida não passou pelo portão de residência, que foi
 ligado depois dela.
+
+**b057 — contra o ScaNN do AlloyDB, casado por recall.** Cinco pares casaram em SIFT real: **vencemos os
+três até recall 0,961** (dz até −2,02) e **perdemos os dois em 0,994+** (dz +0,98 e +0,22). Contra o
+*access method* não há gap de ordem de grandeza em nenhum sentido. Duas corridas antes desta devolveram
+`no verdict` em tudo e sugeriam que o ScaNN satura em 0,72 — **falso**, e a leitura falsa era a favorável
+a nós: o `head2head` pareava por posição ([[B-103]]).
