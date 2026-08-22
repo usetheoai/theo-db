@@ -4555,6 +4555,19 @@ why_now: o sweep de crossover de 2026-08-21 reprovou `group_by_category` nas sei
 > Evidência: [[b058-crossover-colunar]] § Re-medido em 2026-08-21.
 
 status: triaged
+verificacao_2026_08_22: **bullets 1 e 3 fechados; o 2 é o que mantém o item aberto.**
+  .
+  **Bullet 1 (medido se, com estatística real, o planner escolhe `HashAggregate`)**: SIM — medido nos
+  seis pontos do sweep do [[B-097]], `GroupAggregate` virou `Sort` + `HashAggregate`. **Bullet 2 (se
+  sim, fecha por B-097)**: NÃO fechou — o `theodb_columnar_agg` continua ausente nos seis pontos, o
+  que **refuta a saída nº 2 hipotetizada por este próprio item**. A forma do plano não era o bloqueio,
+  ou não era o único. Resta implementar a saída nº 1: emitir em ordem de collation.
+  .
+  **Bullet 3 (o limite fica declarado em `wiki/` em qualquer dos casos)**: ENTREGUE. O conceito
+  [[columnar-groupby-verdict]] passou a declarar que chave de TEXTO recusa o pushdown, com a razão
+  (executor byte-wise contra promessa de collation do PG), com o `THEODB_ADMIT_TRACE` que expõe a
+  causa, e com o que fazer — chave inteira é o caminho que entrega hoje. Antes disso não havia nada
+  que dissesse isso ao usuário, e a descoberta era lendo um `EXPLAIN`.
 dod:
   - medido se, com estatística real na tabela colunar ([[B-097]]), o planner escolhe `HashAggregate` + `Sort` acima — a forma que a guarda já admite
   - se sim, este item fecha por [[B-097]] e o custo é zero; se não, uma das duas saídas é implementada e medida
