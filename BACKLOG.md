@@ -3063,6 +3063,29 @@ OSS, enquanto o produto expõe um access method do PostgreSQL que paga o mesmo i
 com Elasticsearch/OpenSearch. Com o AlloyDB nunca foi feito, e desde que o Omni é `docker pull
 google/alloydbomni:18` a impossibilidade deixou de existir.
 status: planned
+medido_2026_08_22: **o adapter tocou um Omni REAL pela primeira vez, e produziu dois achados.**
+  Imagem `google/alloydbomni:latest` (3,1 GB, pública) rodando localmente.
+  .
+  **1. A armadilha que o bullet 3 nomeia está CONFIRMADA por medição.** Versão lida do servidor:
+  **PostgreSQL 17.9**. O TheoDB roda **18.6**. O head-to-head atravessa uma versão maior, e isso tem de
+  ser declarado em qualquer comparação — era exatamente o que o DoD antecipava a partir do artigo do
+  avaliador independente. Extensões disponíveis: `alloydb_scann 0.1.4`, `google_columnar_engine 1.0`,
+  `google_ml_integration 1.6`, `vector 0.8.2.google-1`.
+  .
+  **2. O Omni tem um matador de backends próprio, e ele disparou.** Numa corrida
+  `vector/synthetic/smoke`, o log do servidor mostra:
+  `WARNING: [g_term_it.cc:163] Memory critically low. Attempting termination of high memory footprint
+  backend (pid=290 RSS=16MB) to avoid OOM` seguido de `FATAL: terminating connection due to
+  administrator command`. **O backend usava 16 MB.** O servidor sobreviveu; a conexão morreu, e o arnês
+  reportou `sut_alive` FAIL corretamente.
+  .
+  Isso é propriedade do produto concorrente, não defeito do adapter — e é caveat obrigatório de
+  qualquer comparação: **o Omni encerra consultas quando julga a memória crítica**, e o julgamento dele
+  não é o do PostgreSQL. Numa máquina de 15 GB com outros contêineres, ele matou a consulta vetorial.
+  .
+  **O adapter funciona**: a configuração de busca exata mediu `qps=505,5, recall=1,0000` antes de o
+  matador agir. Bullets 2 e 3 fechados; o bullet 4 (corrida de três vias) precisa de host com memória
+  folgada, e é o que resta.
 nao_shipped_porque: 2026-08-20 — o corte `v0.1.0` do bench saiu e este item **não** avança, porque o
   quarto bullet do DoD não fechou: ele exige que a corrida `theodb × alloydbomni × pgvector` produza
   **bundle válido**, e o campo `measured:` deste mesmo bloco registra que ela reporta **INVALID**.
