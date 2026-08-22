@@ -3909,6 +3909,30 @@ status_nota_2026_08_22c: **A nota anterior estava certa no diagnóstico e ERRADA
   com `repetitions >= 5`. Isso é alcançável hoje — a CLI ganhou `--cpu-set`/`--memory` nesta sessão, que
   era o que tornava `nightly`/`release` inalcançáveis pelo próprio ponto de entrada.
 
+status_nota_2026_08_22d: **CORREÇÃO da nota anterior, medida — e ela custou um droplet que o acervo
+  poderia ter poupado.** Eu escrevi que as duas causas do "zero bundles `release`" eram *"do
+  ferramental, não de decisão"*. **Metade certa, e a metade que faltava é a que decide.** Consertei o
+  default `research` e expus `REPS`; rodei `--profile release --repetitions 5`, e a corrida morreu no
+  preflight em **um segundo**:
+  .
+  `error: host may not run a 'release' benchmark; blocking checks: cpu_governor`
+  .
+  O perfil `release` tem `preflight_required=True`, e `cpu_governor` é bloqueante. **Droplets são
+  virtualizados e não expõem governor de frequência.** Portanto o zero na coluna `release` **não é
+  descuido** — é teto estrutural: *nenhuma* corrida na infraestrutura de medição atual pode produzir
+  bundle publicável, e nenhum conserto de script muda isso.
+  .
+  **E o acervo já dizia.** `wiki/runbooks/droplet-de-medicao.md` traz a seção *"`cpu_governor`: o teto é
+  a CLASSE DE MÁQUINA, e vale para tudo já publicado"*, escrita em 2026-08-21, com **a mesma mensagem de
+  erro**. É a quarta vez hoje que o precedente existia, estava publicado, e não disparou — e a única em
+  que a omissão custou uma máquina.
+  .
+  **Consequência para o bullet 1:** ele não é alcançável com o parque atual. As saídas honestas são
+  três, e nenhuma é escrever script: (a) medir em metal com governor exposto; (b) um ADR que redefina
+  `release` para uma infraestrutura virtualizada, declarando o que se perde; (c) manter `nightly` como
+  o teto real e **parar de usar a palavra "publicável"** para o que sai dele. **A (c) é grátis e
+  honesta, e as outras duas dependem do dono.**
+
 ## B-070 — Carga de 1M por `executemany` domina o tempo de toda corrida em escala   [x]
 
 domain: arnes
