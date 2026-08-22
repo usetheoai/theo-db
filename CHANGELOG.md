@@ -13,6 +13,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`README.md` e `CLAUDE.md` descreviam uma decisão assinada como pendente, por mais de um mês.** Os dois
+  diziam que o reposicionamento do North Star estava *"proposto, decisão do owner; o mandato LOCKED do
+  ADR-0002 permanece até assinatura"*. O `ADR-0033` tem `adr_status: Accepted`, `decision_date: 2026-07-16`,
+  `owner` nomeado e `amends: ["0002"]` — **a meta do pilar vetorial é PARIDADE desde julho**, não
+  superioridade. O nome do arquivo ainda diz `proposal` e foi o que sustentou a leitura errada. Corrigido nos
+  dois documentos, com a medição de 2026-08-22 que sustenta a meta assinada.
+
 ### Changed
 - **`README.md` e `CLAUDE.md` passam a carregar o estado medido contra o concorrente — inclusive onde o
   sistema perde.** O README ganhou o head-to-head TPC-H contra o AlloyDB Omni (paridade no heap, **1,30× à

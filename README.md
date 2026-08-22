@@ -35,9 +35,20 @@ nunca afirmações sem evidência. Estratégia completa: [`wiki/decisions/0002-n
 >   engenharia. Posicionamento honesto: **paridade de recall + memória billion-scale + AI-native/HTAP/aberto** —
 >   **nunca** "mais rápido que o AlloyDB no vetor".
 >
-> Onde o TheoDB pode ser genuinamente superior é a **superfície AI-native híbrida** (as duas pernas próprias,
-> vetor + lexical, no mesmo banco transacional) — o reposicionamento do North Star está em
-> [`wiki/decisions/0033`](./wiki/decisions/) (proposto, decisão do owner; o mandato LOCKED do ADR-0002 permanece até assinatura).
+> **A meta do pilar vetorial é PARIDADE, não superioridade** — decidido no
+> [`ADR-0033`](./wiki/decisions/0033-north-star-reposition-proposal.md), **assinado pelo owner em 2026-07-16**,
+> que emenda o ADR-0002: *"paridade vetorial classe-pgvector (recall e latência) + eficiência de memória para
+> billion-scale em hardware barato + diferenciação por AI-native, HTAP, abertura e portabilidade"*. O nome do
+> arquivo ainda diz `proposal` por herança; o `adr_status` dele é `Accepted`.
+>
+> **Medido em 2026-08-22 contra o access method `scann` do AlloyDB Omni, casado por recall, na mesma
+> máquina** ([`b057`](./wiki/benchmarks/b057-hnsw-vs-scann-am-recall-casado.md)): dos cinco pares que casaram
+> dentro de 0,01 de recall, **vencemos os três até recall 0,961 e perdemos os dois em 0,994+**. Não há gap de
+> ordem de grandeza em nenhum dos dois sentidos — `mean diff` de −0,774 a +0,658 ms. **Isso é paridade, que é
+> a meta**, e não superioridade, que não é.
+>
+> Onde o TheoDB pode ser genuinamente diferenciado é a **superfície AI-native híbrida** — as duas pernas
+> próprias, vetor + lexical, no mesmo banco transacional.
 
 ---
 

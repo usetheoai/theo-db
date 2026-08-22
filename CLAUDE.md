@@ -79,8 +79,12 @@ buscar **superioridade de performance no pilar vetorial comprovada por benchmark
   de QPS vetorial sobre o ScaNN/AlloyDB MEDIDA como NÃO-ALCANÇÁVEL** por extensão PG permissiva (gap ~25-44× @ 0.99 é
   de paradigma — AH-LUT anisotrópico + não pagar o imposto MVCC/WAL; RaBitQ, melhor quantizador permissivo, dá
   memória não QPS — M74/ADR-0036). Posicionamento permitido: "paridade recall + memória billion-scale + AI-native/
-  HTAP/aberto"; **jamais** "mais rápido que o AlloyDB no vetor". Reposicionamento formal do North Star: `wiki/decisions/0033-north-star-reposition-proposal.md`
-  (proposto, decisão do owner — o mandato LOCKED ADR-0002 permanece até assinatura).
+  HTAP/aberto"; **jamais** "mais rápido que o AlloyDB no vetor". **Reposicionamento formal do North Star: ADR-0033, `Accepted`, ASSINADO pelo owner em
+  2026-07-16**, emendando o ADR-0002 — *"paridade vetorial classe-pgvector (recall e latência) + eficiência
+  de memória para billion-scale + diferenciação por AI-native, HTAP, abertura e portabilidade"*. **A meta é
+  paridade, não superioridade.** Até 2026-08-22 este arquivo e o README descreviam essa decisão como
+  *"proposta, permanece até assinatura"* — por mais de um mês depois de assinada. O nome do arquivo ainda diz
+  `proposal`, e foi isso que sustentou a leitura errada; o `adr_status` sempre disse `Accepted`.
 - **Fork é condicional** ao benchmark de gatilho (D3); não forkar antes de medir (anti-sunk-cost).
 - **Columnar / lakehouse (D2)** é uma aposta **diferente e competitiva**, não cópia do AlloyDB — forçado pela
   licença permissiva (D1 barra AGPL). Desde o **M143 (v0.131.0) é 100% own-code** (colunar in-DB `theodb_columnar`

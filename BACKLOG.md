@@ -674,6 +674,26 @@ dod:
   - os itens B-003..B-010 são repriorizados contra esse ADR, e os que não servem a nenhum eixo são mortos
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `objetivo-atratividade-medida`).
+status_nota_2026_08_22: **Metade deste item já estava decidida, e nossos documentos escondiam isso.** O item
+  pergunta o que torna o TheoDB atrativo *"já que superar o AlloyDB foi medido como inalcançável"*. **A meta
+  deixou de ser superar em 2026-07-16**, pelo `ADR-0033`, `Accepted`, assinado pelo owner, emendando o
+  ADR-0002: *"paridade vetorial classe-pgvector + eficiência de memória para billion-scale + diferenciação por
+  AI-native, HTAP, abertura e portabilidade"*.
+  .
+  **O `README.md` e o `CLAUDE.md` descreviam essa decisão como "proposta, permanece até assinatura" — por mais
+  de um mês.** Corrigidos em 2026-08-22, quando o owner reafirmou a decisão em conversa e a divergência
+  apareceu. O nome do arquivo (`...-proposal.md`) sustentava a leitura errada; o `adr_status` sempre disse
+  `Accepted`. **Sétima ocorrência no mesmo dia de "a coisa existia e o que deveria apontá-la dizia outra
+  coisa"** — e a única em que o documento errado era o nosso contrato de posicionamento.
+  .
+  **E a medição de 2026-08-22 sustenta a meta assinada:** contra o access method `scann` do Omni, casado por
+  recall, vencemos até 0,961 e perdemos em 0,994+, sem gap de ordem de grandeza em nenhum sentido
+  ([[b057-hnsw-vs-scann-am-recall-casado]]). **Isso é paridade — que é a meta.**
+  .
+  **O que resta do item, e é o que de fato falta:** a meta assinada nomeia quatro eixos de diferenciação
+  (AI-native, HTAP, abertura, portabilidade) e **nenhum deles tem medição**. "Atrativo" continua sem número
+  em três dos quatro; o vetorial, que tinha, agora está respondido.
+
 ## B-003 — Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido   [ ]
 
 domain: vetorial
