@@ -68,12 +68,13 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-103 items — **Open** 10 · **In flight** 5 · **Closed** 88
+104 items — **Open** 11 · **In flight** 5 · **Closed** 88
 
-### Open (10)
+### Open (11)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
+| [`B-104`](#b-104--o-arnês-não-cobre-os-pilares-que-a-meta-assinada-chama-de-diferenciação----) | O arnês não cobre os pilares que a meta assinada chama de diferenciação | `triaged` | — |
 | [`B-002`](#b-002--o-objetivo-definir-e-medir-o-que-torna-o-theodb-atrativo-já-que-superar-todo-benchmark-é-impossível----) | O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível | `raw` | — |
 | [`B-003`](#b-003--vetorial-o-teto-é-o-build-não-a-busca--100m-nunca-foi-atingido----) | Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido | `raw` | — |
 | [`B-005`](#b-005--híbrido-o-ganho-da-fusão-sobre-o-vetorial-puro-é-estatisticamente-não-significativo----) | Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo | `raw` | — |
@@ -658,6 +659,52 @@ dod:
 >
 > **A leitura falsa era a favorável a nós**, e é o melhor argumento que este projeto tem para o portão de
 > recall casado: sem ele, a corrida teria publicado uma vantagem inexistente e nada teria reclamado.
+
+## B-104 — O arnês não cobre os pilares que a meta assinada chama de diferenciação   [ ]
+
+domain: arnes
+repo: theodb-bench
+suggested_mode: review
+source: human
+evidence: medido em 2026-08-22 sobre o registro do arnês — **23 suítes**, distribuídas assim: **18 vetorial**,
+2 colunar (`analytical/*`), 2 lexical (`retrieval/scifact/*`), 1 grafo. Cruzando com os pilares que o
+`README.md` declara:
+.
+| Pilar declarado | Suítes registradas | Produz bundle? |
+|---|---|---|
+| Vetorial | **18** | sim |
+| Lexical (BM25) | 2 | sim |
+| Colunar in-DB | 2 | sim |
+| Grafo | 1 | sim |
+| Lakehouse Parquet | dentro de `analytical/synthetic/paths` | sim, parcial |
+| **Híbrido (RRF, BM25+vetor)** | **0** | — |
+| **Superfície AI** (`embed`, `rerank`, NL→SQL) | **0** | — |
+| **HTAP / contenção escrita×scan** | 0 — existe como **comando** `contention` | **não** |
+| **TPC-H** | 0 — existe como **comando** `tpch` | **não** |
+.
+E o `retrieval/scifact/lexical` **declara textualmente que fica de fora**: *"Dense and hybrid legs stay out:
+BEIR publishes no embeddings, and filling them with noise would make those numbers merely look measured"* — a
+recusa está certa, e deixa o pilar híbrido sem instrumento.
+why_now: o [[ADR-0033]], assinado, define a meta como *"paridade vetorial + eficiência de memória +
+**diferenciação por AI-native, HTAP, abertura e portabilidade**"*. **Dos quatro eixos de diferenciação, dois
+são medíveis por benchmark — AI-native e HTAP — e nenhum dos dois tem suíte registrada.** O pilar mais medido
+(18 suítes) é justamente aquele em que a meta é empatar; os eixos em que se pretende ganhar têm zero.
+.
+Some com isso a leitura de que o arnês "cobre os pilares": ele cobre bem os quatro que produzem número fácil.
+E o [[B-005]] já registra que o híbrido é *"o pilar mais frágil do produto e o único exposto prometendo algo
+que a medição não confirma"* — sem instrumento, ele continua assim por construção.
+status: triaged
+dod:
+  - existe suíte registrada que mede a **fusão híbrida** contra a perna vetorial pura, com corpus que tenha
+    embeddings de verdade (o `scifact` não tem, e a recusa dele está certa)
+  - `contention` e `tpch` passam a ser suítes registradas, ou fica **declarado no `README.md`** que os números
+    deles não são publicáveis pelo padrão do próprio projeto — hoje isso não está dito em lugar nenhum
+  - a superfície AI (`embed`, `rerank`, NL→SQL) tem ao menos **uma** medição de latência e custo, ou o
+    `README.md` deixa de listá-la como capacidade medida
+  - a tabela acima vira um artefato gerado do registro, não escrito à mão, para não desatualizar em silêncio
+
+> Registrado em 2026-08-22 ao responder "nosso bench tem todos os pilares?". A resposta medida é **não** —
+> e a parte que falta é a parte em que a meta assinada diz que queremos ganhar.
 
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
