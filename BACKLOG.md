@@ -3878,6 +3878,37 @@ status_nota_2026_08_22b: **Bullet 1 está a UMA INVOCAÇÃO, e o que falta é is
   citação do `b058` por ela fecha o bullet. Isso é invocação, não implementação — fica registrado porque
   "está a uma invocação" some da memória e vira "está bloqueado" na próxima leitura.
 
+status_nota_2026_08_22c: **A nota anterior estava certa no diagnóstico e ERRADA na causa — e a causa
+  verdadeira é bem pior.** Eu disse que o bundle do crossover era `EXPLORATORY` por causa dos três
+  `UNAVAILABLE` (`cpu_limit`, `memory_limit`, `clean_source_tree`). **Não é.** Lido em
+  `validation.py:414-423`: `EXPLORATORY` ocorre **exclusivamente** quando o perfil é `research`; os
+  `UNAVAILABLE` só invalidariam se fossem `required`, e no `research` não são.
+  .
+  **E só o perfil `release` é `publishable`.** Medido em `profiles.py`: `smoke` e `research` não são
+  publicáveis nem isolam; `pr` e `nightly` isolam e produzem `VALID` — **e continuam
+  `publishable=False`**; só `release` (reps ≥ 5, isolamento, árvore limpa invalida) é publicável. O
+  módulo diz isso na primeira linha: *"smoke e research produzem medições reais que nunca são evidência
+  publicável, e nenhuma quantidade de output favorável muda isso (PRD §10)"*.
+  .
+  **Medido no acervo em 2026-08-22 — 18 bundles em `benchmarks/artifacts/`:**
+  .
+  | perfil | bundles |
+  |---|---|
+  | `research` | **15** |
+  | `nightly` | 3 |
+  | `release` | **0** |
+  .
+  Status: 14 `EXPLORATORY`, 3 `VALID`, 1 `INVALID`.
+  .
+  **Nenhum número deste projeto saiu do único perfil que o próprio código chama de publicável.** Isso
+  não invalida os números — eles foram medidos e conferidos —, mas invalida a palavra "publicável"
+  aplicada a eles pelo padrão que nós mesmos escrevemos. É o mesmo defeito do [[B-102]] um eixo acima:
+  o artefato não desmente, ele simplesmente não é lido.
+  .
+  **Bullet 1 revisado:** não basta declarar isolamento; a corrida tem de rodar em `--profile release`
+  com `repetitions >= 5`. Isso é alcançável hoje — a CLI ganhou `--cpu-set`/`--memory` nesta sessão, que
+  era o que tornava `nightly`/`release` inalcançáveis pelo próprio ponto de entrada.
+
 ## B-070 — Carga de 1M por `executemany` domina o tempo de toda corrida em escala   [x]
 
 domain: arnes
