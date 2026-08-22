@@ -564,7 +564,7 @@ domain: colunar
 repo: theo-db
 suggested_mode: evolve
 source: human
-evidence: none-yet
+evidence: medido em 2026-08-22. **Leitura**: sweep de 10 000 a 2 000 000 de linhas (200×, duas ordens de grandeza) com tempo publicado em [[b096-parquet-jsonb-dois-roundtrips]] e bundle em `benchmarks/artifacts/b096/`. **Arquivo inválido**: `theodb_rs/src/parquet.rs` — quatro casos novos provam que bytes arbitrários, `PAR1` sem footer e arquivo **vazio** erram com erro tipado e sem derrubar o backend; o vazio era a suspeita real, porque zero linhas para arquivo inválido seria dado errado disfarçado de resposta. **Testes**: 507 passando, com o [[B-001]] já `shipped` destravando a execução
 why_now: o M184 mediu 4 funções de parquet no default e **zero testes próprios** em `parquet.rs` contra uma nota que exigia "testado" — a nota estava alta, e isso está registrado. Foram adicionados 6 testes em 2026-08-09, que **não rodaram** (bloqueados por B-001). Escala, formatos além de Parquet e comportamento sob arquivo corrompido seguem sem medição.
 status: triaged
 evidence_2026_08_22: **os três bullets medidos; o 1 e o 3 fechados, o 2 fechado com o produto passando.**
