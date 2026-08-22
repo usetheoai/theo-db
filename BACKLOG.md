@@ -714,9 +714,13 @@ repo: theodb-bench
 suggested_mode: review
 source: human
 evidence: medido em 2026-08-22. `src/bench/retrieval.py` define `summary(results)` — que monta a comparação
-entre caminhos (`pipelines`, com `ndcg_at_10`, `recall_at_k`, `mrr`, vazão) — e **nada a chama**: o
-`src/runner.py` pede ao benchmark apenas `load` e `points`, e `src/bench/protocol.py` declara só esses dois.
-O payload que ela produz **nunca entra em bundle nenhum**.
+entre caminhos (`pipelines`, com `ndcg_at_10`, `recall_at_k`, `mrr`, vazão) — e **nenhum código de produção a
+chama**: o `src/runner.py` pede ao benchmark apenas `load` e `points`, e `src/bench/protocol.py` declara só
+esses dois. O payload que ela produz **nunca entra em bundle nenhum**.
+.
+**Correção da primeira redação deste item, feita minutos depois:** eu escrevi *"nada a chama"*, e
+`tests/test_bench_retrieval.py:222` a chama. A substância não muda — o que falta é chamador de PRODUÇÃO, e é
+isso que mantém o payload fora do artefato —, mas *"zero chamadores"* era falso e um teste o desmentia.
 .
 Encontrado ao tentar ligar o veredito pareado de qualidade do [[B-005]]: escrevi a fiação dentro de
 `summary()`, rodei, e o bundle saiu **sem** o campo. **A fiação teria sido teatro** — um veredito que ninguém
@@ -734,7 +738,17 @@ dod:
   - o veredito pareado de qualidade chega ao bundle por um caminho que **roda**, e existe teste que reprova
     se ele parar de chegar
   - um portão que detecte método público sem chamador no `bench/` — esta é a segunda vez (`assert_analytical_path`
-    foi a primeira, e o comentário dela registra "ZERO chamadas em `src/bench/`")
+    foi a primeira, e o comentário dela registra "ZERO chamadas em `src/bench/`").
+    **PARCIAL: `scripts/check_bench_protocol_methods.py` existe e achou três órfãos reais**
+    (`VectorWorkload.k_values`, `VectorWorkload.operation_count`, `VectorBenchmark.corpus` — nenhum com
+    chamador em `src/` ou `tests/`). **Ele NÃO teria achado o `summary()`**, e o próprio arquivo diz por quê:
+    casa por nome, como o `vulture`, e uma chamada a um `summary()` de outra classe conta. O caso do nome
+    único está coberto; o da colisão, não
+  - **o arnês passa a ter portão de qualidade.** Medido: `theodb-bench` **não tem `.claude/` nenhum** — nem
+    `code-quality-languages.txt`, nem detector de código morto. São **18,7 mil linhas de Python que decidem o
+    que é verdade sobre o produto**, nunca auditadas. Rodando o `vulture` à mão pela primeira vez:
+    **39 funções/métodos/classes sem uso** a 60% de confiança, incluindo classes inteiras em `ai.py`
+    (`MockEndpoint`, `LocalEndpoint`, `RemoteEndpoint`, `CostBreakdown`)
 
 > Registrado em 2026-08-22. **Eu mesmo produzi o defeito e o encontrei ao verificar**: a suíte passava, o
 > teste que escrevi passava, e o bundle real não trazia o campo. Só a execução mostrou.
