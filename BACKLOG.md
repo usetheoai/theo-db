@@ -3037,6 +3037,40 @@ dod:
 > Registrado 2026-08-16. **Não é reabertura do ADR-0002 nem contestação do M73** — a vantagem algorítmica do
 > AH-LUT é real e está medida. É a observação de que a comparação usou um substituto mais favorável ao
 > concorrente do que o produto dele, e que o produto agora é obtenível.
+status_nota_2026_08_22b: **Primeira medição em SIFT REAL nas três vias — e ela expôs três defeitos meus
+  antes de responder o item.** Registrado por inteiro porque cada um custou parte de uma máquina.
+  .
+  **O que MEDIU (SIFT real, 100k × 128d, mesma máquina, `k=10`):**
+  .
+  | `ef_search` | TheoDB QPS / recall | pgvector QPS / recall |
+  |---|---|---|
+  | 16 | 1.065,7 / 0,8690 | 1.179,5 / 0,8856 |
+  | 64 | 880,3 / 0,9606 | 697,1 / 0,9880 |
+  | 256 | 369,3 / **0,9952** | 299,7 / **0,9998** |
+  .
+  **Não tiro conclusão de comparação daqui, e a razão é a mesma do b058:** os pontos de operação **não
+  estão casados**. Somos 1,26× e 1,23× mais rápidos a `ef_search` 64 e 256 — **com recall menor nos dois**.
+  Mais rápido com recall pior é outro ponto da curva, não vantagem.
+  .
+  **Defeito 1 — a perna do Omni voltou `run_not_refused`, pelo motivo que EU documentei nesta mesma
+  página horas antes.** Rodei `vector/sift/hnsw` (suíte de `ef_search`) contra um índice de **árvore**.
+  .
+  **Defeito 2 — e o conserto já existia.** O modo `headtohead` roda UMA suíte contra três sistemas. O
+  comando **`head2head` do arnês já tem a forma certa** — `--benchmark-a` / `--benchmark-b`, uma suíte por
+  sistema. Construí o modo errado sem verificar. **Quinta vez no mesmo dia** que a coisa existia e não foi
+  consultada. Modo `recall-casado` acrescentado; ele só invoca o comando que já havia.
+  .
+  **Defeito 3 — as três pernas saíram `INVALID: cpu_limit, memory_limit`.** Pedi `PROFILE=nightly` com
+  isolamento, e o caminho de três vias tem laço próprio que não passava os flags. Consertado, mais uma
+  **recusa na entrada**: perfil que exige isolamento sem isolamento declarado agora falha em um segundo.
+  .
+  **Bônus, e é o que mais vale:** ao criar as variáveis do modo novo **indentadas**, o portão de variáveis
+  que escrevi hoje respondeu *"nenhuma faltando"* sobre **quatro que faltavam** — o regex ancorava em `^`.
+  O portão foi escrito hoje para esta classe, pegou um esquecimento real horas antes, e ainda tinha buraco.
+  .
+  **Falta:** a corrida `recall-casado` de verdade — `vector/sift/hnsw` (nós) contra `vector/sift/scann-ah`
+  (Omni), casada por recall. O caminho está pronto e verificado; nunca foi executado.
+
 ## B-058 — O colunar nunca foi comparado ao concorrente que faz a mesma coisa, e agora há números públicos   [ ]
 
 domain: colunar
