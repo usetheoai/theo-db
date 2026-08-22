@@ -68,13 +68,14 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-99 items — **Open** 12 · **In flight** 5 · **Closed** 82
+100 items — **Open** 13 · **In flight** 5 · **Closed** 82
 
-### Open (12)
+### Open (13)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-099`](#b-099--o-modo-de-contenção-não-emite-bundle-e-uma-leitura-colunar-mede-250-o-esperado----) | O modo de contenção não emite bundle, e uma leitura colunar mede 250× o esperado | `triaged` | — |
+| [`B-100`](#b-100--select-count-em-tabela-colunar-grande-ainda-falha-a-correção-do-b-097-está-incompleta----) | `SELECT count(*)` em tabela colunar grande AINDA falha: a correção do B-097 está incompleta | `triaged` | — |
 | [`B-002`](#b-002--o-objetivo-definir-e-medir-o-que-torna-o-theodb-atrativo-já-que-superar-todo-benchmark-é-impossível----) | O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível | `raw` | — |
 | [`B-003`](#b-003--vetorial-o-teto-é-o-build-não-a-busca--100m-nunca-foi-atingido----) | Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido | `raw` | — |
 | [`B-005`](#b-005--híbrido-o-ganho-da-fusão-sobre-o-vetorial-puro-é-estatisticamente-não-significativo----) | Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo | `raw` | — |
@@ -463,6 +464,27 @@ dod:
 > fábrica entregando cliente sem conexão —, todos no [[B-066]], que havia sido fechado por inspeção de
 > código e testes contra o adapter `fake`. A anomalia de 250× só apareceu quando o caminho finalmente
 > executou de ponta a ponta.
+
+## B-100 — `SELECT count(*)` em tabela colunar grande AINDA falha: a correção do B-097 está incompleta   [ ]
+
+domain: colunar
+repo: theo-db
+suggested_mode: bug
+source: human
+evidence: reproduzido em 2026-08-22 com `psql` puro, imagem `theodb:b097` (contém a correção do [[B-097]]), contêiner limpo, `shared_buffers=2GB`. Tabela `(id bigint, value bigint) USING theodb_columnar` com **40.000.000** de linhas (125 MB): `SELECT count(*)` devolve **`ERROR: theodb_columnar: parallel scan is not supported (M99 is append-only analytical)`**. O `EXPLAIN` mostra `Finalize Aggregate → Gather (Workers Planned: 2) → Partial Aggregate → Parallel Seq Scan on t`. **A 10.000.000 de linhas a mesma consulta funciona em 40–52 ms** — o defeito aparece acima de algum limiar entre 10M e 40M.
+why_now: **é uma consulta trivial numa tabela grande, e ela ERRA.** Pior: o [[B-097]] declarou este exato defeito como corrigido, e o commit `a5abb85` — já promovido para `develop` — afirma que `consider_parallel = false` mais a limpeza do `partial_pathlist` no `pathlist_hook` resolvem. Resolvem a 10M e não a 40M, então a afirmação publicada está errada. O plano indica por quê: o paralelismo aqui é montado no nível do AGREGADO (`Partial Aggregate` sob `Gather`), não na lista de caminhos da relação base onde o hook age.
+status: triaged
+dod:
+  - `SELECT count(*)` funciona em tabela colunar de 40M linhas, e o teste cobre um volume ACIMA do limiar onde o defeito aparece — não os 50 mil do teste atual, que passam por baixo dele
+  - o limiar é medido, não estimado: entre 10M e 40M, onde exatamente o planner passa a montar o agregado paralelo
+  - o `CHANGELOG` e o registro do [[B-097]] são corrigidos por acréscimo, porque a afirmação de correção já foi publicada e promovida
+  - se o caminho paralelo puder ser SUPORTADO em vez de recusado, isso é avaliado — recusar é o remendo, e a mensagem de erro diz "M99 is append-only", o que sugere uma limitação de desenho e não uma impossibilidade
+
+> Registrado em 2026-08-22, encontrado ao diagnosticar o [[B-099]]: o arnês reportava `0/200` leituras, e
+> a exceção real era esta. **O teste que eu escrevi para o [[B-097]] usa 50 mil linhas com
+> `min_parallel_table_scan_size = 0` para forçar o plano paralelo** — ele prova que o hook age, e não
+> que ele age em toda forma de plano paralelo. Um teste que força o caminho por GUC não cobre o caminho
+> que o volume produz sozinho.
 
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 

@@ -85,6 +85,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   caminho colunar entre 0,90× e 1,02× em todas as escalas — ruído. As três consultas que já rodavam
   pelo caminho colunar já escolhiam o plano certo mesmo com estimativa zerada, porque não havia
   alternativa a comparar (B-097)
+- **RETRATAÇÃO PARCIAL: a correção abaixo está INCOMPLETA e o defeito persiste acima de ~10M linhas.**
+  Reproduzido em 2026-08-22 com `psql` puro, contêiner limpo, tabela colunar de **40 milhões** de
+  linhas: `SELECT count(*)` ainda devolve `ERROR: theodb_columnar: parallel scan is not supported`. O
+  `EXPLAIN` mostra `Finalize Aggregate → Gather → Partial Aggregate → Parallel Seq Scan` — **o
+  paralelismo é montado no nível do AGREGADO, não na lista de caminhos da relação base onde o
+  `pathlist_hook` age.** A 10M linhas funciona; entre 10M e 40M há um limiar não medido. O teste que
+  acompanha a correção usa 50 mil linhas com `min_parallel_table_scan_size = 0`, o que prova que o hook
+  age — e não que ele age em toda forma de plano paralelo. **Um teste que força o caminho por GUC não
+  cobre o caminho que o volume produz sozinho.** Registrado como `B-100` (B-097, B-100)
 - **`SELECT count(*)` em tabela colunar grande virava ERRO, e o defeito era latente.** Com a estimativa
   zerada o planner nunca cogitava plano paralelo, e a recusa do TAM (`parallel scan is not supported`)
   ficava inalcançável; com a contagem real, qualquer tabela acima de `min_parallel_table_scan_size`
