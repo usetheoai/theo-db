@@ -3250,6 +3250,23 @@ em disco), porque foi exatamente aí que a avaliação independente mediu uma **
 número do artigo em que o colunar do concorrente sai **pior**, e é portanto o mais interessante de responder —
 e o que não temos instrumento para medir. Ficou declarado e não feito no B-061.
 status: shipped
+correcao_2026_08_22: **eu fechei este item hoje por inspeção de código e 10 testes unitários, e a
+  PRIMEIRA corrida contra um servidor de verdade não funcionou.** Os dois regimes fecharam com
+  `0/200` operações de leitura.
+  .
+  A causa era do executor: `_contention_probe` inventava `query.id = "contention-{index}"`, e o
+  adapter real resolve o SQL por `ANALYTICAL_SQL[query.id]` — onde esse id nunca esteve. **Os 10
+  testes passavam porque usavam o adapter `fake`, que não consulta esse mapa e aceita qualquer id:
+  suíte verde sobre um caminho que não existe.**
+  .
+  Corrigido (`9eb3538` no theodb-bench) com quatro testes que resolvem a sonda contra o adapter
+  **real**, mais a guarda de que a sonda não pode nomear coluna que a tabela de contenção não tem.
+  1097 testes passando.
+  .
+  **O item continua `shipped`** — o executor existe e as quatro propriedades da DoD continuam
+  verdadeiras. O que estava errado era o meu critério de fechamento: verifiquei o código e os testes,
+  não a execução contra um sistema real. É a mesma distinção que esta sessão perseguiu o dia inteiro,
+  e desta vez eu a cometi ao FECHAR um item, não ao medir um.
 verificacao_2026_08_21: os quatro bullets conferidos no código, não na nota. (1) `theodb-bench
   contention` com `--readers`/`--writers` e p95/p99 por lado. (2) `p95_ratio`/`p99_ratio` — e aqui o
   código **supera a DoD**: mantém o absoluto junto, de propósito, porque *"uma degradação de 1,8× sobre
