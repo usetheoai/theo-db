@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-21T21:20:08.030148Z",
+  "hostname": "theo-b097-20260821",
+  "cpu": {
+    "vendor": "GenuineIntel",
+    "model": "Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz",
+    "microarchitecture": {
+      "absent": "unavailable",
+      "detail": "not derivable from /proc/cpuinfo"
+    },
+    "sockets": 1,
+    "physical_cores": 16,
+    "logical_cpus": 16,
+    "smt_enabled": false,
+    "frequency_policy": {
+      "absent": "unavailable",
+      "detail": "cpufreq governor not exposed"
+    },
+    "numa_nodes": 1,
+    "cache": {
+      "L1d": "32K",
+      "L1i": "32K",
+      "L2u": "4096K"
+    }
+  },
+  "memory": {
+    "total_bytes": 67424509952,
+    "swap_total_bytes": 0,
+    "hugepages": "2097152 bytes",
+    "numa_distribution": {
+      "node0": 67424509952
+    }
+  },
+  "storage": [
+    {
+      "device": "/dev/vda1",
+      "mountpoint": "/",
+      "filesystem": "ext4",
+      "mount_options": "rw,relatime,discard,errors=remount-ro,commit=30",
+      "rotational": true,
+      "capacity_bytes": 206900281344
+    },
+    {
+      "device": "/dev/vda16",
+      "mountpoint": "/boot",
+      "filesystem": "ext4",
+      "mount_options": "rw,relatime",
+      "rotational": true,
+      "capacity_bytes": 923156480
+    },
+    {
+      "device": "/dev/vda15",
+      "mountpoint": "/boot/efi",
+      "filesystem": "vfat",
+      "mount_options": "rw,relatime,fmask=0077,dmask=0077,codepage=437,iocharset=iso8859-1,shortname=mixed,errors=remount-ro",
+      "rotational": true,
+      "capacity_bytes": 109395456
+    }
+  ],
+  "software": {
+    "os": "Ubuntu 24.04.4 LTS",
+    "kernel": "6.8.0-124-generic",
+    "libc": "glibc 2.39",
+    "compiler": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "rust_toolchain": {
+      "absent": "unavailable",
+      "detail": "rustc not on PATH"
+    },
+    "python": "3.12.3",
+    "postgres": "psql (PostgreSQL) 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
+    "theodb": {
+      "absent": "unavailable",
+      "detail": "reported by the system adapter, not by the host"
+    },
+    "container_runtime": "Docker version 29.1.3, build 29.1.3-0ubuntu3~24.04.2",
+    "benchmark_runner": "theodb-bench 0.6.0"
+  },
+  "capabilities": {
+    "perf_events": false,
+    "cgroup_v2": true,
+    "cpu_affinity": true,
+    "numa_control": true
+  },
+  "source_control": {
+    "benchmark_commit": {
+      "absent": "unavailable",
+      "detail": "git rev-parse failed"
+    },
+    "benchmark_dirty": {
+      "absent": "unavailable",
+      "detail": "git status failed"
+    }
+  }
+}

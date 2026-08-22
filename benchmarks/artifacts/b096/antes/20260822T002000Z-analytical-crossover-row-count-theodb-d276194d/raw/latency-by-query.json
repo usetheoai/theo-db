@@ -1,0 +1,1151 @@
+{
+  "queries_are_seeded_and_ordered": true,
+  "points": [
+    {
+      "label": "total_rows via row @ 10000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via row @ 10000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via row @ 10000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via row @ 10000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via columnar @ 10000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via columnar @ 10000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via columnar @ 10000 linhas",
+      "repetitions": []
+    },
+    {
+      "label": "filtered_sum via columnar @ 10000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via parquet @ 10000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via parquet @ 10000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via parquet @ 10000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via parquet @ 10000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via row @ 50000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via row @ 50000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via row @ 50000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via row @ 50000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via columnar @ 50000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via columnar @ 50000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via columnar @ 50000 linhas",
+      "repetitions": []
+    },
+    {
+      "label": "filtered_sum via columnar @ 50000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via parquet @ 50000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via parquet @ 50000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via parquet @ 50000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via parquet @ 50000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via row @ 100000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via row @ 100000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via row @ 100000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via row @ 100000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via columnar @ 100000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via columnar @ 100000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via columnar @ 100000 linhas",
+      "repetitions": []
+    },
+    {
+      "label": "filtered_sum via columnar @ 100000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via parquet @ 100000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via parquet @ 100000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via parquet @ 100000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via parquet @ 100000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via row @ 500000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via row @ 500000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via row @ 500000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via row @ 500000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via columnar @ 500000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via columnar @ 500000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via columnar @ 500000 linhas",
+      "repetitions": []
+    },
+    {
+      "label": "filtered_sum via columnar @ 500000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via parquet @ 500000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via parquet @ 500000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via parquet @ 500000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via parquet @ 500000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via row @ 1000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via row @ 1000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via row @ 1000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via row @ 1000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via columnar @ 1000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via columnar @ 1000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via columnar @ 1000000 linhas",
+      "repetitions": []
+    },
+    {
+      "label": "filtered_sum via columnar @ 1000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via parquet @ 1000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via parquet @ 1000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via parquet @ 1000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via parquet @ 1000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via row @ 2000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via row @ 2000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via row @ 2000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via row @ 2000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via columnar @ 2000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via columnar @ 2000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via columnar @ 2000000 linhas",
+      "repetitions": []
+    },
+    {
+      "label": "filtered_sum via columnar @ 2000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "total_rows via parquet @ 2000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "sum_amount via parquet @ 2000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "group_by_category via parquet @ 2000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    },
+    {
+      "label": "filtered_sum via parquet @ 2000000 linhas",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 2,
+          "latency_ms_by_query": {}
+        },
+        {
+          "repetition": 3,
+          "latency_ms_by_query": {}
+        }
+      ]
+    }
+  ]
+}

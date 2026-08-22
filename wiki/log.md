@@ -362,3 +362,36 @@ abaixo** dos 13 GB necessários. Muda só o teto: ~13M num host de 16 GB, não o
 
 A correção entrou na issue #230 e no conceito **por acréscimo**, com o número errado riscado e não
 apagado, porque ele foi publicado e citado.
+
+## 2026-08-21
+
+**O arnês media, e ninguém media o arnês.**
+
+Novo conceito: [b098 — provisionar um host de bench](benchmarks/b098-host-de-bench-medido.md), e uma
+atualização por acréscimo em [b058](benchmarks/b058-crossover-colunar.md).
+
+O [[B-097]] foi entregue e medido: o planner passou a ver a contagem real (`rows=1` → `rows=200000`) e
+a forma do plano do `GROUP BY` mudou nos seis pontos da faixa. **O QPS não mudou, e foi publicado como
+nulo.** E uma alegação minha caiu: eu havia escrito no `CHANGELOG` e no commit que isso fechava o
+[[B-095]]. Não fechou — o agregado vetorizado continua ausente. **Vi a forma do plano mudar e supus o
+resto**, que é o erro que o portão de caminho analítico existe para pegar.
+
+Perseguir essa medição expôs algo maior. Nove defeitos no ferramental de medição, **nenhum encontrado
+por inspeção** — todos por execução contra hosts reais, depois de os scripts passarem em `bash -n` e
+serem considerados prontos. Entre eles: um `scp` de arquivo vazio contando como colheita; o `trap`
+destruindo o droplet antes de colher; e o arnês reportando `sut_alive` FAIL — *"o sistema sob teste
+caiu"* — com o servidor `healthy` e um diretório faltando.
+
+E o achado que vale mais que os nove: **dois dos cinco perfis do arnês estavam mortos por
+construção.** `nightly` e `release` exigem isolamento declarado, e a CLI nunca construía um
+`IsolationPlan`; além disso `apply_isolation` nunca marcava `memory_limit_applied = True`, apenas
+aconselhava rodar sob cgroup externo sem jamais verificar se alguém o fizera. Não era limitação de
+máquina. Corrigido com TDD, e `nightly` foi de inalcançável a `VALID`.
+
+**Três alegações minhas sobre o teto de veredito foram derrubadas por medição**, e a primeira delas
+chegou ao owner como recomendação de comprar acesso git que não era necessário. Estão registradas no
+conceito em vez de apagadas.
+
+O teto que resta é físico: `cpufreq` não é exposto ao hóspede numa VM, então **nenhum número medido em
+droplet pode ser `publishable` pelas regras do próprio arnês — inclusive os já publicados.** Isso não
+os invalida como evidência; invalida chamá-los de `release`.

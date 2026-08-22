@@ -2237,9 +2237,59 @@ pub unsafe extern "C-unwind" fn columnar_relation_estimate_size(
             0
         };
         *pages = nblocks;
-        // Phase A: no catalog row-count yet; a real estimate reads columnar.stripe (Phase C ANALYZE).
-        *tuples = 0.0;
+        // B-097 — a contagem REAL, somada de `columnar.stripe`.
+        //
+        // Esta linha era `*tuples = 0.0` fixo, com um comentário dizendo que a estimativa de verdade viria numa
+        // "Phase C". MEDIDO em 2026-08-21: uma tabela colunar de 200.000 linhas era planejada como se tivesse ~1
+        // (`EXPLAIN` reportando `rows=1` depois do `ANALYZE`), e o efeito não é de uma consulta só — é a entrada
+        // de TODA decisão de plano sobre dado colunar. Os custos colapsam a ponto de `enable_sort=off` não mudar
+        // o plano escolhido, e `GROUP BY <text>` cai para `GroupAggregate` porque o planner nunca alcança a forma
+        // `HashAggregate` + `Sort` acima que a guarda do M153 já admite ([[B-095]] é sintoma deste item).
+        //
+        // O metadado já existia: `columnar.stripe.row_count`, uma linha por stripe, escrita por `insert_stripe_row`.
+        // Ler dele é o degrau 4 da parsimony ladder — reusar o que está instalado — e reusa também o par
+        // `with_active_snapshot` + SPI que `read_visible_stripes` já usa neste arquivo, com a mesma justificativa
+        // de visibilidade: o SELECT roda sob a snapshot ativa, então stripe não-commitado é filtrado por MVCC de
+        // graça. Não há recursão de planner: `columnar.stripe` é heap, então planejá-la não chama este callback.
+        //
+        // LIMITE DECLARADO, e não é detalhe: `row_count` é contagem de ESCRITA. Linhas deletadas/atualizadas
+        // continuam somando aqui, então a estimativa é um teto, não a cardinalidade visível. Para o planner isso
+        // é adequado — ele quer ordem de grandeza — e é incomparavelmente melhor que zero; para `count(*)` não
+        // serviria, e nada aqui a usa para isso. O `pg_stats` continua VAZIO para tabela colunar (o
+        // `scan_analyze_next_block` abaixo não amostra), então seletividade de predicado segue sem histograma —
+        // essa metade do [[B-097]] não é fechada por esta função.
+        //
+        // FALHA É NÃO-FATAL, de propósito. Este callback roda dentro do planner: propagar um erro de SPI aqui
+        // transformaria uma lacuna de estatística em falha de TODA consulta sobre a tabela. O custo de errar a
+        // estimativa é um plano ruim; o de errar aqui seria não ter plano nenhum. Cai para o comportamento
+        // anterior (zero) e segue.
+        *tuples = match unsafe { total_row_count((*rel).rd_id) } {
+            Ok(n) => n as f64,
+            Err(_) => 0.0,
+        };
         *allvisfrac = 0.0;
+    }
+}
+
+/// Soma `row_count` de todos os stripes visíveis de `rel_oid`. Ver a justificativa completa — inclusive por que
+/// isto é um teto e não a cardinalidade visível — em `columnar_relation_estimate_size`, o único chamador.
+unsafe fn total_row_count(rel_oid: pg_sys::Oid) -> Result<i64, String> {
+    unsafe {
+        with_active_snapshot(|| {
+            Spi::connect(|c| {
+                let t = c
+                    .select(
+                        "SELECT coalesce(sum(row_count), 0)::bigint FROM columnar.stripe WHERE relid = $1",
+                        None,
+                        &[rel_oid.into()],
+                    )
+                    .map_err(|e| format!("theodb_columnar: stripe row_count read failed: {e:?}"))?;
+                t.into_iter()
+                    .next()
+                    .and_then(|row| row.get::<i64>(1).ok().flatten())
+                    .ok_or_else(|| "theodb_columnar: empty row_count aggregate".to_string())
+            })
+        })
     }
 }
 
@@ -2435,6 +2485,155 @@ mod tests {
         .unwrap();
         assert_eq!(next, 1005, "after reserving a batch of 5, the next single must be 1005");
         Spi::run("DROP TABLE m99_rt").unwrap();
+    }
+
+    // B-097 — o planner precisa saber quantas linhas a tabela tem.
+    //
+    // MEDIDO em 2026-08-21, e é a entrada de toda decisão de plano sobre dado colunar:
+    // `columnar_relation_estimate_size` devolvia `*tuples = 0.0` fixo ("Phase A"), então uma tabela colunar de
+    // 200.000 linhas era planejada como se tivesse ~1. Consequências medidas no mesmo repro: `EXPLAIN` reporta
+    // `rows=1`; todos os custos colapsam a ponto de `enable_sort=off` não mudar o plano escolhido; e
+    // `GROUP BY <text>` cai para `GroupAggregate` porque o planner nunca chega na forma `HashAggregate` + `Sort`
+    // acima que a guarda do M153 já admite (esse é o [[B-095]], sintoma deste item).
+    //
+    // O teste afirma a PROPRIEDADE — a estimativa acompanha o número de linhas — e não um valor exato, porque
+    // `row_count` do stripe é contagem de escrita e não de visibilidade MVCC (ver a nota na implementação).
+    #[pg_test]
+    fn b097_planner_ve_a_contagem_de_linhas_da_tabela_colunar() {
+        Spi::run("CREATE TABLE b097_est (a int, b text) USING theodb_columnar").unwrap();
+        Spi::run("INSERT INTO b097_est SELECT g, 'x' FROM generate_series(1, 50000) g").unwrap();
+        // MEDIDO ao escrever este teste: sem forcar o flush, `columnar.stripe` esta VAZIO aqui e a estimativa
+        // sai 0 legitimamente — 50k linhas cabem no buffer de escrita e `INSERT ... SELECT` nao passa por
+        // `finish_bulk_insert`. Num servidor de verdade o flush ja aconteceu quando alguem planeja uma consulta;
+        // dentro de um `#[pg_test]` tudo e uma transacao so, entao o teste usa o helper que o M99 ja expoe.
+        Spi::get_one::<String>("SELECT theodb_columnar_test_stripe_info('b097_est'::regclass)")
+            .unwrap()
+            .unwrap();
+        Spi::run("ANALYZE b097_est").unwrap();
+
+        let plano = Spi::get_one::<String>("EXPLAIN (FORMAT TEXT) SELECT * FROM b097_est")
+            .unwrap()
+            .unwrap();
+        let linhas: f64 = plano
+            .split("rows=")
+            .nth(1)
+            .and_then(|s| s.split_whitespace().next())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| panic!("EXPLAIN sem `rows=`: {plano}"));
+
+        assert!(
+            linhas > 10_000.0,
+            "o planner estimou {linhas} linhas para uma tabela colunar de 50.000 — com uma estimativa \
+             degenerada ele escolhe forma de agregação, ordem de junção e caminho de acesso às cegas. \
+             Plano: {plano}"
+        );
+        Spi::run("DROP TABLE b097_est").unwrap();
+    }
+
+    // B-097 — com estimativa real, o planner NAO pode escolher varredura paralela numa tabela colunar.
+    //
+    // Este teste existe por um defeito que a propria correcao do [[B-097]] criou e que o sweep do arnes apanhou:
+    // enquanto a estimativa era zero, o planner nunca cogitava paralelismo e a recusa do TAM
+    // (`theodb_columnar: parallel scan is not supported`) era inalcancavel. Com a contagem real, uma tabela acima
+    // de `min_parallel_table_scan_size` recebia `Parallel Seq Scan` e um `SELECT count(*)` COMUM virava ERRO.
+    //
+    // `min_parallel_table_scan_size = 0` e o que torna o teste barato: sem isso seria preciso uma tabela de 8 MB
+    // para o planner sequer considerar o caminho, e foi exatamente por isso que nenhum teste unitario apanhou o
+    // defeito — 50 mil linhas ficam abaixo do limiar.
+    #[pg_test]
+    fn b097_tabela_colunar_nunca_recebe_plano_paralelo() {
+        Spi::run("CREATE TABLE b097_par (a int, b text) USING theodb_columnar").unwrap();
+        Spi::run("INSERT INTO b097_par SELECT g, 'x' FROM generate_series(1, 20000) g").unwrap();
+        Spi::get_one::<String>("SELECT theodb_columnar_test_stripe_info('b097_par'::regclass)")
+            .unwrap()
+            .unwrap();
+        Spi::run("ANALYZE b097_par").unwrap();
+        Spi::run("SET min_parallel_table_scan_size = 0").unwrap();
+        Spi::run("SET max_parallel_workers_per_gather = 2").unwrap();
+        Spi::run("SET parallel_setup_cost = 0").unwrap();
+        Spi::run("SET parallel_tuple_cost = 0").unwrap();
+
+        let plano = Spi::connect(|c| {
+            let t = c
+                .select("EXPLAIN (FORMAT TEXT) SELECT count(*) FROM b097_par", None, &[])
+                .unwrap();
+            t.filter_map(|row| row.get::<String>(1).ok().flatten())
+                .collect::<Vec<_>>()
+                .join(" | ")
+        });
+        assert!(
+            !plano.contains("Parallel"),
+            "o planner escolheu varredura paralela numa tabela colunar, que o TAM recusa — a consulta \
+             viraria erro. Plano: {plano}"
+        );
+
+        // E o que importa de verdade: a consulta RODA.
+        let n = Spi::get_one::<i64>("SELECT count(*) FROM b097_par").unwrap().unwrap();
+        assert_eq!(n, 20000, "count(*) sobre tabela colunar com paralelismo habilitado");
+        Spi::run("DROP TABLE b097_par").unwrap();
+    }
+
+    // B-095 — a estimativa real muda a forma do plano de `GROUP BY <text>`?
+    //
+    // O [[B-095]] era `GROUP BY` por texto recusando o pushdown com `swap_sorted_text_group_not_resorted`: a
+    // guarda do M153 so troca quando um `Sort` COMPLETO fica acima da agregacao, porque nosso executor emite
+    // grupos em ordem byte-wise e o PostgreSQL promete ordem de collation. Com estimativa degenerada o planner
+    // escolhia `Sort` -> `GroupAggregate` (o Sort ABAIXO), e a guarda recusava — corretamente.
+    //
+    // MEDIDO em 2026-08-21: com a contagem real do [[B-097]], o planner passa a escolher `Sort` ACIMA da
+    // agregacao (custo 84 -> 772, `rows=1` -> `rows=200`), a guarda para de recusar, e o `GROUP BY` por texto
+    // empurra para `theodb_columnar_agg`. **O [[B-095]] fecha sem uma linha de codigo propria** — ele era
+    // sintoma da estimativa degenerada, e nao lacuna de cobertura.
+    //
+    // O teste guarda as DUAS coisas, e a ordem importa: primeiro que o resultado bate com o do heap (se o
+    // pushdown devolvesse a ordem errada, ser rapido nao valeria nada), depois que ele de fato aconteceu.
+    #[pg_test]
+    fn b095_group_by_texto_com_estimativa_real() {
+        Spi::run("CREATE TABLE b095_c (cat text, amount float8) USING theodb_columnar").unwrap();
+        Spi::run("CREATE TABLE b095_h (cat text, amount float8)").unwrap();
+        Spi::run(
+            "INSERT INTO b095_c SELECT chr(97 + (g % 5)), (g % 97)::float8              FROM generate_series(1, 50000) g",
+        )
+        .unwrap();
+        Spi::run("INSERT INTO b095_h SELECT * FROM b095_c").unwrap();
+        Spi::get_one::<String>("SELECT theodb_columnar_test_stripe_info('b095_c'::regclass)")
+            .unwrap()
+            .unwrap();
+        Spi::run("ANALYZE b095_c").unwrap();
+        Spi::run("ANALYZE b095_h").unwrap();
+        Spi::run("SET theodb.enable_columnar_agg = on").unwrap();
+
+        let consulta = "SELECT cat, sum(amount) FROM b095_c GROUP BY cat ORDER BY cat";
+        // O plano INTEIRO, e nao a primeira linha dele. `EXPLAIN (FORMAT TEXT)` devolve UMA LINHA POR NO, e
+        // `Spi::get_one` le so a primeira: a primeira versao deste teste olhava apenas o no de topo e reprovava
+        // um pushdown ocorrido tres niveis abaixo. `FORMAT JSON` resolveria a linha unica mas devolve datum
+        // `json` (oid 114), que nao converte para `String` — a segunda versao morreu nisso. Iterar as linhas e
+        // o caminho que nao depende de nenhuma das duas suposicoes.
+        let plano = Spi::connect(|c| {
+            let t = c.select(&format!("EXPLAIN (FORMAT TEXT) {consulta}"), None, &[]).unwrap();
+            t.filter_map(|row| row.get::<String>(1).ok().flatten())
+                .collect::<Vec<_>>()
+                .join(" | ")
+        });
+
+        let nosso = Spi::get_one::<String>(&format!(
+            "SELECT string_agg(cat || '=' || round(s::numeric, 6), ',') FROM ({consulta}) t(cat, s)"
+        ))
+        .unwrap()
+        .unwrap();
+        let heap = Spi::get_one::<String>(
+            "SELECT string_agg(cat || '=' || round(s::numeric, 6), ',') FROM              (SELECT cat, sum(amount) FROM b095_h GROUP BY cat ORDER BY cat) t(cat, s)",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(nosso, heap, "agrupamento por texto divergiu do heap. Plano: {plano}");
+
+        assert!(
+            plano.contains("theodb_columnar_agg"),
+            "o GROUP BY por texto deixou de empurrar para o colunar — se isto reprovar, a estimativa de \
+             linhas regrediu antes do pushdown. Plano: {plano}"
+        );
+        Spi::run("DROP TABLE b095_c, b095_h").unwrap();
     }
 
     // M104 (#99) — a big INSERT with a small maintenance_work_mem flushes INCREMENTALLY: it produces MULTIPLE stripes

@@ -418,4 +418,103 @@ mod tests {
             "unresolvable host is refused, not attempted; got: {msg}"
         );
     }
+
+    // ── B-009 — os modos de falha do egress, contra um servidor REAL e local ───────────────────────────────────
+    //
+    // O comentario do `m104_breaker_success_closes` acima declara a lacuna: *"We can't hit a live 4xx
+    // hermetically"*. Da para: a saida de allowlist (`theodb.egress_allowlist = '127.0.0.1'`) e a mesma
+    // que o teste do disjuntor ja usa, e um `TcpListener` da stdlib responde o status que o teste quiser —
+    // degrau 2 da parsimony ladder, sem dependencia nova.
+    //
+    // O que ESTES testes cobrem do DoD do B-009: 5xx com retentativas esgotadas, e credencial ausente
+    // (que vira 401 no endpoint, porque a chave sai de GUC e `None` apenas omite o header).
+    //
+    // O que NAO cobrem, e fica DECLARADO em vez de silenciado: **timeout**. Com `HTTP_TIMEOUT_SECS = 30`
+    // e `MAX_RETRIES = 2`, um teste de timeout custaria ~90 s de suite. Cobri-lo exige tornar o timeout
+    // injetavel, que e mudanca de producao para servir teste — decisao que nao cabe neste item.
+
+    /// Sobe um servidor HTTP minimo em 127.0.0.1 que responde `status` a `n` conexoes e sai.
+    /// Devolve a URL. O `JoinHandle` e descartado de proposito: a thread termina sozinha ao servir `n`.
+    fn servidor_local(status: u16, n: usize) -> String {
+        use std::io::{Read, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind local");
+        let porta = l.local_addr().expect("addr").port();
+        std::thread::spawn(move || {
+            for _ in 0..n {
+                let Ok((mut c, _)) = l.accept() else { return };
+                let mut buf = [0u8; 1024];
+                let _ = c.read(&mut buf); // consome a request; o conteudo nao importa aqui
+                let corpo = "{}";
+                let _ = c.write_all(
+                    format!(
+                        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}",
+                        corpo.len()
+                    )
+                    .as_bytes(),
+                );
+                let _ = c.flush();
+            }
+        });
+        format!("http://127.0.0.1:{porta}/v1/x")
+    }
+
+    /// Chama `post_json` e devolve `(sqlstate, mensagem)` do erro tipado, ou `None` se nao houve erro.
+    fn erro_de(endpoint: &str, api_key: Option<&str>) -> Option<(String, String)> {
+        let ep = endpoint.to_string();
+        let k = api_key.map(|s| s.to_string());
+        PgTryBuilder::new(move || {
+            post_json("b009_test", &ep, "{}".to_string(), k.as_deref());
+            None
+        })
+        .catch_others(|e| {
+            let r = match &e {
+                pgrx::pg_sys::panic::CaughtError::PostgresError(r)
+                | pgrx::pg_sys::panic::CaughtError::ErrorReport(r) => r,
+                pgrx::pg_sys::panic::CaughtError::RustPanic { ereport, .. } => ereport,
+            };
+            Some((format!("{:?}", r.sql_error_code()), r.message().to_string()))
+        })
+        .execute()
+    }
+
+    // 5xx e RECUPERAVEL: tenta `MAX_RETRIES` vezes e so entao falha. O servidor responde 500 as tres, e o
+    // erro final tem de NOMEAR o status — "endpoint call failed" sozinho nao diz a quem le o log se o
+    // problema foi nosso ou do provedor.
+    #[pg_test]
+    fn b009_um_5xx_persistente_falha_com_erro_tipado_que_nomeia_o_status() {
+        Spi::run("SET theodb.egress_allowlist = '127.0.0.1'").unwrap();
+        let ep = servidor_local(500, (MAX_RETRIES + 1) as usize);
+        let (code, msg) = erro_de(&ep, None).expect("um 500 persistente tem de falhar, nao devolver Value");
+        assert!(code.contains("EXTERNAL"), "erro EXTERNO (falha do provedor), got {code}");
+        assert!(msg.contains("500"), "a mensagem nomeia o status, got: {msg}");
+    }
+
+    // 4xx e NAO-recuperavel: uma chamada so, sem retentativa. E o caminho da credencial ausente — a chave
+    // sai de GUC e `None` apenas omite o header, entao o endpoint responde 401.
+    #[pg_test]
+    fn b009_credencial_ausente_vira_401_sem_retentativa_e_sem_abrir_o_disjuntor() {
+        Spi::run("SET theodb.egress_allowlist = '127.0.0.1'").unwrap();
+        // UMA conexao so: se houvesse retentativa, a segunda nao seria atendida e o erro mudaria de forma.
+        let ep = servidor_local(401, 1);
+        let (code, msg) = erro_de(&ep, None).expect("401 tem de falhar com erro tipado");
+        assert!(code.contains("EXTERNAL"), "erro EXTERNO, got {code}");
+        assert!(msg.contains("401"), "a mensagem nomeia o status, got: {msg}");
+        // Um 4xx e a NOSSA requisicao sendo recusada, nao o endpoint caindo. Abrir o disjuntor aqui puniria
+        // o provedor por um erro nosso — e faria a proxima chamada legitima falhar rapido sem razao.
+        assert!(!breaker_is_open(&ep), "um 4xx nao pode abrir o disjuntor");
+    }
+
+    // B-009 bullet 2 — NENHUM segredo em mensagem de erro. A chave vai no header `Authorization`, e a
+    // mensagem de erro monta `fn_name` + status; o teste existe porque essa separacao e facil de perder
+    // num refactor que passe a incluir a request no diagnostico.
+    #[pg_test]
+    fn b009_a_chave_nunca_aparece_na_mensagem_de_erro() {
+        Spi::run("SET theodb.egress_allowlist = '127.0.0.1'").unwrap();
+        let ep = servidor_local(401, 1);
+        let segredo = "sk-NAO-PODE-VAZAR-9f3a";
+        let (_, msg) = erro_de(&ep, Some(segredo)).expect("401 falha");
+        assert!(!msg.contains(segredo), "a chave VAZOU na mensagem de erro: {msg}");
+        assert!(!msg.contains("sk-"), "nem um prefixo de chave pode aparecer: {msg}");
+    }
+
 }

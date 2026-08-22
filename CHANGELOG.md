@@ -13,6 +13,93 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`read_parquet` passa a ter teste de arquivo truncado, corrompido e vazio.** O `CLAUDE.md` trata
+  crash de backend como severidade máxima, e esta função lê arquivo do sistema de arquivos do
+  servidor — um arquivo pode chegar truncado por transferência interrompida, corrompido por disco, ou
+  simplesmente não ser Parquet. **Não havia teste nenhum desse caminho** (bullet 2 do B-008). Os
+  quatro casos asseram a mesma propriedade: o backend **sobrevive** e o usuário recebe erro tipado.
+  O caso do arquivo vazio existe porque devolver zero linhas para um arquivo inválido seria **dado
+  errado, não erro** — e a medição diz que o produto **erra corretamente** nos três casos. 507 testes
+  passando (B-008)
+- **Os modos de falha do egress passam a ter teste contra um servidor HTTP real e local.** O próprio
+  código declarava a lacuna — *"We can't hit a live 4xx hermetically"* — e ela fecha com a saída de
+  allowlist que o projeto já documenta (`theodb.egress_allowlist = '127.0.0.1'`) mais um `TcpListener`
+  da stdlib, **sem dependência nova**. Cobertos: 5xx com retentativas esgotadas falhando com erro
+  tipado que **nomeia o status**; credencial ausente virando 401 **sem retentativa e sem abrir o
+  disjuntor** (um 4xx é a nossa requisição sendo recusada, não o provedor caindo); e a chave de API
+  **nunca** aparecendo na mensagem de erro. **Timeout NÃO está coberto** e a razão vai declarada:
+  custaria ~90 s de suíte, e cobri-lo exigiria tornar o timeout injetável — mudar produção para servir
+  teste (B-009)
+
+### Changed
+- **O README passa a dizer que `halfvec` e `sparsevec` NÃO existem**, ao lado do que é suportado. A
+  decisão de deixá-los fora é o ADR-0063 e já estava registrada; o que faltava era a limitação
+  aparecer onde alguém a lê **antes** de escrever o `CREATE TABLE`, em vez de descobri-la em runtime
+  (B-038)
+- **`read_parquet` converte Arrow→`jsonb` direto, sem round-trip por texto.** MEDIDO em 2026-08-21
+  (máquina de desenvolvimento, 2M linhas, mesmo arquivo): o parser Parquet lê e agrega em **25 ms**, o
+  Postgres constrói 2M `jsonb` nativos em **435 ms**, e `read_parquet` levava **4 650 ms** — ou seja,
+  ~90% do tempo era a travessia `Arrow → texto NDJSON → serde_json::Value → JsonB`, serializando e
+  re-parseando cada linha. **Nem o parser nem o `jsonb` eram o gargalo.** A via por texto permanece
+  como oráculo dos testes de equivalência e como fallback para tipos que a conversão direta não cobre
+  (nested, temporal, decimal). **Ganho medido no arnês: 1,085× mediano** (0,98×–1,21×, n=24, seis
+  escalas × quatro consultas, `nightly`/`VALID`) — ~8,5%, e **não** a ordem de grandeza que a
+  decomposição local sugeria (B-096, B-069)
+- **CORREÇÃO da entrada acima: minha leitura da decomposição estava errada, e a hipótese do `B-096`
+  estava CERTA.** Eu atribuí ~90% do custo à travessia `Arrow → NDJSON → Value` e disse que a
+  assinatura `SETOF jsonb` não era o problema. **Havia DOIS round-trips por texto, e a correção removeu
+  um.** O segundo vive dentro do `pgrx` — `impl IntoDatum for JsonB` faz `serde_json::to_string` e
+  entrega o texto ao `jsonb_in` do Postgres, por linha. Enquanto o retorno for `jsonb`, nenhuma
+  otimização do lado Arrow escapa dele, que é exatamente o que o item afirmava (B-096)
+- **Chave nula em `read_parquet` continua OMITIDA, não emitida como `null`.** O `arrow-json` omite
+  campos nulos, e a primeira versão da conversão direta os emitia — diferença invisível em qualquer
+  benchmark e visível em `doc ? 'chave'` e `jsonb_object_keys(doc)`. Pega pelo teste de equivalência
+  antes de sair daqui (B-096)
+
+### Fixed
+- **O planner via ZERO linha em toda tabela colunar.** `columnar_relation_estimate_size` devolvia
+  `*tuples = 0.0` fixo, então uma tabela de 200.000 linhas era planejada como se tivesse ~1: forma de
+  agregação, ordem de junção e caminho de acesso escolhidos às cegas. Passa a somar `row_count` de
+  `columnar.stripe`, metadado que já existia. Medido no servidor: `rows=1` → `rows=200000` (B-097)
+- **RETRATAÇÃO DA RETRATAÇÃO — o `B-097` FECHOU o `B-095`, e a entrada abaixo está errada.** Medido em
+  2026-08-22 com controle nas duas imagens: com `theodb.enable_columnar_agg=on`, a imagem **sem** a
+  correção de estimativa dá `GroupAggregate → Sort → Seq Scan` (sem pushdown, com o `Sort` ABAIXO); a
+  imagem **com** a correção dá **`Sort → Custom Scan (theodb_columnar_agg)`** — o pushdown engata, com
+  o `Sort` ACIMA, que é exatamente o que a guarda do M153 exige. **A saída nº 2 hipotetizada pelo
+  `B-095` funcionou.**
+  .
+  O que me enganou: o recurso é **opt-in e default OFF** (documentado no código como *"opt-in until
+  benchmarked"*), e o arnês mede a configuração **default**. Li o "ausente" do portão de caminho como
+  *"ainda bloqueado"* quando ele significa *"não habilitado"* — duas coisas diferentes, e o portão
+  responde a segunda (B-095, B-097)
+- **RETRATADO — e esta entrada, por sua vez, estava errada; ver acima. Preservada porque foi publicada.**
+  ~~O `GROUP BY` NÃO voltou ao caminho colunar, e o `B-095` segue aberto.~~ A entrada
+  acima, escrita antes da medição, dizia que ele voltava e que era sintoma da estimativa degenerada.
+  Medido no sweep de crossover nos seis pontos de 10K a 2M: a **forma** do plano mudou de
+  `GroupAggregate` para `Sort` + `HashAggregate` — a que a guarda do M153 admite —, mas o agregado
+  vetorizado `theodb_columnar_agg` **continua ausente** e o portão de caminho analítico reprova. Eu vi
+  a forma do plano mudar e supus o resto. O `B-095` é lacuna de pushdown própria, que a estimativa
+  apenas escondia atrás de um plano ainda pior (B-095, B-097)
+- **O sweep de crossover não mostrou ganho de QPS, e isso vai publicado como nulo.** Latência p50 no
+  caminho colunar entre 0,90× e 1,02× em todas as escalas — ruído. As três consultas que já rodavam
+  pelo caminho colunar já escolhiam o plano certo mesmo com estimativa zerada, porque não havia
+  alternativa a comparar (B-097)
+- **`SELECT count(*)` em tabela colunar grande virava ERRO, e o defeito era latente.** Com a estimativa
+  zerada o planner nunca cogitava plano paralelo, e a recusa do TAM (`parallel scan is not supported`)
+  ficava inalcançável; com a contagem real, qualquer tabela acima de `min_parallel_table_scan_size`
+  passava a receber `Parallel Seq Scan` e falhava. A estimativa degenerada estava mascarando uma
+  capacidade não implementada (B-097)
+- Correção no registro: o `B-002` estava marcado `shipped` por engano de edição — ele segue aberto e é
+  decisão do owner. O `B-007`, que está entregue, estava marcado `raw`. Ambos corrigidos (B-002, B-007)
+
+### Added
+- `B-095` — `group_by_category` não usa o caminho colunar; o plano cai para `GroupAggregate` em todas as
+  seis escalas medidas. Não é quebra, é lacuna de pushdown (B-095)
+- `B-096` — `read_parquet` devolve `SETOF jsonb`, e a materialização por documento é o que custa os 142×
+  contra o heap — não o parser (B-096)
+
+
 ## [0.167.0] - 2026-08-21
 
 ### Added

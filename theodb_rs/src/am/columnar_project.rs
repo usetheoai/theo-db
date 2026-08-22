@@ -310,6 +310,25 @@ unsafe extern "C-unwind" fn pathlist_hook(
     if amoid == pg_sys::InvalidOid || unsafe { pg_sys::get_rel_relam((*rte).relid) } != amoid {
         return;
     }
+    // B-097 — o TAM colunar NAO faz varredura paralela, e agora o planner sabe disso.
+    //
+    // MEDIDO em 2026-08-21, e e o efeito colateral que a correcao da estimativa expos: enquanto
+    // `columnar_relation_estimate_size` devolvia zero linhas, o planner nunca cogitava plano paralelo, e a recusa
+    // do TAM (`theodb_columnar: parallel scan is not supported`) ficava inalcancavel. Com a contagem real, uma
+    // tabela acima de `min_parallel_table_scan_size` passa a receber `Parallel Seq Scan` — e um `SELECT count(*)`
+    // comum vira ERRO. O sweep do arnes apanhou; nenhum teste unitario apanharia, porque 50 mil linhas ficam
+    // abaixo do limiar de paralelismo.
+    //
+    // A estimativa degenerada estava MASCARANDO uma capacidade nao implementada. Corrigir uma sem a outra troca
+    // um plano ruim por uma consulta que falha, o que e estritamente pior.
+    //
+    // As duas linhas fazem coisas diferentes e as duas sao necessarias: `consider_parallel = false` impede que
+    // caminhos parciais NOVOS sejam considerados daqui para frente, e limpar `partial_pathlist` remove os que ja
+    // foram criados — este hook roda DEPOIS de `create_partial_seqscan_path`. So a primeira deixaria o caminho
+    // paralelo ja existente vencer.
+    relref.consider_parallel = false;
+    relref.partial_pathlist = std::ptr::null_mut();
+
     // (c) NOT an aggregate query — leave those to the plain seqscan (which columnar_agg may then swap at
     // UPPERREL_GROUP_AGG). Replacing the seqscan under an Agg would break columnar_agg's `find_scan_relid`
     // (it matches a T_SeqScan, not our CustomScan) and lose the vectorized-aggregate path (plan R3).

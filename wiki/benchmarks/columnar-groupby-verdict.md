@@ -1,9 +1,9 @@
 ---
 type: Measurement
 title: pushdown de GROUP BY no colunar — veredito
-description: Ganho de 4,5 a 9,8×, com a agregação vetorizada adotada e apenas a cola sendo código próprio — o degrau de reuso da escada de parcimônia.
+description: Ganho de 4,5 a 9,8× para chave INTEIRA. Chave de TEXTO recusa o pushdown, e a guarda está certa — nosso executor emite byte-wise e o PostgreSQL promete ordem de collation. O B-097 entregou a forma de plano que o B-095 previa como saída, e o agregado vetorizado continua ausente: a forma não era o bloqueio.
 resource: git:f7c7b93:docs/benchmarks/columnar-groupby-verdict.md
-tags: [benchmark, columnar, group-by, datafusion, reuso]
+tags: [benchmark, columnar, group-by, datafusion, reuso, b-095, b-097, limite-declarado]
 generated: { by: claude-code/opus-5, at: 2026-08-07T16:12:05Z }
 sources:
   - id: cgb
@@ -36,3 +36,65 @@ idêntico ao nativo, e as recusadas caem para o plano nativo continuando correta
 
 É uma das capacidades listadas em [analítico colunar](/features/14-analitico-colunar.md), e um dos ganhos
 que a feature reporta.
+
+# O limite que este veredito não dizia: chave de TEXTO recusa o pushdown
+
+Medido em 2026-08-21 pelo [[B-095]], e depois re-medido pelo [[B-097]]. O ganho acima é real para
+chave **inteira**. Para chave de **texto** o pushdown **não engata**, e o usuário não tinha onde ler
+isso:
+
+```
+GROUP BY <int>   → Custom Scan (theodb_columnar_agg)      ← pushdown
+GROUP BY <text>  → Seq Scan → Sort → GroupAggregate       ← sem pushdown
+```
+
+Com `THEODB_ADMIT_TRACE=1` a razão aparece: `swap_sorted_text_group_not_resorted`
+(`theodb_rs/src/am/columnar_agg.rs:2028-2033`).
+
+## A guarda está CERTA, e é isso que torna o limite interessante
+
+Não é bug de omissão. Nosso executor emite grupos em ordem **byte-wise**; o PostgreSQL promete ordem
+de **collation**. Trocar o plano sem um `Sort` completo acima devolveria a ordem errada — resposta
+incorreta, rápida. **Recusar é o comportamento certo.**
+
+## CORREÇÃO (2026-08-22): o [[B-097]] FECHOU isto, e a seção abaixo está errada
+
+Medido com controle nas duas imagens, `theodb.enable_columnar_agg=on` nas duas:
+
+| | sem a correção de estimativa | com a correção |
+|---|---|---|
+| estimativa | `rows=1` | `rows=200000` |
+| plano do `GROUP BY <text>` | `GroupAggregate → Sort → Seq Scan` | **`Sort → Custom Scan (theodb_columnar_agg)`** |
+
+**O pushdown engata.** A guarda do M153 exige um `Sort` **acima** para admitir chave de texto, e era a
+estimativa degenerada que impedia o planner de produzir essa forma — o `Sort` saía **abaixo**, como
+ordenação de entrada do `GroupAggregate`.
+
+**O que me enganou, e vale mais que a correção:** o recurso é **opt-in, default OFF** — o código o
+documenta como *"opt-in until benchmarked"*. O arnês mede a configuração **default**, então seu portão
+de caminho analítico reporta o agregado como ausente. Eu li isso como *"ainda bloqueado"*; significa
+*"não habilitado"*. **Um portão que responde "não está ligado" parece responder "não funciona"**, e a
+diferença decide se alguém vai implementar uma saída que já existe.
+
+A seção abaixo foi escrita antes deste controle e fica preservada, riscada, porque foi publicada.
+
+## ~~O que o [[B-097]] mudou, e o que não mudou~~ (ERRADO — ver acima)
+
+O [[B-095]] previa duas saídas: emitir em ordem de collation, **ou** fazer o planner produzir a forma
+com `Sort` acima. O [[B-097]] entregou a segunda — o planner passou a ver a contagem real e a forma do
+plano mudou nos seis pontos do sweep, de `GroupAggregate` para `Sort` + `HashAggregate`.
+
+~~**E o `theodb_columnar_agg` continua ausente.** Medido nos seis pontos, de 10K a 2M linhas: o portão
+de caminho analítico reprova exatamente como antes. A forma do plano não era o bloqueio.~~ **ERRADO.**
+O portão reprova porque o recurso está desligado por default, não porque o pushdown falhe. Com ele
+ligado, engata. Ver a correção acima.
+
+## Para quem usa
+
+Uma tabela `USING theodb_columnar` agregada por coluna de texto recebe o agregado vetorizado **desde que
+`theodb.enable_columnar_agg` esteja ligado** — ele é opt-in e vem desligado. Com ele desligado,
+e a diferença medida entre as duas formas é de ordem de grandeza (13× no docstring do adapter). Se a
+carga agrupa por texto e o ganho colunar importa, a chave inteira é o caminho que hoje entrega — e
+isto está escrito aqui em vez de ser descoberto lendo um `EXPLAIN`.
+
+Evidência: [[b058-crossover-colunar]] § Re-medido em 2026-08-21.

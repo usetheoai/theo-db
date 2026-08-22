@@ -1,0 +1,892 @@
+{
+  "schema_version": 1,
+  "run_id": "20260821T212008Z-analytical-synthetic-paths-theodb-865ec86a",
+  "outlier_policy": {
+    "name": "none"
+  },
+  "points": [
+    {
+      "label": "total_rows via row",
+      "parameters": {
+        "query": "total_rows",
+        "path": "row",
+        "row_count": 200000
+      },
+      "metrics": {
+        "throughput_per_second": {
+          "median": 102.81080631829283,
+          "mean": 105.83363899886194,
+          "stdev": 5.658293280593977,
+          "min": 102.3287673900573,
+          "max": 112.36134328823569,
+          "coefficient_of_variation": 0.05346403406439442,
+          "ci95_low": 99.43067738740056,
+          "ci95_high": 112.23660061032332,
+          "repetitions": 3,
+          "values": [
+            102.3287673900573,
+            112.36134328823569,
+            102.81080631829283
+          ]
+        },
+        "latency_p50_ms": {
+          "median": 9.764436000295973,
+          "mean": 9.558039000088078,
+          "stdev": 0.3729790596953429,
+          "min": 9.127481999712472,
+          "max": 9.782199000255787,
+          "coefficient_of_variation": 0.03902255051396064,
+          "ci95_low": 9.135973461474366,
+          "ci95_high": 9.98010453870179,
+          "repetitions": 3,
+          "values": [
+            9.782199000255787,
+            9.127481999712472,
+            9.764436000295973
+          ]
+        },
+        "latency_p95_ms": {
+          "median": 9.865992599770834,
+          "mean": 9.873506699871845,
+          "stdev": 0.3082033560300113,
+          "min": 9.569129100145801,
+          "max": 10.185398399698897,
+          "coefficient_of_variation": 0.031215186802274787,
+          "ci95_low": 9.524741770356462,
+          "ci95_high": 10.222271629387228,
+          "repetitions": 3,
+          "values": [
+            9.865992599770834,
+            9.569129100145801,
+            10.185398399698897
+          ]
+        },
+        "latency_p99_ms": {
+          "median": 9.873440919727727,
+          "mean": 9.901548273185957,
+          "stdev": 0.3081781567703886,
+          "min": 9.60838662018432,
+          "max": 10.222817279645824,
+          "coefficient_of_variation": 0.03112423918640636,
+          "ci95_low": 9.552811859317254,
+          "ci95_high": 10.250284687054661,
+          "repetitions": 3,
+          "values": [
+            9.873440919727727,
+            9.60838662018432,
+            10.222817279645824
+          ]
+        }
+      },
+      "stability": {
+        "stable": false,
+        "reason": "throughput_per_second cv=0.053",
+        "threshold_cv": 0.05
+      }
+    },
+    {
+      "label": "sum_amount via row",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "row",
+        "row_count": 200000
+      },
+      "metrics": {
+        "throughput_per_second": {
+          "median": 86.05860126116416,
+          "mean": 85.61682712155836,
+          "stdev": 1.8574328621034972,
+          "min": 83.57833625983501,
+          "max": 87.21354384367595,
+          "coefficient_of_variation": 0.021694717318434645,
+          "ci95_low": 83.51494397020161,
+          "ci95_high": 87.7187102729151,
+          "repetitions": 3,
+          "values": [
+            83.57833625983501,
+            87.21354384367595,
+            86.05860126116416
+          ]
+        },
+        "latency_p50_ms": {
+          "median": 11.645505000160483,
+          "mean": 11.750266666543515,
+          "stdev": 0.27424722760491105,
+          "min": 11.543841999809956,
+          "max": 12.061452999660105,
+          "coefficient_of_variation": 0.023339659889232475,
+          "ci95_low": 11.439926713606395,
+          "ci95_high": 12.060606619480636,
+          "repetitions": 3,
+          "values": [
+            12.061452999660105,
+            11.543841999809956,
+            11.645505000160483
+          ]
+        },
+        "latency_p95_ms": {
+          "median": 11.871280800187378,
+          "mean": 11.922008266659153,
+          "stdev": 0.28456491580130877,
+          "min": 11.66621859974839,
+          "max": 12.22852540004169,
+          "coefficient_of_variation": 0.023868874222903975,
+          "ci95_low": 11.599992750409129,
+          "ci95_high": 12.244023782909178,
+          "repetitions": 3,
+          "values": [
+            12.22852540004169,
+            11.66621859974839,
+            11.871280800187378
+          ]
+        },
+        "latency_p99_ms": {
+          "median": 11.891349760189769,
+          "mean": 11.937274186669432,
+          "stdev": 0.28591953667286696,
+          "min": 11.677096519742918,
+          "max": 12.243376280075609,
+          "coefficient_of_variation": 0.02395182787978167,
+          "ci95_low": 11.613725772598713,
+          "ci95_high": 12.260822600740152,
+          "repetitions": 3,
+          "values": [
+            12.243376280075609,
+            11.677096519742918,
+            11.891349760189769
+          ]
+        }
+      },
+      "stability": {
+        "stable": true,
+        "reason": "all metrics within the coefficient-of-variation threshold",
+        "threshold_cv": 0.05
+      }
+    },
+    {
+      "label": "group_by_category via row",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "row",
+        "row_count": 200000
+      },
+      "metrics": {
+        "throughput_per_second": {
+          "median": 43.752118696116064,
+          "mean": 43.87231388478946,
+          "stdev": 0.5955330638964137,
+          "min": 43.34604600635455,
+          "max": 44.51877695189777,
+          "coefficient_of_variation": 0.013574234207484668,
+          "ci95_low": 43.19840478227571,
+          "ci95_high": 44.54622298730322,
+          "repetitions": 3,
+          "values": [
+            43.752118696116064,
+            44.51877695189777,
+            43.34604600635455
+          ]
+        },
+        "latency_p50_ms": {
+          "median": 23.49626500017621,
+          "mean": 23.235273666614376,
+          "stdev": 0.5855776942931546,
+          "min": 22.564580000107526,
+          "max": 23.644975999559392,
+          "coefficient_of_variation": 0.025202100164395416,
+          "ci95_low": 22.572630125328452,
+          "ci95_high": 23.8979172079003,
+          "repetitions": 3,
+          "values": [
+            23.49626500017621,
+            22.564580000107526,
+            23.644975999559392
+          ]
+        },
+        "latency_p95_ms": {
+          "median": 23.804187800396903,
+          "mean": 23.804799067056592,
+          "stdev": 0.6422652183311957,
+          "min": 23.162839700216864,
+          "max": 24.44736970055601,
+          "coefficient_of_variation": 0.02698049315694603,
+          "ci95_low": 23.07800755353508,
+          "ci95_high": 24.531590580578104,
+          "repetitions": 3,
+          "values": [
+            24.44736970055601,
+            23.162839700216864,
+            23.804187800396903
+          ]
+        },
+        "latency_p99_ms": {
+          "median": 23.81833996047135,
+          "mean": 23.8554235470959,
+          "stdev": 0.65873033127803,
+          "min": 23.216018340226583,
+          "max": 24.53191234058977,
+          "coefficient_of_variation": 0.027613441026421107,
+          "ci95_low": 23.110000004285887,
+          "ci95_high": 24.600847089905912,
+          "repetitions": 3,
+          "values": [
+            24.53191234058977,
+            23.216018340226583,
+            23.81833996047135
+          ]
+        }
+      },
+      "stability": {
+        "stable": true,
+        "reason": "all metrics within the coefficient-of-variation threshold",
+        "threshold_cv": 0.05
+      }
+    },
+    {
+      "label": "filtered_sum via row",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "row",
+        "row_count": 200000
+      },
+      "metrics": {
+        "throughput_per_second": {
+          "median": 68.04919494306854,
+          "mean": 68.11147826390513,
+          "stdev": 0.13095302541950465,
+          "min": 68.02329144563666,
+          "max": 68.26194840301018,
+          "coefficient_of_variation": 0.0019226278559410104,
+          "ci95_low": 67.96329096552992,
+          "ci95_high": 68.25966556228033,
+          "repetitions": 3,
+          "values": [
+            68.26194840301018,
+            68.04919494306854,
+            68.02329144563666
+          ]
+        },
+        "latency_p50_ms": {
+          "median": 15.070499999637832,
+          "mean": 15.006199000102546,
+          "stdev": 0.2303284663776855,
+          "min": 14.750553000340005,
+          "max": 15.197544000329799,
+          "coefficient_of_variation": 0.01534888790799799,
+          "ci95_low": 14.745557804054773,
+          "ci95_high": 15.26684019615032,
+          "repetitions": 3,
+          "values": [
+            14.750553000340005,
+            15.197544000329799,
+            15.070499999637832
+          ]
+        },
+        "latency_p95_ms": {
+          "median": 16.835468399858655,
+          "mean": 17.896614399736183,
+          "stdev": 3.609875132571536,
+          "min": 14.936245499848155,
+          "max": 21.918129299501743,
+          "coefficient_of_variation": 0.20170715264585182,
+          "ci95_low": 13.811656135855202,
+          "ci95_high": 21.981572663617165,
+          "repetitions": 3,
+          "values": [
+            14.936245499848155,
+            16.835468399858655,
+            21.918129299501743
+          ]
+        },
+        "latency_p99_ms": {
+          "median": 16.981061679816776,
+          "mean": 18.15354021303695,
+          "stdev": 3.9207920568754178,
+          "min": 14.952751499804435,
+          "max": 22.526807459489646,
+          "coefficient_of_variation": 0.21597947347260144,
+          "ci95_low": 13.716746328068755,
+          "ci95_high": 22.590334098005147,
+          "repetitions": 3,
+          "values": [
+            14.952751499804435,
+            16.981061679816776,
+            22.526807459489646
+          ]
+        }
+      },
+      "stability": {
+        "stable": false,
+        "reason": "latency_p95_ms cv=0.202; latency_p99_ms cv=0.216",
+        "threshold_cv": 0.05
+      }
+    },
+    {
+      "label": "total_rows via columnar",
+      "parameters": {
+        "query": "total_rows",
+        "path": "columnar",
+        "row_count": 200000
+      },
+      "metrics": {
+        "throughput_per_second": {
+          "median": 545.0969617323631,
+          "mean": 559.3035323277139,
+          "stdev": 28.656944837997962,
+          "min": 540.5253473930485,
+          "max": 592.2882878577301,
+          "coefficient_of_variation": 0.05123683864239737,
+          "ci95_low": 526.875146487628,
+          "ci95_high": 591.7319181677999,
+          "repetitions": 3,
+          "values": [
+            592.2882878577301,
+            545.0969617323631,
+            540.5253473930485
+          ]
+        },
+        "latency_p50_ms": {
+          "median": 1.914319999741565,
+          "mean": 1.8820850000338396,
+          "stdev": 0.061245759243500786,
+          "min": 1.8114540007445612,
+          "max": 1.9204809996153926,
+          "coefficient_of_variation": 0.032541441668362266,
+          "ci95_low": 1.8127788990853615,
+          "ci95_high": 1.9513911009823177,
+          "repetitions": 3,
+          "values": [
+            1.8114540007445612,
+            1.914319999741565,
+            1.9204809996153926
+          ]
+        },
+        "latency_p95_ms": {
+          "median": 1.9810919004157768,
+          "mean": 1.991063000059512,
+          "stdev": 0.14514185440584865,
+          "min": 1.8511637998926744,
+          "max": 2.1409332998700847,
+          "coefficient_of_variation": 0.07289666595256425,
+          "ci95_low": 1.8268195301841916,
+          "ci95_high": 2.1553064699348323,
+          "repetitions": 3,
+          "values": [
+            1.8511637998926744,
+            1.9810919004157768,
+            2.1409332998700847
+          ]
+        },
+        "latency_p99_ms": {
+          "median": 1.9870271804757067,
+          "mean": 2.0007499333951273,
+          "stdev": 0.1533788568786947,
+          "min": 1.8546935598169512,
+          "max": 2.160529059892724,
+          "coefficient_of_variation": 0.07666068323612134,
+          "ci95_low": 1.8271854177535807,
+          "ci95_high": 2.174314449036674,
+          "repetitions": 3,
+          "values": [
+            1.8546935598169512,
+            1.9870271804757067,
+            2.160529059892724
+          ]
+        }
+      },
+      "stability": {
+        "stable": false,
+        "reason": "latency_p95_ms cv=0.073; latency_p99_ms cv=0.077; throughput_per_second cv=0.051",
+        "threshold_cv": 0.05
+      }
+    },
+    {
+      "label": "sum_amount via columnar",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "columnar",
+        "row_count": 200000
+      },
+      "metrics": {
+        "throughput_per_second": {
+          "median": 274.21436213929866,
+          "mean": 267.29536857799616,
+          "stdev": 16.686834960841463,
+          "min": 248.26197995605,
+          "max": 279.4097636386398,
+          "coefficient_of_variation": 0.062428447786487866,
+          "ci95_low": 248.4124372111294,
+          "ci95_high": 286.17829994486294,
+          "repetitions": 3,
+          "values": [
+            279.4097636386398,
+            274.21436213929866,
+            248.26197995605
+          ]
+        },
+        "latency_p50_ms": {
+          "median": 3.771112999856996,
+          "mean": 3.8465736664268966,
+          "stdev": 0.2235398334555064,
+          "min": 3.6705299999084673,
+          "max": 4.098077999515226,
+          "coefficient_of_variation": 0.05811401336378247,
+          "ci95_low": 3.593614531707421,
+          "ci95_high": 4.099532801146372,
+          "repetitions": 3,
+          "values": [
+            3.6705299999084673,
+            3.771112999856996,
+            4.098077999515226
+          ]
+        },
+        "latency_p95_ms": {
+          "median": 4.176623700095661,
+          "mean": 4.281291366745184,
+          "stdev": 0.6487098645804311,
+          "min": 3.691279500253586,
+          "max": 4.975970899886306,
+          "coefficient_of_variation": 0.1515220079668643,
+          "ci95_low": 3.547207049459888,
+          "ci95_high": 5.01537568403048,
+          "repetitions": 3,
+          "values": [
+            3.691279500253586,
+            4.975970899886306,
+            4.176623700095661
+          ]
+        },
+        "latency_p99_ms": {
+          "median": 4.183605540147255,
+          "mean": 4.31993294010681,
+          "stdev": 0.7049297688799562,
+          "min": 3.693123900284263,
+          "max": 5.0830693798889115,
+          "coefficient_of_variation": 0.1631807203151924,
+          "ci95_low": 3.522229812134468,
+          "ci95_high": 5.117636068079151,
+          "repetitions": 3,
+          "values": [
+            3.693123900284263,
+            5.0830693798889115,
+            4.183605540147255
+          ]
+        }
+      },
+      "stability": {
+        "stable": false,
+        "reason": "latency_p50_ms cv=0.058; latency_p95_ms cv=0.152; latency_p99_ms cv=0.163; throughput_per_second cv=0.062",
+        "threshold_cv": 0.05
+      }
+    },
+    {
+      "label": "group_by_category via columnar",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "columnar",
+        "row_count": 200000
+      },
+      "metrics": {},
+      "stability": {
+        "stable": true,
+        "reason": "all metrics within the coefficient-of-variation threshold",
+        "threshold_cv": 0.05
+      }
+    },
+    {
+      "label": "filtered_sum via columnar",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "columnar",
+        "row_count": 200000
+      },
+      "metrics": {
+        "throughput_per_second": {
+          "median": 43.45937493782314,
+          "mean": 44.15646188499472,
+          "stdev": 2.365343067138311,
+          "min": 42.21799854479058,
+          "max": 46.79201217237043,
+          "coefficient_of_variation": 0.05356731418606036,
+          "ci95_low": 41.47982423018001,
+          "ci95_high": 46.83309953980943,
+          "repetitions": 3,
+          "values": [
+            46.79201217237043,
+            43.45937493782314,
+            42.21799854479058
+          ]
+        },
+        "latency_p50_ms": {
+          "median": 23.250201999871933,
+          "mean": 22.970811000050162,
+          "stdev": 1.125175149583409,
+          "min": 21.732264000092982,
+          "max": 23.92996700018557,
+          "coefficient_of_variation": 0.04898282213810178,
+          "ci95_low": 21.697555456075143,
+          "ci95_high": 24.24406654402518,
+          "repetitions": 3,
+          "values": [
+            21.732264000092982,
+            23.250201999871933,
+            23.92996700018557
+          ]
+        },
+        "latency_p95_ms": {
+          "median": 23.55728020038441,
+          "mean": 23.457943799803616,
+          "stdev": 1.2990596484285621,
+          "min": 22.112067599300644,
+          "max": 24.70448359972579,
+          "coefficient_of_variation": 0.055378240288879776,
+          "ci95_low": 21.98791942188494,
+          "ci95_high": 24.927968177722292,
+          "repetitions": 3,
+          "values": [
+            22.112067599300644,
+            23.55728020038441,
+            24.70448359972579
+          ]
+        },
+        "latency_p99_ms": {
+          "median": 23.584576040429965,
+          "mean": 23.501244493115035,
+          "stdev": 1.315731460132134,
+          "min": 22.145827919230214,
+          "max": 24.77332951968492,
+          "coefficient_of_variation": 0.05598560793312852,
+          "ci95_low": 22.01235418424548,
+          "ci95_high": 24.99013480198459,
+          "repetitions": 3,
+          "values": [
+            22.145827919230214,
+            23.584576040429965,
+            24.77332951968492
+          ]
+        }
+      },
+      "stability": {
+        "stable": false,
+        "reason": "latency_p95_ms cv=0.055; latency_p99_ms cv=0.056; throughput_per_second cv=0.054",
+        "threshold_cv": 0.05
+      }
+    },
+    {
+      "label": "total_rows via parquet",
+      "parameters": {
+        "query": "total_rows",
+        "path": "parquet",
+        "row_count": 200000
+      },
+      "metrics": {
+        "throughput_per_second": {
+          "median": 1.6630654785391075,
+          "mean": 1.659722923841362,
+          "stdev": 0.006574770805274063,
+          "min": 1.6521484179511468,
+          "max": 1.6639548750338313,
+          "coefficient_of_variation": 0.003961366509330979,
+          "ci95_low": 1.6522828702805632,
+          "ci95_high": 1.6671629774021608,
+          "repetitions": 3,
+          "values": [
+            1.6521484179511468,
+            1.6630654785391075,
+            1.6639548750338313
+          ]
+        },
+        "latency_p50_ms": {
+          "median": 606.374620000679,
+          "mean": 606.2568016668592,
+          "stdev": 0.6682579953509178,
+          "min": 605.5374699999447,
+          "max": 606.858314999954,
+          "coefficient_of_variation": 0.0011022688628211522,
+          "ci95_low": 605.5005965571914,
+          "ci95_high": 607.013006776527,
+          "repetitions": 3,
+          "values": [
+            605.5374699999447,
+            606.858314999954,
+            606.374620000679
+          ]
+        },
+        "latency_p95_ms": {
+          "median": 606.9970310993995,
+          "mean": 607.5117037667042,
+          "stdev": 2.061113560106862,
+          "min": 605.7566974004658,
+          "max": 609.7813828002472,
+          "coefficient_of_variation": 0.0033927141606120695,
+          "ci95_low": 605.1793342079383,
+          "ci95_high": 609.84407332547,
+          "repetitions": 3,
+          "values": [
+            605.7566974004658,
+            606.9970310993995,
+            609.7813828002472
+          ]
+        },
+        "latency_p99_ms": {
+          "median": 607.0093614193502,
+          "mean": 607.6232506200237,
+          "stdev": 2.2186500607383266,
+          "min": 605.7761842805121,
+          "max": 610.0842061602089,
+          "coefficient_of_variation": 0.003651358071756468,
+          "ci95_low": 605.1126117288062,
+          "ci95_high": 610.1338895112411,
+          "repetitions": 3,
+          "values": [
+            605.7761842805121,
+            607.0093614193502,
+            610.0842061602089
+          ]
+        }
+      },
+      "stability": {
+        "stable": true,
+        "reason": "all metrics within the coefficient-of-variation threshold",
+        "threshold_cv": 0.05
+      }
+    },
+    {
+      "label": "sum_amount via parquet",
+      "parameters": {
+        "query": "sum_amount",
+        "path": "parquet",
+        "row_count": 200000
+      },
+      "metrics": {
+        "throughput_per_second": {
+          "median": 1.5163641584604755,
+          "mean": 1.518924314502131,
+          "stdev": 0.0065907409579195764,
+          "min": 1.5139977777325773,
+          "max": 1.52641100731334,
+          "coefficient_of_variation": 0.004339084505392141,
+          "ci95_low": 1.5114661890123515,
+          "ci95_high": 1.5263824399919104,
+          "repetitions": 3,
+          "values": [
+            1.5139977777325773,
+            1.52641100731334,
+            1.5163641584604755
+          ]
+        },
+        "latency_p50_ms": {
+          "median": 663.9373319994775,
+          "mean": 663.5116936665023,
+          "stdev": 1.7763873458742685,
+          "min": 661.5611530005481,
+          "max": 665.0365959994815,
+          "coefficient_of_variation": 0.0026772510007444204,
+          "ci95_low": 661.5015221503443,
+          "ci95_high": 665.5218651826603,
+          "repetitions": 3,
+          "values": [
+            665.0365959994815,
+            663.9373319994775,
+            661.5611530005481
+          ]
+        },
+        "latency_p95_ms": {
+          "median": 665.5939358999603,
+          "mean": 665.2691812668005,
+          "stdev": 0.5797662139723481,
+          "min": 664.599822999844,
+          "max": 665.6137849005972,
+          "coefficient_of_variation": 0.0008714761337183268,
+          "ci95_low": 664.6131140345807,
+          "ci95_high": 665.9252484990203,
+          "repetitions": 3,
+          "values": [
+            665.6137849005972,
+            665.5939358999603,
+            664.599822999844
+          ]
+        },
+        "latency_p99_ms": {
+          "median": 665.6650905806964,
+          "mean": 665.425402386827,
+          "stdev": 0.4825582282315387,
+          "min": 664.8699269997815,
+          "max": 665.7411895800033,
+          "coefficient_of_variation": 0.000725187566480993,
+          "ci95_low": 664.8793363458075,
+          "ci95_high": 665.9714684278466,
+          "repetitions": 3,
+          "values": [
+            665.6650905806964,
+            665.7411895800033,
+            664.8699269997815
+          ]
+        }
+      },
+      "stability": {
+        "stable": true,
+        "reason": "all metrics within the coefficient-of-variation threshold",
+        "threshold_cv": 0.05
+      }
+    },
+    {
+      "label": "group_by_category via parquet",
+      "parameters": {
+        "query": "group_by_category",
+        "path": "parquet",
+        "row_count": 200000
+      },
+      "metrics": {
+        "throughput_per_second": {
+          "median": 1.4438930855266883,
+          "mean": 1.4424038200379394,
+          "stdev": 0.005535342837773863,
+          "min": 1.4362761968087407,
+          "max": 1.4470421777783897,
+          "coefficient_of_variation": 0.0038375819315483142,
+          "ci95_low": 1.4361399899501461,
+          "ci95_high": 1.4486676501257327,
+          "repetitions": 3,
+          "values": [
+            1.4362761968087407,
+            1.4470421777783897,
+            1.4438930855266883
+          ]
+        },
+        "latency_p50_ms": {
+          "median": 694.1699429999062,
+          "mean": 695.1018126668108,
+          "stdev": 2.0728065749080087,
+          "min": 693.6584960003529,
+          "max": 697.4769990001732,
+          "coefficient_of_variation": 0.002982018658468936,
+          "ci95_low": 692.7562112161685,
+          "ci95_high": 697.4474141174531,
+          "repetitions": 3,
+          "values": [
+            697.4769990001732,
+            694.1699429999062,
+            693.6584960003529
+          ]
+        },
+        "latency_p95_ms": {
+          "median": 699.878180900123,
+          "mean": 699.4403322668708,
+          "stdev": 1.1279877324721297,
+          "min": 698.1590649004829,
+          "max": 700.2837510000063,
+          "coefficient_of_variation": 0.0016127004412461407,
+          "ci95_low": 698.1638939857394,
+          "ci95_high": 700.7167705480022,
+          "repetitions": 3,
+          "values": [
+            698.1590649004829,
+            700.2837510000063,
+            699.878180900123
+          ]
+        },
+        "latency_p99_ms": {
+          "median": 700.4310417801025,
+          "mean": 699.8259784535427,
+          "stdev": 1.4051157312849916,
+          "min": 698.2196929805104,
+          "max": 700.8272006000152,
+          "coefficient_of_variation": 0.0020078073328886415,
+          "ci95_low": 698.2359403199707,
+          "ci95_high": 701.4160165871147,
+          "repetitions": 3,
+          "values": [
+            698.2196929805104,
+            700.8272006000152,
+            700.4310417801025
+          ]
+        }
+      },
+      "stability": {
+        "stable": true,
+        "reason": "all metrics within the coefficient-of-variation threshold",
+        "threshold_cv": 0.05
+      }
+    },
+    {
+      "label": "filtered_sum via parquet",
+      "parameters": {
+        "query": "filtered_sum",
+        "path": "parquet",
+        "row_count": 200000
+      },
+      "metrics": {
+        "throughput_per_second": {
+          "median": 1.5546744925002378,
+          "mean": 1.5604543628585423,
+          "stdev": 0.012303786916265658,
+          "min": 1.5521047252494715,
+          "max": 1.5745838708259177,
+          "coefficient_of_variation": 0.007884746397662522,
+          "ci95_low": 1.546531317269753,
+          "ci95_high": 1.5743774084473316,
+          "repetitions": 3,
+          "values": [
+            1.5745838708259177,
+            1.5521047252494715,
+            1.5546744925002378
+          ]
+        },
+        "latency_p50_ms": {
+          "median": 643.4330379997846,
+          "mean": 645.6459436664469,
+          "stdev": 8.471373321273711,
+          "min": 638.5006419995989,
+          "max": 655.0041509999573,
+          "coefficient_of_variation": 0.013120772157518867,
+          "ci95_low": 636.0596823182583,
+          "ci95_high": 655.2322050146355,
+          "repetitions": 3,
+          "values": [
+            638.5006419995989,
+            655.0041509999573,
+            643.4330379997846
+          ]
+        },
+        "latency_p95_ms": {
+          "median": 656.811278099849,
+          "mean": 651.3365725664395,
+          "stdev": 10.61502555738301,
+          "min": 639.1018797997276,
+          "max": 658.096559799742,
+          "coefficient_of_variation": 0.016297296980510374,
+          "ci95_low": 639.3245403549402,
+          "ci95_high": 663.3486047779388,
+          "repetitions": 3,
+          "values": [
+            639.1018797997276,
+            656.811278099849,
+            658.096559799742
+          ]
+        },
+        "latency_p99_ms": {
+          "median": 656.9719116198394,
+          "mean": 651.8424062464388,
+          "stdev": 11.054204709456203,
+          "min": 639.155323159739,
+          "max": 659.3999839597382,
+          "coefficient_of_variation": 0.016958400686310972,
+          "ci95_low": 639.3333960396626,
+          "ci95_high": 664.351416453215,
+          "repetitions": 3,
+          "values": [
+            639.155323159739,
+            656.9719116198394,
+            659.3999839597382
+          ]
+        }
+      },
+      "stability": {
+        "stable": true,
+        "reason": "all metrics within the coefficient-of-variation threshold",
+        "threshold_cv": 0.05
+      }
+    }
+  ]
+}
