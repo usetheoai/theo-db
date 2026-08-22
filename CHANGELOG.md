@@ -85,7 +85,18 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   caminho colunar entre 0,90× e 1,02× em todas as escalas — ruído. As três consultas que já rodavam
   pelo caminho colunar já escolhiam o plano certo mesmo com estimativa zerada, porque não havia
   alternativa a comparar (B-097)
-- **RETRATAÇÃO PARCIAL: a correção abaixo está INCOMPLETA e o defeito persiste acima de ~10M linhas.**
+- **A RETRATAÇÃO ABAIXO ESTAVA ERRADA — a correção está COMPLETA, e eu medi na imagem sem ela.**
+  Controle na imagem construída do `HEAD`: com `min_parallel_table_scan_size=0` numa tabela de 50 mil
+  linhas o plano sai `Aggregate → Seq Scan`, **sem `Gather`**; e a 40M linhas o `SELECT count(*)`
+  **devolve 40000000 sem erro**. A imagem em que medi (`theodb:b097`) foi construída antes de eu
+  adicionar o conserto — **confundi o nome da tag com o conteúdo do binário**, que é exatamente o que
+  o executor de bench deste projeto proíbe: *"proveniência lida do servidor, nunca da tag da imagem"*.
+  A entrada abaixo fica preservada porque foi publicada (B-097, B-100)
+- **O que a investigação produziu de verdade:** `count(*)` no colunar custa **~1 s por milhão de
+  linhas** (2M → 1,0–2,0 s; 10M → 9–14 s; 40M → 44–48 s, valores de retorno conferidos), e isso
+  contradiz por **264×** o `total_rows via columnar @ 2M = 12,5 ms` publicado no `b058`. Registrado
+  como `B-101` (B-101)
+- ~~**RETRATAÇÃO PARCIAL: a correção abaixo está INCOMPLETA e o defeito persiste acima de ~10M linhas.**~~ (ERRADO — ver acima)
   Reproduzido em 2026-08-22 com `psql` puro, contêiner limpo, tabela colunar de **40 milhões** de
   linhas: `SELECT count(*)` ainda devolve `ERROR: theodb_columnar: parallel scan is not supported`. O
   `EXPLAIN` mostra `Finalize Aggregate → Gather → Partial Aggregate → Parallel Seq Scan` — **o
