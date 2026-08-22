@@ -753,6 +753,32 @@ dod:
 > Registrado em 2026-08-22. **Eu mesmo produzi o defeito e o encontrei ao verificar**: a suíte passava, o
 > teste que escrevi passava, e o bundle real não trazia o campo. Só a execução mostrou.
 
+status_nota_2026_08_22: **Medido quanto falta em cada eixo, e as respostas são diferentes — o que muda quem
+  pega qual.**
+  .
+  **`hybrid` — FECHADO no mesmo dia, e estava a UMA entrada de registro.** A maquinaria existia inteira:
+  `bench/retrieval.py` declara as quatro pernas, o adapter implementa `execute_hybrid` chamando
+  `ai.hybrid_search_rrf`, e o gerador sintético produz corpus com texto e vetores. Suíte
+  `retrieval/synthetic/hybrid` registrada; a matriz saiu de 0 para 1.
+  .
+  **`vectorizer` — NÃO está a uma entrada.** `bench/operations.py` existe, tem **16 testes** e mede cinco
+  cargas reais do vectorizer (`INSERT_BASELINE`, `INSERT_VECTORIZED`, `UPDATE_SOURCE`, `BACKLOG_DRAIN`,
+  `WORKER_SATURATION`). Mas `OperationsWorkload` implementa **só `table_spec()`**, e o protocolo em
+  `bench/protocol.py` exige `build`, `benchmark_payload`, `expected_operations`, `warmup_operations` e
+  `quality_was_reported`; o `OperationsBenchmark` tem `run(adapter, name)` e não o par `load`/`points` que o
+  runner chama. **Distância medida: cinco métodos de protocolo mais dois do benchmark** — trabalho de
+  desenho, não de registro.
+  .
+  **`rerank` / `ai_sql` — a maquinaria existe e ninguém a importa.** `src/ai.py` define `MockEndpoint`,
+  `LocalEndpoint`, `RemoteEndpoint` e `CostBreakdown`, e **nenhum arquivo de `src/` importa
+  `theodb_bench.ai`** — o único importador é `tests/test_ai.py`. É o mesmo padrão do
+  [[B-105]]: construído, testado, e sem caminho vivo.
+  .
+  **A ressalva honesta que a matriz já dá, e que continua valendo:** essas três capacidades alcançam modelo
+  externo. Medi-las contra `MockEndpoint` mediria o mock. **Mas nem tudo ali é modelo:** as cinco cargas do
+  vectorizer medem **o nosso pipeline** — vazão de inserção, drenagem de backlog, saturação do worker —, e
+  isso é nosso e é medível com o modelo como custo constante.
+
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
 domain: acervo
