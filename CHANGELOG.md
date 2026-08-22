@@ -14,6 +14,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`read_parquet` passa a ter teste de arquivo truncado, corrompido e vazio.** O `CLAUDE.md` trata
+  crash de backend como severidade máxima, e esta função lê arquivo do sistema de arquivos do
+  servidor — um arquivo pode chegar truncado por transferência interrompida, corrompido por disco, ou
+  simplesmente não ser Parquet. **Não havia teste nenhum desse caminho** (bullet 2 do B-008). Os
+  quatro casos asseram a mesma propriedade: o backend **sobrevive** e o usuário recebe erro tipado.
+  O caso do arquivo vazio existe porque devolver zero linhas para um arquivo inválido seria **dado
+  errado, não erro** (B-008)
 - **Os modos de falha do egress passam a ter teste contra um servidor HTTP real e local.** O próprio
   código declarava a lacuna — *"We can't hit a live 4xx hermetically"* — e ela fecha com a saída de
   allowlist que o projeto já documenta (`theodb.egress_allowlist = '127.0.0.1'`) mais um `TcpListener`
