@@ -3840,6 +3840,21 @@ status_nota_2026_08_22: **Uma catraca fecha o buraco que o bullet 3 deixou — e
   .
   **Bullets 1 e 2 seguem abertos** e continuam exigindo servidor vivo.
 
+status_nota_2026_08_22b: **Bullet 1 está a UMA INVOCAÇÃO, e o que falta é isolamento declarado — não código.**
+  Medido hoje: o crossover do colunar **já sai** de `theodb-bench run` e o número publicado **já cita** o
+  bundle (`b058-crossover-colunar.md:138` →
+  `benchmarks/artifacts/20260821T122336Z-analytical-crossover-row-count-theodb-eed87401/`). O que impede o
+  bullet de fechar é que esse bundle é `EXPLORATORY`, e o critério pede **válido**.
+  .
+  **Motivo, lido do `validation.json`:** nenhum check FALHOU. Três saíram `UNAVAILABLE` — `cpu_limit`
+  (*"no CPU set declared"*), `memory_limit` (*"no memory bound declared"*) e `clean_source_tree`. Os dois
+  primeiros são exatamente os `--cpu-set` / `--memory` que a CLI ganhou nesta sessão, e o `bench-run.sh`
+  **já os encaminha** (`CPU_SET`/`MEM_MAX` → `systemd-run --scope -p MemoryMax` + `--cpu-set`).
+  .
+  **Portanto:** uma corrida do crossover com `CPU_SET` e `MEM_MAX` declarados produz `VALID`, e trocar a
+  citação do `b058` por ela fecha o bullet. Isso é invocação, não implementação — fica registrado porque
+  "está a uma invocação" some da memória e vira "está bloqueado" na próxima leitura.
+
 ## B-070 — Carga de 1M por `executemany` domina o tempo de toda corrida em escala   [x]
 
 domain: arnes
