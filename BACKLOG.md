@@ -78,7 +78,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-003`](#b-003--vetorial-o-teto-é-o-build-não-a-busca--100m-nunca-foi-atingido----) | Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido | `raw` | — |
 | [`B-005`](#b-005--híbrido-o-ganho-da-fusão-sobre-o-vetorial-puro-é-estatisticamente-não-significativo----) | Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo | `raw` | — |
 | [`B-006`](#b-006--colunar-43-queries-do-clickbench-medidas-a-suíte-completa-nunca----) | Colunar: 43 queries do ClickBench medidas, a suíte completa nunca | `raw` | — |
-| [`B-008`](#b-008--lakehouse-4-funções-expostas-escala-e-formatos-nunca-medidos----) | Lakehouse: 4 funções expostas, escala e formatos nunca medidos | `raw` | — |
+| [`B-008`](#b-008--lakehouse-4-funções-expostas-escala-e-formatos-nunca-medidos----) | Lakehouse: 4 funções expostas, escala e formatos nunca medidos | `triaged` | — |
 | [`B-010`](#b-010--maturidade-zero-uso-real-e-é-o-gargalo-de-todos-os-pilares----) | Maturidade: zero uso real, e é o gargalo de todos os pilares | `raw` | — |
 | [`B-017`](#b-017--running-exige-tempo-e-nenhuma-ação-instantânea-o-produz----) | `running` exige tempo, e nenhuma ação instantânea o produz | `triaged` | — |
 | [`B-043`](#b-043--o-qps-lexical-satura-em-20-clientes-numa-máquina-de-16-vcpu-e-não-sobe-mais----) | O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais | `triaged` | — |
@@ -566,7 +566,30 @@ suggested_mode: evolve
 source: human
 evidence: none-yet
 why_now: o M184 mediu 4 funções de parquet no default e **zero testes próprios** em `parquet.rs` contra uma nota que exigia "testado" — a nota estava alta, e isso está registrado. Foram adicionados 6 testes em 2026-08-09, que **não rodaram** (bloqueados por B-001). Escala, formatos além de Parquet e comportamento sob arquivo corrompido seguem sem medição.
-status: raw
+status: triaged
+evidence_2026_08_22: **os três bullets medidos; o 1 e o 3 fechados, o 2 fechado com o produto passando.**
+  .
+  **Bullet 3 (os 6 testes efetivamente executados, dependia do [[B-001]])**: destravado — o `B-001` está
+  `shipped` e `cargo pgrx test` roda; `parquet.rs` tem 11 `pg_test` e a suíte fecha em **507 passando**.
+  .
+  **Bullet 1 (leitura em ao menos duas ordens de grandeza)**: medido no sweep do [[B-096]], de 10 000 a
+  2 000 000 de linhas — **200×**, com o tempo publicado em [[b096-parquet-jsonb-dois-roundtrips]] e
+  bundle no repositório.
+  .
+  **Bullet 2 (arquivo truncado/corrompido: erro tipado, nunca crash)**: não havia teste nenhum e agora há
+  quatro casos. **O produto erra corretamente nos três** — bytes arbitrários, só o magic header `PAR1`
+  sem footer, e arquivo vazio. O vazio era a suspeita real: devolver zero linhas para arquivo inválido
+  seria dado errado disfarçado de resposta. Não devolve.
+  .
+  **Duas falhas na primeira rodada eram DOS MEUS TESTES, não do produto**, e valem registro: (a) a sonda
+  `SELECT 1` para "provar que o backend vive" não prova nada dentro de um `pg_test` — tudo roda numa
+  transação, um `ereport ERROR` a aborta, e o `SELECT 1` seguinte falha com *"current transaction is
+  aborted"* mesmo com o processo vivo; a prova real é o teste **chegar ao fim**, porque um backend morto
+  derruba a conexão e o arnês do pgrx reporta a queda. (b) o helper fazia `let _ = with_runtime(...)`,
+  **descartando o `Result`**, então nunca havia erro para capturar — eu testava o `impl` acreditando
+  testar a superfície SQL.
+  .
+  Resta do item o que exige campanha de medição: formatos além do Parquet e escalas maiores.
 dod:
   - leitura medida em ao menos duas ordens de grandeza de tamanho de arquivo, com o tempo publicado
   - comportamento sob arquivo truncado/corrompido: erro tipado, nunca crash do backend

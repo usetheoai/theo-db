@@ -20,7 +20,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   simplesmente não ser Parquet. **Não havia teste nenhum desse caminho** (bullet 2 do B-008). Os
   quatro casos asseram a mesma propriedade: o backend **sobrevive** e o usuário recebe erro tipado.
   O caso do arquivo vazio existe porque devolver zero linhas para um arquivo inválido seria **dado
-  errado, não erro** (B-008)
+  errado, não erro** — e a medição diz que o produto **erra corretamente** nos três casos. 507 testes
+  passando (B-008)
 - **Os modos de falha do egress passam a ter teste contra um servidor HTTP real e local.** O próprio
   código declarava a lacuna — *"We can't hit a live 4xx hermetically"* — e ela fecha com a saída de
   allowlist que o projeto já documenta (`theodb.egress_allowlist = '127.0.0.1'`) mais um `TcpListener`

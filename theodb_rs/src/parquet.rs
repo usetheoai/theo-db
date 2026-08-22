@@ -713,25 +713,53 @@ mod tests {
 
     // ── B-008 — arquivo truncado ou corrompido: erro TIPADO, nunca crash do backend ────────────────────────────
     //
-    // O `CLAUDE.md` deste projeto trata crash de backend como severidade MAXIMA, acima de qualquer ganho de
-    // performance. `read_parquet` le arquivo do sistema de arquivos do servidor, e um arquivo pode estar
-    // truncado por transferencia interrompida, corrompido por disco, ou simplesmente nao ser Parquet.
+    // O `CLAUDE.md` deste projeto trata crash de backend como severidade MAXIMA. `read_parquet` le arquivo do
+    // sistema de arquivos do SERVIDOR, e um arquivo chega truncado por transferencia interrompida, corrompido
+    // por disco, ou simplesmente nao e Parquet. O bullet 2 do B-008 pede isto e nao existia teste.
     //
-    // O bullet 2 do B-008 pede exatamente isto e nao existia teste. As tres formas abaixo cobrem as tres
-    // maneiras de o arquivo estar errado, e todas asseram a MESMA propriedade: o backend sobrevive e o
-    // usuario recebe erro tipado, nao um servidor reiniciado.
+    // COMO A SOBREVIVENCIA DO BACKEND E PROVADA, e por que nao por um `SELECT 1`:
+    // a primeira versao destes testes fazia `SELECT 1` depois da leitura para "provar que o backend vive".
+    // Isso NAO prova nada e reprova por conta propria — dentro de um `#[pg_test]` tudo roda numa transacao, e
+    // um `ereport ERROR` a ABORTA; o `SELECT 1` seguinte falha com "current transaction is aborted" mesmo com
+    // o processo perfeitamente vivo. A prova real e o teste CHEGAR AO FIM: se o backend morresse, o arnes do
+    // pgrx perderia a conexao e reportaria a queda, nao uma asercao.
 
-    /// Escreve `bytes` num arquivo temporario unico por backend e devolve o caminho.
+    /// Escreve `bytes` num arquivo temporario unico por processo e devolve o caminho.
     fn arquivo_temp(nome: &str, bytes: &[u8]) -> String {
         let caminho = format!("/tmp/theodb_b008_{}_{nome}", std::process::id());
         std::fs::write(&caminho, bytes).expect("escrever o arquivo de teste");
         caminho
     }
 
-    fn erro_ao_ler(caminho: &str) -> Option<(String, String)> {
-        let c = caminho.to_string();
-        PgTryBuilder::new(move || {
-            let _ = with_runtime(read_parquet_impl(c.clone()));
+    /// As tres formas de o arquivo estar errado, no `impl` — que devolve `Result`, entao nada aborta a
+    /// transacao e as tres podem ser exercitadas no mesmo teste.
+    #[pgrx::pg_test]
+    fn b008_arquivo_invalido_erra_em_vez_de_devolver_linhas() {
+        for (nome, bytes, porque) in [
+            ("lixo", &b"isto nao e um arquivo parquet, e nunca foi"[..],
+             "bytes arbitrarios tem de ser recusados pelo magic number"),
+            ("truncado", &b"PAR1"[..],
+             "so o magic header, sem footer — o caso da transferencia interrompida"),
+            ("vazio", &b""[..],
+             "arquivo vazio tem de ERRAR; devolver zero linhas seria dado errado, nao erro"),
+        ] {
+            let p = arquivo_temp(nome, bytes);
+            let r = with_runtime(read_parquet_impl(p.clone()));
+            let _ = std::fs::remove_file(&p);
+            assert!(r.is_err(), "{nome}: {porque} — devolveu {r:?}");
+        }
+    }
+
+    /// A superficie SQL: o `impl` acima devolve `Result`, mas o usuario chama `read_parquet`, que converte
+    /// o erro em `ereport` via `err_input`. Este teste prova a PONTE — que o erro chega tipado, com SQLSTATE,
+    /// em vez de panico solto atravessando a fronteira C.
+    #[pgrx::pg_test]
+    fn b008_a_superficie_sql_devolve_erro_tipado_para_arquivo_invalido() {
+        let p = arquivo_temp("sql", b"nem de longe parquet");
+        let caminho = p.clone();
+        let caught = PgTryBuilder::new(move || {
+            // A funcao PUBLICA, nao o `impl`: e ela que chama `err_input`.
+            let _ = read_parquet(caminho.clone());
             None
         })
         .catch_others(|e| {
@@ -742,55 +770,14 @@ mod tests {
             };
             Some((format!("{:?}", r.sql_error_code()), r.message().to_string()))
         })
-        .execute()
-    }
-
-    // (a) NAO E PARQUET: bytes arbitrarios. O leitor tem de recusar pelo magic number, nao tentar interpretar.
-    #[pgrx::pg_test]
-    fn b008_arquivo_que_nao_e_parquet_falha_sem_derrubar_o_backend() {
-        let p = arquivo_temp("lixo.parquet", b"isto nao e um arquivo parquet, e nunca foi");
-        let r = with_runtime(read_parquet_impl(p.clone()));
-        // O backend TEM de continuar vivo — esta consulta e a prova, e falharia se o processo tivesse morrido.
-        assert_eq!(Spi::get_one::<i32>("SELECT 1").unwrap(), Some(1), "backend vivo apos ler lixo");
-        assert!(r.is_err(), "bytes arbitrarios nao podem ser lidos como Parquet: {r:?}");
+        .execute();
         let _ = std::fs::remove_file(&p);
-    }
-
-    // (b) TRUNCADO: um Parquet valido comeca com o magic "PAR1" e TERMINA com ele mais o footer. Um arquivo
-    // que so tem o cabecalho e exatamente o caso de transferencia interrompida — o mais provavel na pratica.
-    #[pgrx::pg_test]
-    fn b008_parquet_truncado_falha_sem_derrubar_o_backend() {
-        let p = arquivo_temp("truncado.parquet", b"PAR1");
-        let r = with_runtime(read_parquet_impl(p.clone()));
-        assert_eq!(Spi::get_one::<i32>("SELECT 1").unwrap(), Some(1), "backend vivo apos ler truncado");
-        assert!(r.is_err(), "um arquivo so com o magic header nao tem footer: {r:?}");
-        let _ = std::fs::remove_file(&p);
-    }
-
-    // (c) ARQUIVO VAZIO: caso de borda de tamanho zero, que um leitor descuidado trata como "sem linhas"
-    // em vez de "sem arquivo valido" — e devolver zero linhas para um arquivo invalido e DADO ERRADO, nao erro.
-    #[pgrx::pg_test]
-    fn b008_arquivo_vazio_falha_em_vez_de_devolver_zero_linhas() {
-        let p = arquivo_temp("vazio.parquet", b"");
-        let r = with_runtime(read_parquet_impl(p.clone()));
-        assert_eq!(Spi::get_one::<i32>("SELECT 1").unwrap(), Some(1), "backend vivo apos ler vazio");
+        let (code, msg) = caught.expect("ler arquivo invalido tem de falhar, nao devolver linhas");
+        assert!(!code.is_empty(), "o erro carrega SQLSTATE — nao e panico solto: {code}");
         assert!(
-            r.is_err(),
-            "arquivo vazio tem de ERRAR; devolver zero linhas seria dado errado, nao erro: {r:?}"
+            msg.contains("read_parquet") || msg.to_lowercase().contains("parquet"),
+            "a mensagem nomeia a operacao para quem le o log: {msg}"
         );
-        let _ = std::fs::remove_file(&p);
-    }
-
-    // (d) O CAMINHO PUBLICO: a superficie SQL tem de dar erro TIPADO, nao panico. O (a)-(c) provam o `impl`;
-    // este prova a ponte ate o usuario, que e onde `err_input` entra.
-    #[pgrx::pg_test]
-    fn b008_a_superficie_sql_devolve_erro_tipado_para_arquivo_invalido() {
-        let p = arquivo_temp("sql.parquet", b"nem de longe parquet");
-        let (code, msg) = erro_ao_ler(&p).expect("ler arquivo invalido tem de falhar");
-        assert!(!code.is_empty(), "o erro tem SQLSTATE, nao e panico solto");
-        assert!(msg.contains("read_parquet") || msg.contains("parquet"), "a mensagem nomeia a operacao: {msg}");
-        assert_eq!(Spi::get_one::<i32>("SELECT 1").unwrap(), Some(1), "backend vivo");
-        let _ = std::fs::remove_file(&p);
     }
 
 }
