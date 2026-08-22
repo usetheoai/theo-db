@@ -3495,6 +3495,18 @@ TheoDB entrega híbrido, BM25, rerank, Parquet, grafo e vectorizer como produto.
 alcançar, **nenhuma alegação sobre esses pilares tem artefato** — e o bench vai ser publicado. Este item é o
 mapa; cada pilar é trabalho próprio.
 status: planned
+verificacao_2026_08_21: **bullet 1 ENTREGUE, e a premissa do título caiu.** `theodb-bench capabilities`
+  produz exatamente o que ele pede — relatório **gerado** da matriz capability × adapter, derivado do
+  registro e não escrito à mão.
+  .
+  **O título diz "oito dos catorze pilares não têm adapter nenhum". A medição de hoje diz 11 de 14
+  alcançáveis** — só `rerank`, `vectorizer` e `ai_sql` ficam sem, e o próprio relatório explica por
+  quê, com uma frase que vale mais que a tabela: *"A dash is not a gap in this table — it is the
+  measured state. (…) a stub would put a number where an absence belongs."* Os três alcançam modelo
+  externo, e sem endpoint não há o que medir.
+  .
+  Restam os bullets 2 (ordem de ataque decidida por escrito) e 3 (portão de residência por pilar novo).
+  O item segue aberto por eles, não pelo bullet 1 — e não pela premissa, que já não vale.
 closed_partially: 2026-08-17 — **11 de 14 alcançáveis** (era 6). Acrescentados: `parquet`
   (`write_parquet`/`read_parquet`), `lexical` (`bm25_build`/`bm25_search`), `graph` (`theodb.graph_build` +
   `graph_expand` + `graph_expand_card`), `hybrid` (`ai.hybrid_search_rrf`) e `vector_quantized` (`pq_subspaces`,
