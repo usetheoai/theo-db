@@ -68,13 +68,14 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-104 items — **Open** 11 · **In flight** 5 · **Closed** 88
+105 items — **Open** 12 · **In flight** 5 · **Closed** 88
 
-### Open (11)
+### Open (12)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-104`](#b-104--o-arnês-não-cobre-os-pilares-que-a-meta-assinada-chama-de-diferenciação----) | O arnês não cobre os pilares que a meta assinada chama de diferenciação | `triaged` | — |
+| [`B-105`](#b-105--retrievalbenchmarksummary-tem-zero-chamadores-e-o-protocolo-não-tem-onde-pôr-um-veredito-entre-caminhos----) | `RetrievalBenchmark.summary()` tem zero chamadores, e o protocolo não tem onde pôr um veredito entre caminhos | `triaged` | — |
 | [`B-002`](#b-002--o-objetivo-definir-e-medir-o-que-torna-o-theodb-atrativo-já-que-superar-todo-benchmark-é-impossível----) | O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível | `raw` | — |
 | [`B-003`](#b-003--vetorial-o-teto-é-o-build-não-a-busca--100m-nunca-foi-atingido----) | Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido | `raw` | — |
 | [`B-005`](#b-005--híbrido-o-ganho-da-fusão-sobre-o-vetorial-puro-é-estatisticamente-não-significativo----) | Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo | `raw` | — |
@@ -705,6 +706,38 @@ dod:
 
 > Registrado em 2026-08-22 ao responder "nosso bench tem todos os pilares?". A resposta medida é **não** —
 > e a parte que falta é a parte em que a meta assinada diz que queremos ganhar.
+
+## B-105 — `RetrievalBenchmark.summary()` tem zero chamadores, e o protocolo não tem onde pôr um veredito entre caminhos   [ ]
+
+domain: arnes
+repo: theodb-bench
+suggested_mode: review
+source: human
+evidence: medido em 2026-08-22. `src/bench/retrieval.py` define `summary(results)` — que monta a comparação
+entre caminhos (`pipelines`, com `ndcg_at_10`, `recall_at_k`, `mrr`, vazão) — e **nada a chama**: o
+`src/runner.py` pede ao benchmark apenas `load` e `points`, e `src/bench/protocol.py` declara só esses dois.
+O payload que ela produz **nunca entra em bundle nenhum**.
+.
+Encontrado ao tentar ligar o veredito pareado de qualidade do [[B-005]]: escrevi a fiação dentro de
+`summary()`, rodei, e o bundle saiu **sem** o campo. **A fiação teria sido teatro** — um veredito que ninguém
+lê, que é a classe de defeito que `assert_analytical_path` teve neste mesmo arnês e que este dia já pagou
+três vezes. Revertida.
+why_now: o `dod` do [[B-005]] pede um teste pareado de significância sobre o ganho da fusão. As primitivas
+existem e estão testadas — `ndcg_by_query` guarda a qualidade por consulta, `veredito_de_qualidade` reusa o
+`pair_by_query` e o `render_paired_verdict` do `compare.py` — mas **não há caminho vivo que as carregue até o
+artefato**. Um resultado que compara CAMINHOS não cabe num `PointResult`, que descreve UM ponto; é uma lacuna
+de desenho do protocolo, não um esquecimento de chamada.
+status: triaged
+dod:
+  - o protocolo ganha um lugar para resultado entre-caminhos, OU `summary()` é removida — as duas são
+    respostas honestas; manter um método morto que parece cobrir a lacuna é a única que não é
+  - o veredito pareado de qualidade chega ao bundle por um caminho que **roda**, e existe teste que reprova
+    se ele parar de chegar
+  - um portão que detecte método público sem chamador no `bench/` — esta é a segunda vez (`assert_analytical_path`
+    foi a primeira, e o comentário dela registra "ZERO chamadas em `src/bench/`")
+
+> Registrado em 2026-08-22. **Eu mesmo produzi o defeito e o encontrei ao verificar**: a suíte passava, o
+> teste que escrevi passava, e o bundle real não trazia o campo. Só a execução mostrou.
 
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
