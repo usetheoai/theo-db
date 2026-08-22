@@ -68,7 +68,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Index
 
-98 items — **Open** 13 · **In flight** 8 · **Closed** 77
+98 items — **Open** 13 · **In flight** 7 · **Closed** 78
 
 ### Open (13)
 
@@ -88,12 +88,11 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-095`](#b-095--group-by-por-texto-recusa-o-pushdown-colunar-e-a-guarda-está-certa----) | `GROUP BY` por TEXTO recusa o pushdown colunar, e a guarda está certa | `triaged` | — |
 | [`B-096`](#b-096--read_parquet-devolve-setof-jsonb-e-é-isso-que-custa-142----) | `read_parquet` devolve `SETOF jsonb`, e é isso que custa 142× | `triaged` | — |
 
-### In flight (8)
+### In flight (7)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
 | [`B-009`](#b-009--ai-surface-embedrs-e-rerankrs-têm-1-teste-cada----) | AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada | `planned` | — |
-| [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta----) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `planned` | — |
 | [`B-049`](#b-049--as-diferenças-de-velocidade-que-publicamos-não-têm-teste-e-o-pareado-não-serve-para-elas----) | As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas | `planned` | — |
 | [`B-056`](#b-056--o-gate-de-sessão-avalia-o-transcript-não-o-repositório-e-pede-para-refazer-o-que-está-feito----) | O gate de sessão avalia o transcript, não o repositório, e pede para refazer o que está feito | `planned` | — |
 | [`B-059`](#b-059--o-theodb-bench-não-conhece-o-alloydb-omni-que-é-o-concorrente-que-o-north-star-nomeia----) | O `theodb-bench` não conhece o AlloyDB Omni, que é o concorrente que o North Star nomeia | `planned` | — |
@@ -101,7 +100,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-075`](#b-075--a-escala-de-referência-publicável-é-20m-e-ela-precisa-de-corpus-real-oráculo-em-streaming-e-um-orçamento-de-carga-próprio----) | A escala de referência publicável é 20M, e ela precisa de corpus real, oráculo em streaming e um orçamento de carga próprio | `planned` | — |
 | [`B-076`](#b-076--o-build-do-theodb_hnsw-materializa-o-corpus-e-o-teto-de-escala-é-ram-e-não-disco----) | O build do `theodb_hnsw` materializa o corpus, e o teto de escala é RAM e não disco | `planned` | — |
 
-### Closed (77)
+### Closed (78)
 
 | Item | Title | Status | Severity |
 |---|---|---|---|
@@ -134,6 +133,7 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 | [`B-035`](#b-035--cliente-theodb-no-vectordbbench-em-fork-para-medir-contra-pgvector-e-alloydb-no-mesmo-arnês---x) | Cliente `theodb` no VectorDBBench, em fork, para medir contra pgvector e AlloyDB no mesmo arnês | `shipped` | — |
 | [`B-036`](#b-036--o-hnsw-alias-não-aceita-m-nem-ef_construction-a-sintaxe-de-build-do-pgvector-falha-alto---x) | O `hnsw` alias não aceita `m` nem `ef_construction`: a sintaxe de build do pgvector falha alto | `shipped` | — |
 | [`B-037`](#b-037--o-am-ivfflat-não-existe-metade-do-shim-pgvector-está-ausente---x) | O AM `ivfflat` não existe: metade do shim pgvector está ausente | `shipped` | — |
+| [`B-038`](#b-038--halfvec-e-sparsevec-não-existem-a-superfície-de-tipos-do-pgvector-está-incompleta---x) | `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta | `shipped` | — |
 | [`B-039`](#b-039--o-detector-de-cargo-udeps-roda-no-host-onde-o-ambiente-de-build-não-existe---x) | O detector de `cargo-udeps` roda no host, onde o ambiente de build não existe | `shipped` | — |
 | [`B-040`](#b-040--cliente-fts-no-vectordbbench-validar-o-pilar-lexical-no-mesmo-arnês-com-a-mesma-disciplina---x) | Cliente FTS no VectorDBBench: validar o pilar lexical no mesmo arnês, com a mesma disciplina | `shipped` | — |
 | [`B-041`](#b-041--bm25_search-sobre-índice-nunca-construído-devolve-zero-linhas-sem-erro---x) | `bm25_search` sobre índice nunca construído devolve zero linhas, sem erro | `shipped` | — |
@@ -1800,7 +1800,7 @@ dod:
 
 > Registrado 2026-08-12 pela medição do B-035. **Custo estimado por comparação com o que já existe**, não por
 > impressão: o alias `hnsw` custou ~20 linhas de SQL no shim. Este deve custar o mesmo.
-## B-038 — `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta   [ ]
+## B-038 — `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1808,7 +1808,18 @@ suggested_mode: evolve
 source: discover-evolve
 evidence: medido em 2026-08-12 contra `theodb:b034`. `SELECT typname FROM pg_type WHERE typname IN ('vector','halfvec','sparsevec')` devolve **só `vector`**. O `pgvector-python 0.5.0` trata a ausência sem erro — `register_vector` só registra os dois se `TypeInfo.fetch` os encontrar (verificado na fonte do pacote) —, então nada quebra no cliente; o que quebra é qualquer DDL ou consulta de app que os use, e todos os casos de quantização do VectorDBBench, que assumem `halfvec` e `bit` como tipo de coluna.
 why_now: é a lacuna de drop-in mais funda das três encontradas neste ciclo e, honestamente, **a menos urgente** — as outras duas são rotulagem ou parâmetro sobre capacidade que já existe; esta pede tipos novos com I/O binário, operadores, opclasses e cast. Fica registrada porque foi medida, e porque uma decisão de NÃO fazer também precisa estar escrita: se o posicionamento é "compatível com pgvector", um `ERROR: type "halfvec" does not exist` é uma resposta que o produto dá hoje e ninguém decidiu dar.
-status: planned
+status: shipped
+verificacao_2026_08_21: **a nota deste item dizia que os três bullets fecharam, e o terceiro NÃO
+  tinha fechado.** Conferido: `halfvec` aparecia apenas no ADR-0063 e no conceito b035 — em nenhum
+  lugar da documentação de compatibilidade, que é onde a DoD manda estar, *"ao lado do que É
+  suportado, em vez de ser descoberta em runtime"*. O README afirmava que o tipo `vector` é own-code
+  e não dizia o que da superfície do pgvector não existe, que é exatamente a descoberta-em-runtime
+  que o bullet existe para evitar.
+  .
+  Fechado agora: o `README.md` passou a declarar, ao lado do `CREATE EXTENSION`, que `halfvec` e
+  `sparsevec` não existem, que a decisão é o ADR-0063, e que uma aplicação que os use falha no
+  `CREATE TABLE`. Bullets 1 e 3 satisfeitos; o 2 não se aplica (a saída escolhida foi fora-de-escopo).
+  O lint de copy pública passa sem avisos.
 status_nota: 2026-08-20 — os três bullets fecharam com a saída "fora de escopo", registrada em
   `wiki/decisions/0063-halfvec-fora-de-escopo-e-a-versao-que-mentia.md`.
   **A medição encontrou algo que o item não procurava, e mais urgente que ele**: o shim declarava

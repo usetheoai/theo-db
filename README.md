@@ -102,6 +102,12 @@ CREATE EXTENSION theodb_rs CASCADE;   -- CASCADE puxa theodb_rs (o tipo `vector`
 ALTER EXTENSION theodb_rs UPDATE;  -- upgrade in-place da extensão (cadeia de upgrade própria, M137)
 ```
 
+**Compatibilidade de tipos, e o que NÃO existe.** O tipo `vector(N)` é own-code e fala o mesmo formato de
+fio do pgvector — provado por `COPY … FORMAT BINARY` no [b035](./wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md).
+**`halfvec` e `sparsevec` não existem**, e a decisão é declarada, não acidental:
+[ADR-0063](./wiki/decisions/0063-halfvec-fora-de-escopo-e-a-versao-que-mentia.md). Uma aplicação que os use
+falha no `CREATE TABLE` — e este parágrafo existe para que a descoberta seja aqui, não em runtime.
+
 Passo a passo das 12 capacidades em [`wiki/guides/quickstart.md`](./wiki/guides/quickstart.md).
 
 > **Sem `plpython3u` (desde M19):** toda a superfície de IA (`ai.*`, NL→SQL, generativas, embed) é servida

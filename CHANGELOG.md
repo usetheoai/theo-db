@@ -14,6 +14,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **O README passa a dizer que `halfvec` e `sparsevec` NÃO existem**, ao lado do que é suportado. A
+  decisão de deixá-los fora é o ADR-0063 e já estava registrada; o que faltava era a limitação
+  aparecer onde alguém a lê **antes** de escrever o `CREATE TABLE`, em vez de descobri-la em runtime
+  (B-038)
 - **`read_parquet` converte Arrow→`jsonb` direto, sem round-trip por texto.** MEDIDO em 2026-08-21
   (máquina de desenvolvimento, 2M linhas, mesmo arquivo): o parser Parquet lê e agrega em **25 ms**, o
   Postgres constrói 2M `jsonb` nativos em **435 ms**, e `read_parquet` levava **4 650 ms** — ou seja,
