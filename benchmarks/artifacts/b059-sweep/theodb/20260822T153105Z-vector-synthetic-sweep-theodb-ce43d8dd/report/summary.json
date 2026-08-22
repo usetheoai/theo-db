@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "run_id": "20260822T153105Z-vector-synthetic-sweep-theodb-ce43d8dd",
+  "status": "EXPLORATORY",
+  "profile": "research",
+  "publishable": false,
+  "benchmark": {
+    "id": "vector/synthetic/sweep",
+    "version": 1,
+    "commit": "623faed9e52a910c4b6e82e5ccc3d089630bb858"
+  },
+  "system": {
+    "id": "theodb",
+    "version": null
+  },
+  "environment_digest": "sha256:0efe242bf5c8fa5bc547a1461a2a4b2b",
+  "headline": {
+    "configuration": "hnsw m=16 ef_search=16",
+    "throughput_per_second": 1963.2634843582207,
+    "recall": 0.5892000000000001,
+    "latency_p50_ms": 0.4239854999923409,
+    "latency_p95_ms": 0.5135356500346688,
+    "latency_p99_ms": 0.5651577300233156
+  },
+  "limitations": [
+    "profile 'research' is not publishable",
+    "run status is EXPLORATORY",
+    "none: unstable (latency_p99_ms cv=0.259)",
+    "hnsw m=16 ef_search=16: unstable (latency_p50_ms cv=0.090; latency_p95_ms cv=0.080; latency_p99_ms cv=0.097; throughput_per_second cv=0.124)",
+    "hnsw m=16 ef_search=64: unstable (latency_p50_ms cv=0.113; latency_p95_ms cv=0.158; latency_p99_ms cv=0.181; throughput_per_second cv=0.085)"
+  ]
+}

@@ -1,0 +1,2 @@
+run aborted (refused): AdapterError: alloydbomni cannot apply search parameter(s) 'ef_search'; it understands num_leaves_to_search, pct_leaves_to_search, pre_reordering_num_neighbors. Accepting the request and measuring the default would publish this point under a label that does not describe it. [phase=measurement system=alloydbomni]
+the harness refused to measure: a precondition it checks was not met, so no number was taken. This is the harness working, not a fault of the system under test

@@ -3063,6 +3063,38 @@ OSS, enquanto o produto expõe um access method do PostgreSQL que paga o mesmo i
 com Elasticsearch/OpenSearch. Com o AlloyDB nunca foi feito, e desde que o Omni é `docker pull
 google/alloydbomni:18` a impossibilidade deixou de existir.
 status: planned
+sweep_hnsw_2026_08_22: **segunda corrida de três vias, agora com índice — e o Omni RECUSOU, com razão.**
+  Suíte `vector/synthetic/sweep` (`none` + `hnsw`, 10 000 vetores de 64 dimensões), mesmo droplet.
+  .
+  | config | TheoDB QPS / recall | pgvector QPS / recall |
+  |---|---|---|
+  | `none` (exata) | 169,3 / 1,0000 | 385,7 / 1,0000 |
+  | `hnsw ef=16` | 1 963,3 / 0,5892 | 2 028,7 / 0,6214 |
+  | `hnsw ef=64` | 1 490,7 / 0,7794 | 1 307,4 / 0,9012 |
+  | `hnsw ef=256` | 710,6 / **0,9662** | 544,2 / **0,9898** |
+  .
+  **O Omni saiu `INVALID` por `run_not_refused`, e isso é o arnês funcionando:** *"`alloydbomni` não
+  pode aplicar o parâmetro `ef_search`; ele entende `num_leaves_to_search`, `pct_leaves_to_search`,
+  `pre_reordering_num_neighbors`. Aceitar o pedido e medir o default publicaria este ponto sob um
+  rótulo que não o descreve."*
+  .
+  **Eu ia "consertar" isso e teria reintroduzido um defeito documentado.** O `capabilities()` declara
+  `vector_hnsw: True` e a `SEARCH_PARAMETERS` não tem `ef_search` — parecia inconsistência. O
+  `postgres.py:568-580` explica: *"o Omni traz um fork do pgvector que NÃO registra `hnsw.ef_search`;
+  um sweep desse botão produzia mapeamento vazio, o portão não tinha o que checar, e passava vazio —
+  publicando três linhas rotuladas 16/64/256 com recall idêntico até a quarta casa"*.
+  .
+  **Tentei verificar essa afirmação no servidor e NÃO consegui**: o contêiner do Omni morreu na máquina
+  de desenvolvimento (`Exited (2)`), provavelmente pelo mesmo matador de memória medido acima. A
+  afirmação segue apoiada na medição original registrada no código, não numa reprodução minha — e digo
+  isso em vez de assumir qualquer dos lados.
+  .
+  **O que isso decide para o [[B-057]]:** a comparação com o Omni não pode ser um sweep de `ef_search`.
+  Tem de ser `scann-sweep` contra o Omni e `sweep` contra os outros — **cada motor no seu ponto de
+  operação** —, e a comparação se dá na frente recall×QPS, não no botão. É decisão de desenho, e é o
+  que falta para aquele item.
+  .
+  Artefatos: `benchmarks/artifacts/b059-sweep/`.
 bullet4_2026_08_22: **a corrida de três vias EXISTE — três bundles, mesma máquina, mesma suíte.**
   Droplet `g-16vcpu-64gb` (nyc1), suíte `vector/synthetic/smoke`, perfil `research`. Proveniência lida
   de **cada servidor**, não das tags:

@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "status": "INVALID",
+  "checks": [
+    {
+      "id": "sut_alive",
+      "outcome": "PASS",
+      "required": true,
+      "description": "System under test did not crash."
+    },
+    {
+      "id": "run_not_refused",
+      "outcome": "FAIL",
+      "required": true,
+      "description": "The harness did not refuse to measure.",
+      "detail": "the harness refused to measure: a precondition it checks was not met, so no number was taken. This is the harness working, not a fault of the system under test"
+    },
+    {
+      "id": "within_time_budget",
+      "outcome": "PASS",
+      "required": true,
+      "description": "No statement was cancelled by a harness time budget."
+    },
+    {
+      "id": "client_alive",
+      "outcome": "PASS",
+      "required": true,
+      "description": "Benchmark client did not crash."
+    },
+    {
+      "id": "operation_count",
+      "outcome": "UNAVAILABLE",
+      "required": false,
+      "description": "Observed operations match the declared window.",
+      "detail": "benchmark declared no expected operation count",
+      "observed": 0
+    },
+    {
+      "id": "repetitions_completed",
+      "outcome": "PASS",
+      "required": true,
+      "description": "Every declared repetition ran.",
+      "observed": 3,
+      "expected": 3
+    },
+    {
+      "id": "timeout_rate",
+      "outcome": "PASS",
+      "required": true,
+      "description": "Timeout rate within policy.",
+      "observed": 0.0,
+      "expected": 0.001
+    },
+    {
+      "id": "error_rate",
+      "outcome": "PASS",
+      "required": true,
+      "description": "Error rate within policy.",
+      "observed": 0.0,
+      "expected": 0.0
+    },
+    {
+      "id": "result_integrity",
+      "outcome": "PASS",
+      "required": true,
+      "description": "No invalid result rows were returned.",
+      "observed": 0,
+      "expected": 0
+    },
+    {
+      "id": "warmup_policy",
+      "outcome": "PASS",
+      "required": true,
+      "description": "Warm-up followed the declared policy."
+    },
+    {
+      "id": "process_containment",
+      "outcome": "PASS",
+      "required": false,
+      "description": "No process escaped the declared resource controls."
+    },
+    {
+      "id": "cpu_limit",
+      "outcome": "UNAVAILABLE",
+      "required": false,
+      "description": "Declared CPU allocation was respected.",
+      "detail": "unavailable: no CPU set declared"
+    },
+    {
+      "id": "memory_limit",
+      "outcome": "UNAVAILABLE",
+      "required": false,
+      "description": "Declared memory bound was respected.",
+      "detail": "unavailable: no memory bound declared"
+    },
+    {
+      "id": "no_oom",
+      "outcome": "PASS",
+      "required": true,
+      "description": "No out-of-memory termination occurred."
+    },
+    {
+      "id": "telemetry_complete",
+      "outcome": "PASS",
+      "required": false,
+      "description": "Declared telemetry was fully collected."
+    },
+    {
+      "id": "quality_reported",
+      "outcome": "FAIL",
+      "required": true,
+      "description": "Quality metric was computed for an approximate workload.",
+      "detail": "approximate retrieval reported without a quality axis"
+    },
+    {
+      "id": "clean_source_tree",
+      "outcome": "PASS",
+      "required": false,
+      "description": "Benchmark source tree was committed."
+    }
+  ],
+  "invalidated_by": [
+    "run_not_refused",
+    "quality_reported"
+  ]
+}
